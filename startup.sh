@@ -1,15 +1,16 @@
 #!/bin/bash
-# Azure App Service startup script
+# Azure App Service startup script for contable-auto
 
-# Install ODBC Driver 18 if not present
-if ! odbcinst -q -d -n 'ODBC Driver 18 for SQL Server' > /dev/null 2>&1; then
-    echo 'Installing ODBC Driver 18...'
+# Install ODBC Driver + pyodbc only if Azure SQL is configured
+if [ "$USE_SQLITE" = "false" ]; then
+    echo 'Azure SQL mode - installing ODBC driver...'
     curl -s https://packages.microsoft.com/keys/microsoft.asc | apt-key add - 2>/dev/null
-    curl -s https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list
-    apt-get update -qq
+    curl -s https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list 2>/dev/null
+    apt-get update -qq 2>/dev/null
     ACCEPT_EULA=Y apt-get install -y -qq msodbcsql18 unixodbc-dev 2>/dev/null || true
-    echo 'ODBC Driver installed.'
+    pip install pyodbc 2>/dev/null || true
+    echo 'ODBC setup complete.'
 fi
 
-# Start gunicorn
+# Start gunicorn with the Flask app
 exec gunicorn --bind=0.0.0.0:8000 --timeout=600 --workers=2 --access-logfile=- --error-logfile=- 'app:app'
