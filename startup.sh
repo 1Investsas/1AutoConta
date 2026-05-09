@@ -1,10 +1,6 @@
 #!/bin/bash
 # Azure App Service startup script for contable-auto
-
-set -e
-
-echo "Installing Python dependencies..."
-pip install --no-cache-dir -q -r requirements.txt 2>&1 | grep -E "Successfully|ERROR" || true
+# Dependencies are pre-installed in the antenv virtual environment by GitHub Actions
 
 # Install ODBC Driver + pyodbc only if Azure SQL is configured
 if [ "$USE_SQLITE" = "false" ]; then
@@ -17,7 +13,6 @@ if [ "$USE_SQLITE" = "false" ]; then
     echo "ODBC setup complete."
 fi
 
-echo "Starting Gunicorn..."
 # Start gunicorn - use PORT env var set by Azure
 PORT="${PORT:-8000}"
 exec gunicorn --bind=0.0.0.0:"$PORT" --timeout=600 --workers=2 --access-logfile=- --error-logfile=- "app:app"
