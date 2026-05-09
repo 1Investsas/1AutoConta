@@ -124,6 +124,13 @@ def exportar_excel(
 
     wb.save(str(filepath))
     logger.info("Excel exportado: %s", filepath)
+
+    # En modo cloud, subir a Azure Blob Storage
+    from app.storage import is_cloud, save_local_file
+    if is_cloud():
+        ref = save_local_file(str(filepath), "output", filepath.name)
+        return ref
+
     return str(filepath)
 
 

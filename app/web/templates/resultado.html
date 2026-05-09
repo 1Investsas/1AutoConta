@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Resultados — contable-auto{% endblock %}
+{% block page_title %}Resultados del proceso{% endblock %}
+
+{% block content %}
+
+<!-- Summary bar -->
+<div class="stats-grid" style="margin-bottom:24px">
+  <div class="card">
+    <div class="card-title">Total documentos</div>
+    <div class="card-value">{{ datos.n_docs }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Con excepciones</div>
+    <div class="card-value" style="color:{% if datos.n_excepciones > 0 %}var(--warning){% else %}var(--success){% endif %}">
+      {{ datos.n_excepciones }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Sin excepciones</div>
+    <div class="card-value" style="color:var(--success)">
+      {{ datos.n_docs - datos.n_excepciones }}
+    </div>
+  </div>
+  <div class="card" style="display:flex; flex-direction:column; justify-content:space-between">
+    <div class="card-title">Acciones</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+      <a href="{{ url_for('web.descargar') }}" class="btn btn-success btn-sm">⬇ Excel</a>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modalSiigo').style.display='flex'">
+        📤 Exportar SIIGO
+      </button>
+      <a href="{{ url_for('web.index') }}" class="btn btn-secondary btn-sm">+ Nuevo</a>
+    </div>
+  </div>
+</div>
+
+<!-- Leyenda de colores -->
+<div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap">
+  <span class="pill pill-pendiente">🔴 Cuenta pendiente</span>
+  <span class="pill pill-sugerida">🟠 Sugerida por el motor</span>
+  <span class="pill pill-ok">🟢 Cuenta asignada</span>
+  <span class="pill pill-warn">🟡 Sin tercero en maestro</span>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="resultado" data-target="tabPreasientos">
+    Preasientos ({{ datos.n_docs }})
+  </button>
+  <button class="tab-btn" data-tab="resultado" data-target="tabExcepciones">
+    Excepciones ({{ datos.n_excepciones }})
+  </button>
+</div>
+
+<!-- Tab: Preasientos -->
+<div class="tab-panel active" id="tabPreasientos" data-tab="resultado">
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Clasificación</th>
+          <th>Tercero</th>
+          <th>Fecha</th>
+          <th>#</th>
+          <th>Concepto</th>
+          <th>Cuenta</th>
+          <th class="text-right">Débito</th>
+          <th class="text-right">Crédito</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in datos.preasientos %}
+          {% set rowspan = p.lineas | length %}
+          {% for linea in p.lineas %}
+          {% if linea.es_pendiente %}
+            {% set row_class = 'row-pendiente' %}
+          {% elif linea.es_sugerida %}
+            {% set row_class = 'row-sugerida' %}
+          {% elif not p.tercero_encontrado %}
+            {% set row_class = 'row-sin-tercero' %}
+          {% else %}
+            {% set row_class = 'row-ok' %}
+          {% endif %}
+          <tr class="{{ row_class }}">
+            {% if loop.first %}
+            <td rowspan="{{ rowspan }}" style="border-right:1px solid var(--border); font-weight:600">
+              {{ p.prefijo }}-{{ p.folio }}<br>
+              <small class="text-dim">{{ p.fecha_emision }}</small>
+            </td>
+            <td rowspan="{{ rowspan }}" style="border-right:1px solid var(--border)">
+              <span style="font-size:0.75rem">{{ p.clasificacion | replace('_',' ') }}</span>
+            </td>
+            <td rowspan="{{ rowspan }}" style="border-right:1px solid var(--border)">
+              {{ p.tercero_nombre }}<br>
+              <small class="text-dim">{{ p.tercero_nit }}</small>
+            </td>
+            <td rowspan="{{ rowspan }}" style="border-right:1px solid var(--border)">
+              {{ p.fecha_emision }}
+            </td>
+            {% endif %}
+            <td class="text-dim">{{ linea.numero_linea }}</td>
+            <td>{{ linea.concepto }}</td>
+            <td>
+              {% if linea.es_pendiente %}
+                <!-- Inline confirm form -->
+                <form class="confirm-form" method="POST"
+                      action="{{ url_for('web.confirmar') }}">
+                  <input type="hidden" name="clasificacion"  value="{{ p.clasificacion }}">
+                  <input type="hidden" name="nit_tercero"    value="{{ p.tercero_nit }}">
+                  <input type="hidden" name="tipo_linea"     value="{{ linea.concepto | lower | replace(' ','_') }}">
+                  <input type="hidden" name="cufe_full"      value="{{ p.cufe_full }}">
+                  <input type="hidden" name="numero_linea"   value="{{ linea.numero_linea }}">
+                  <input type="text" name="cuenta"
+                         placeholder="Ej. 51050501"
+                         title="Ingresa el código de cuenta y presiona Confirmar">
+                  <button type="submit" class="btn btn-primary btn-sm">✓</button>
+                </form>
+              {% else %}
+                {% set edit_id = p.cufe_full ~ '_' ~ linea.numero_linea %}
+                <!-- Display mode -->
+                <div id="display_{{ edit_id }}" style="display:flex; align-items:center; gap:6px">
+                  <code style="font-size:0.78rem">{{ linea.cuenta }}</code>
+                  {% if linea.es_sugerida %}
+                    <span class="pill pill-sugerida" style="margin-left:2px">sugerida</span>
+                  {% endif %}
+                  <button type="button"
+                          class="btn btn-secondary btn-sm"
+                          style="padding:1px 6px; font-size:0.72rem; line-height:1.4"
+                          title="Editar cuenta"
+                          onclick="toggleEditCuenta('{{ edit_id }}')">✎</button>
+                </div>
+                <!-- Edit mode (hidden by default) -->
+                <div id="edit_{{ edit_id }}" style="display:none">
+                  <form class="confirm-form" method="POST"
+                        action="{{ url_for('web.confirmar') }}">
+                    <input type="hidden" name="clasificacion"  value="{{ p.clasificacion }}">
+                    <input type="hidden" name="nit_tercero"    value="{{ p.tercero_nit }}">
+                    <input type="hidden" name="tipo_linea"     value="{{ linea.concepto | lower | replace(' ','_') }}">
+                    <input type="hidden" name="cufe_full"      value="{{ p.cufe_full }}">
+                    <input type="hidden" name="numero_linea"   value="{{ linea.numero_linea }}">
+                    <input type="text" name="cuenta"
+                           value="{{ linea.cuenta }}"
+                           placeholder="Ej. 51050501"
+                           title="Edita el código de cuenta y presiona Confirmar">
+                    <button type="submit" class="btn btn-primary btn-sm">✓</button>
+                    <button type="button"
+                            class="btn btn-secondary btn-sm"
+                            onclick="toggleEditCuenta('{{ edit_id }}')">✕</button>
+                  </form>
+                </div>
+              {% endif %}
+            </td>
+            <td class="text-right moneda">
+              {% if linea.debito > 0 %}${{ "{:,.0f}".format(linea.debito) }}{% endif %}
+            </td>
+            <td class="text-right moneda">
+              {% if linea.credito > 0 %}${{ "{:,.0f}".format(linea.credito) }}{% endif %}
+            </td>
+            <td>
+              {% if linea.es_pendiente %}
+                <span class="pill pill-pendiente">pendiente</span>
+              {% elif linea.es_sugerida %}
+                <span class="pill pill-sugerida">motor</span>
+              {% else %}
+                <span class="pill pill-ok">ok</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+        <tr><td colspan="10" style="text-align:center;color:var(--text-dim);padding:32px">
+          No hay preasientos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Tab: Excepciones -->
+<div class="tab-panel" id="tabExcepciones" data-tab="resultado">
+  {% if datos.excepciones %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>CUFE</th>
+          <th>Clasificación</th>
+          <th>NIT Tercero</th>
+          <th class="text-right">Total</th>
+          <th>Errores</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for exc in datos.excepciones %}
+        <tr>
+          <td><code style="font-size:0.72rem">{{ exc.cufe[:30] }}…</code></td>
+          <td>{{ exc.clasificacion | replace('_',' ') }}</td>
+          <td>{{ exc.tercero_nit }}</td>
+          <td class="text-right moneda">${{ "{:,.0f}".format(exc.total) }}</td>
+          <td style="color:var(--danger)">{{ exc.errores | join(' · ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center; padding:40px; color:var(--success); font-size:1.1rem">
+    ✅ ¡Sin excepciones! Todos los documentos procesados correctamente.
+  </div>
+  {% endif %}
+</div>
+
+<!-- Modal exportar SIIGO -->
+<div id="modalSiigo" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.5);
+     z-index:1000; align-items:center; justify-content:center">
+  <div style="background:var(--surface); border-radius:10px; padding:28px; width:380px; max-width:92vw;
+              border:1px solid var(--border)">
+    <h3 style="margin:0 0 12px">📤 Exportar para SIIGO</h3>
+    <p style="color:var(--text-dim); font-size:0.88rem; margin-bottom:16px">
+      Genera el archivo Excel en el formato de importación de SIIGO Nube
+      (<em>Subir desde excel – Comprobantes contables</em>).<br>
+      Si supera las 500 filas se descargará un ZIP con varios archivos.
+    </p>
+    <form method="POST" action="{{ url_for('web.exportar_siigo') }}">
+      <label class="form-check" style="margin-bottom:16px">
+        <input type="checkbox" name="incluir_pendientes" checked>
+        Incluir líneas con cuenta <strong>[PENDIENTE]</strong>
+        <small style="display:block; color:var(--text-dim); margin-top:2px">
+          Se resaltan en rojo; el contador debe completarlas antes de subir.
+        </small>
+      </label>
+      <div style="display:flex; gap:8px; justify-content:flex-end">
+        <button type="button" class="btn btn-secondary btn-sm"
+                onclick="document.getElementById('modalSiigo').style.display='none'">
+          Cancelar
+        </button>
+        <button type="submit" class="btn btn-primary btn-sm">⬇ Descargar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+#cuenta-ac {
+  position: fixed;
+  background: #1a2d44;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 9999;
+  max-height: 220px;
+  overflow-y: auto;
+  min-width: 260px;
+  display: none;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+#cuenta-ac li {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+#cuenta-ac li.ac-sel {
+  background: var(--accent);
+  color: #fff;
+}
+</style>
+
+<script>
+function toggleEditCuenta(id) {
+  var display = document.getElementById('display_' + id);
+  var edit    = document.getElementById('edit_' + id);
+  var showing = edit.style.display !== 'none';
+  display.style.display = showing ? 'flex' : 'none';
+  edit.style.display    = showing ? 'none' : 'block';
+  if (!showing) {
+    edit.querySelector('input[name="cuenta"]').focus();
+  }
+}
+
+/* ── Autocompletado de cuentas contables ── */
+(function () {
+  var ac = document.createElement('ul');
+  ac.id = 'cuenta-ac';
+  document.body.appendChild(ac);
+
+  var activeInput = null;
+  var timer = null;
+  var selIdx = -1;
+
+  function hide() {
+    ac.style.display = 'none';
+    selIdx = -1;
+  }
+
+  function items() { return ac.querySelectorAll('li'); }
+
+  function highlight(idx) {
+    items().forEach(function (li, i) {
+      li.classList.toggle('ac-sel', i === idx);
+    });
+    var sel = items()[idx];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pick(codigo, input) {
+    input.value = codigo;
+    hide();
+    input.focus();
+  }
+
+  function show(data, input) {
+    ac.innerHTML = '';
+    if (!data.length) { hide(); return; }
+
+    var r = input.getBoundingClientRect();
+    ac.style.left  = r.left + 'px';
+    ac.style.top   = (r.bottom + 2) + 'px';
+    ac.style.width = Math.max(r.width, 280) + 'px';
+
+    data.forEach(function (item) {
+      var li = document.createElement('li');
+      li.dataset.codigo = item.codigo;
+      li.textContent = item.nombre
+        ? item.codigo + '  —  ' + item.nombre
+        : item.codigo;
+      li.addEventListener('mouseenter', function () {
+        selIdx = Array.from(items()).indexOf(li);
+        highlight(selIdx);
+      });
+      li.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        pick(item.codigo, activeInput);
+      });
+      ac.appendChild(li);
+    });
+
+    ac.style.display = 'block';
+    selIdx = -1;
+  }
+
+  function fetch_(q, input) {
+    if (q.length < 2) { hide(); return; }
+    fetch('/api/cuentas?q=' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (activeInput === input) show(data, input);
+      })
+      .catch(hide);
+  }
+
+  document.addEventListener('input', function (e) {
+    if (e.target.name !== 'cuenta') return;
+    activeInput = e.target;
+    clearTimeout(timer);
+    timer = setTimeout(function () { fetch_(e.target.value, e.target); }, 220);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!activeInput || ac.style.display === 'none') return;
+    var its = items();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selIdx = Math.min(selIdx + 1, its.length - 1);
+      highlight(selIdx);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selIdx = Math.max(selIdx - 1, 0);
+      highlight(selIdx);
+    } else if (e.key === 'Enter' && selIdx >= 0) {
+      e.preventDefault();
+      pick(its[selIdx].dataset.codigo, activeInput);
+    } else if (e.key === 'Escape') {
+      hide();
+    }
+  });
+
+  document.addEventListener('focusin', function (e) {
+    if (e.target.name === 'cuenta') activeInput = e.target;
+  });
+
+  document.addEventListener('focusout', function (e) {
+    if (e.target.name === 'cuenta') setTimeout(hide, 160);
+  });
+
+  document.addEventListener('scroll', hide, true);
+}());
+</script>
+
+{% endblock %}

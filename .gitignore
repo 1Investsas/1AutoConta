@@ -16,3 +16,6 @@ build/
 *.log
 .DS_Store
 Thumbs.db
+uploads/
+.azure/
+*.tmp

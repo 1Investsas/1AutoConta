@@ -1,0 +1,739 @@
+{% extends "base.html" %}
+
+{% block title %}Movimientos Bancarios — contable-auto{% endblock %}
+{% block page_title %}🏦 Asignación de movimientos bancarios{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ── Estilos específicos del módulo banco ── */
+.banco-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.banco-header label {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+.banco-header input[type=text] {
+  font-family: monospace;
+  font-size: 0.95rem;
+  width: 140px;
+  padding: 5px 8px;
+}
+
+/* Filas de movimientos */
+.row-ingreso  { background: rgba(39,174,96,.06); }
+.row-egreso   { background: rgba(231,76,60,.06); }
+.row-4x1000   { background: rgba(255,193,7,.08); }
+.row-huerfano { background: rgba(255,140,0,.10); }
+
+.valor-pos { color: #2ecc71; font-weight: 600; font-family: monospace; }
+.valor-neg { color: #e74c3c; font-weight: 600; font-family: monospace; }
+
+/* Sub-fila 4x1000 */
+.subrow-4x1000 {
+  background: rgba(255,193,7,.06);
+  border-left: 3px solid #f39c12;
+}
+.subrow-4x1000 td {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  color: var(--text-dim);
+}
+
+/* Inputs dentro de la tabla */
+.input-cuenta {
+  width: 130px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  padding: 4px 6px;
+}
+.input-nit {
+  width: 110px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  padding: 4px 6px;
+}
+.select-tipo {
+  font-size: 0.82rem;
+  padding: 4px 6px;
+  min-width: 90px;
+}
+
+/* Pill tipo comprobante */
+.pill-111 { background:rgba(39,174,96,.2);  color:#2ecc71; }
+.pill-112 { background:rgba(231,76,60,.2);  color:#e74c3c; }
+.pill-110 { background:rgba(100,100,255,.2);color:#9999ff; }
+
+/* Sticky bottom bar */
+.sticky-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 100;
+  flex-wrap: wrap;
+}
+
+/* Account autocomplete dropdown */
+#banco-ac {
+  position: fixed;
+  background: #1a2d44;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 9999;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 260px;
+  display: none;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+#banco-ac li {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+#banco-ac li.ac-sel { background: var(--accent); color: #fff; }
+
+/* Tercero autocomplete dropdown */
+#tercero-ac {
+  position: fixed;
+  background: #1a2d44;
+  border: 1px solid #9b59b6;
+  border-radius: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 9999;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 300px;
+  display: none;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+#tercero-ac li {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+#tercero-ac li.ac-sel { background: #9b59b6; color: #fff; }
+
+.nit-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nit-nombre-badge {
+  font-size: 0.72rem;
+  color: #9b59b6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+/* Selector banco (header) */
+.banco-nit-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: 16px;
+  padding: 6px 12px;
+  background: rgba(155,89,182,.1);
+  border: 1px solid rgba(155,89,182,.35);
+  border-radius: 8px;
+}
+.banco-nit-selector label {
+  font-size: 0.8rem;
+  color: #9b59b6;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.banco-nit-selector input {
+  font-family: monospace;
+  font-size: 0.88rem;
+  width: 220px;
+  padding: 4px 8px;
+  border: 1px solid rgba(155,89,182,.5);
+  background: rgba(155,89,182,.08);
+  color: var(--text);
+  border-radius: 5px;
+}
+.banco-nit-selector input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155,89,182,.25);
+}
+#nitBancoNombreH { font-size:0.72rem; color:#9b59b6; min-height:1em; }
+.btn-apply-banco {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  background: rgba(155,89,182,.25);
+  border: 1px solid #9b59b6;
+  color: #9b59b6;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s;
+}
+.btn-apply-banco:hover { background: rgba(155,89,182,.45); color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Encabezado con cuenta bancaria editable -->
+<form method="POST" action="{{ url_for('web.banco_exportar') }}" id="bancoForm">
+
+<div class="banco-header">
+  <span style="font-weight:600; font-size:0.95rem">Cuenta bancaria:</span>
+  <input type="text" name="cuenta_banco" value="{{ cuenta_banco }}"
+         id="cuentaBancoForm" placeholder="11100501"
+         title="Código contable de la cuenta bancaria (aplica a todos los movimientos)">
+  <span style="color:var(--text-dim); font-size:0.82rem">— aplica a todos los movimientos</span>
+
+  <!-- ── Selector NIT del banco (editable + autocomplete) ── -->
+  <div class="banco-nit-selector">
+    <label for="nitBancoHeader">🏦 NIT Banco</label>
+    <div style="display:flex; flex-direction:column; gap:2px">
+      <input type="text"
+             id="nitBancoHeader"
+             class="banco-nit-header-ac"
+             placeholder="NIT o nombre del banco"
+             value="{{ nit_banco }}"
+             autocomplete="off"
+             title="Selecciona el banco una vez — se aplica a 4x1000, intereses y cuota de manejo">
+      <span id="nitBancoNombreH"></span>
+    </div>
+    <button type="button" class="btn-apply-banco" id="btnAplicarBanco"
+            title="Propaga el NIT del banco a todos los movimientos bancarios (4x1000, intereses, cuota de manejo)">
+      ✔ Aplicar a todos
+    </button>
+  </div>
+
+  <!-- Campo oculto que envía el NIT al servidor -->
+  <input type="hidden" name="nit_banco" id="nitBancoHidden" value="{{ nit_banco }}">
+
+  <div style="margin-left:auto; display:flex; gap:10px; align-items:center">
+    <!-- Leyenda -->
+    <span class="pill pill-ok" style="font-size:0.75rem">🟢 Ingreso ({{ comp_ingreso }})</span>
+    <span class="pill pill-pendiente" style="font-size:0.75rem">🔴 Egreso ({{ comp_egreso }})</span>
+    <span class="pill" style="font-size:0.75rem; background:rgba(255,193,7,.15);color:#f39c12">🟡 4x1000 auto</span>
+    <span class="pill" style="font-size:0.75rem; background:rgba(100,100,255,.15);color:#9999ff">🔵 Traslado ({{ comp_traslado }})</span>
+  </div>
+</div>
+
+<!-- Resumen -->
+<div class="stats-grid" style="margin-bottom:20px">
+  <div class="card">
+    <div class="card-title">Movimientos totales</div>
+    <div class="card-value">{{ n_total }}</div>
+    <div class="card-sub">en el CSV</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Filas a asignar</div>
+    <div class="card-value">{{ n_principales }}</div>
+    <div class="card-sub">las demás son 4x1000 auto-agrupados</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Cuenta 4x1000</div>
+    <div class="card-value" style="font-size:1rem; font-family:monospace; padding-top:8px">{{ cuenta_4x1000 }}</div>
+    <div class="card-sub">53152001 — Impuesto GTE 4x1000</div>
+  </div>
+</div>
+
+<!-- Tabla de movimientos -->
+<div class="table-wrapper">
+  <table id="tablaMovimientos">
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Descripción</th>
+        <th class="text-right">Valor (COP)</th>
+        <th>Tipo comp.</th>
+        <th>Cuenta contrapartida</th>
+        <th>NIT Tercero</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in movimientos %}
+
+        {# ── Clase de la fila principal ── #}
+        {% if m.es_4x1000 and m.idx_padre is none %}
+          {% set row_cls = 'row-huerfano' %}
+          {% set tipo_label = '⚠ 4x1000 huérfano' %}
+        {% elif m.valor | float > 0 %}
+          {% set row_cls = 'row-ingreso' %}
+          {% set tipo_label = '' %}
+        {% else %}
+          {% set row_cls = 'row-egreso' %}
+          {% set tipo_label = '' %}
+        {% endif %}
+
+        <tr class="{{ row_cls }}">
+          <!-- Fecha -->
+          <td style="white-space:nowrap; font-family:monospace; font-size:0.85rem">
+            {{ m.fecha }}
+          </td>
+
+          <!-- Descripción -->
+          <td style="max-width:220px">
+            {{ m.descripcion }}
+            <br><small class="text-dim">cód. {{ m.codigo_detalle }} | banco {{ m.codigo_banco }}</small>
+            {% if tipo_label %}
+              <br><span style="color:#f39c12; font-size:0.75rem">{{ tipo_label }}</span>
+            {% endif %}
+          </td>
+
+          <!-- Valor -->
+          <td class="text-right">
+            {% set v = m.valor | float %}
+            {% if v > 0 %}
+              <span class="valor-pos">+ ${{ "{:,.0f}".format(v) }}</span>
+            {% else %}
+              <span class="valor-neg">− ${{ "{:,.0f}".format(v | abs) }}</span>
+            {% endif %}
+          </td>
+
+          <!-- Tipo comprobante (select) -->
+          <td>
+            <select name="tipo_comp_{{ m.idx }}" class="select-tipo"
+                    onchange="actualizarPillTipo(this)">
+              <option value="{{ comp_ingreso }}"
+                {% if m.tipo_comp_default == comp_ingreso %}selected{% endif %}>
+                {{ comp_ingreso }} Caja
+              </option>
+              <option value="{{ comp_egreso }}"
+                {% if m.tipo_comp_default == comp_egreso %}selected{% endif %}>
+                {{ comp_egreso }} Egreso
+              </option>
+              <option value="{{ comp_traslado }}"
+                {% if m.tipo_comp_default == comp_traslado %}selected{% endif %}>
+                {{ comp_traslado }} Traslado
+              </option>
+            </select>
+          </td>
+
+          <!-- Cuenta contrapartida con autocomplete -->
+          <td>
+            <input type="text"
+                   name="cuenta_{{ m.idx }}"
+                   class="input-cuenta banco-cuenta-ac"
+                   value="{{ m.cuenta_auto }}"
+                   placeholder="ej. 51050501"
+                   autocomplete="off"
+                   {% if m.es_4x1000 and m.idx_padre is none %}
+                     title="4x1000 huérfano — cuenta sugerida: {{ cuenta_4x1000 }}"
+                   {% endif %}>
+          </td>
+
+          <!-- NIT Tercero con autocomplete -->
+          <td>
+            <div class="nit-wrapper">
+              <input type="text"
+                     name="nit_{{ m.idx }}"
+                     class="input-nit banco-nit-ac"
+                     value="{{ m.nit_auto }}"
+                     placeholder="NIT o nombre"
+                     autocomplete="off"
+                     data-idx="{{ m.idx }}"
+                     {% if m.es_bancario %}data-bancario="1"{% endif %}
+                     {% if m.es_bancario and nit_banco %}title="Auto-asignado al banco ({{ nit_banco }})"{% endif %}>
+              <span class="nit-nombre-badge" id="nit-nombre-{{ m.idx }}">
+                {%- if m.es_bancario and nit_banco -%}
+                  <span style="color:#9b59b6; font-size:0.7rem">🏦 banco</span>
+                {%- endif -%}
+              </span>
+            </div>
+          </td>
+
+          <!-- Estado -->
+          <td>
+            {% if m.impuestos_4x1000 %}
+              <span class="pill" style="background:rgba(255,193,7,.15);color:#f39c12;font-size:0.72rem">
+                4x1000 ×{{ m.impuestos_4x1000 | length }}
+              </span>
+            {% endif %}
+            {% if m.es_4x1000 and m.idx_padre is none %}
+              <span class="pill pill-pendiente" style="font-size:0.72rem">huérfano</span>
+            {% endif %}
+          </td>
+        </tr>
+
+        {# ── Sub-filas de los 4x1000 agrupados ── #}
+        {% for imp in m.impuestos_4x1000 %}
+        <tr class="subrow-4x1000">
+          <td></td>
+          <td colspan="1">
+            ↳ <strong style="color:#f39c12">4x1000</strong>
+            {{ imp.descripcion }}
+          </td>
+          <td class="text-right">
+            {% set iv = imp.valor | float %}
+            <span class="valor-neg">− ${{ "{:,.0f}".format(iv | abs) }}</span>
+          </td>
+          <td>
+            <span class="pill" style="font-size:0.72rem;background:rgba(255,193,7,.15);color:#f39c12">
+              auto
+            </span>
+          </td>
+          <td>
+            <code style="font-size:0.78rem; color:var(--text-dim)">{{ cuenta_4x1000 }}</code>
+          </td>
+          <td colspan="2" style="color:var(--text-dim)">
+            agrupado con asiento anterior
+          </td>
+        </tr>
+        {% endfor %}
+
+      {% else %}
+        <tr>
+          <td colspan="7" style="text-align:center; padding:32px; color:var(--text-dim)">
+            No hay movimientos.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Sticky bar con botón de exportar -->
+<div class="sticky-bar">
+  <div>
+    <strong>{{ n_principales }}</strong> movimientos listos para asignar
+    <span style="color:var(--text-dim); margin-left:8px; font-size:0.82rem">
+      — completa la cuenta contrapartida y el NIT de cada fila
+    </span>
+  </div>
+  <div style="margin-left:auto; display:flex; gap:10px; align-items:center">
+    <a href="{{ url_for('web.banco') }}" class="btn btn-secondary btn-sm">← Volver</a>
+    <button type="submit" class="btn btn-primary" id="btnExportar">
+      ⬇ Generar SIIGO
+    </button>
+  </div>
+</div>
+
+</form>
+
+<!-- Autocomplete dropdowns -->
+<ul id="banco-ac"></ul>
+<ul id="tercero-ac"></ul>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+/* ── Autocomplete reutilizable ── */
+function makeAC(acEl, fetchUrl, getKey, getLabel, onPick) {
+  var actInput = null;
+  var timer    = null;
+  var selIdx   = -1;
+
+  function hide() { acEl.style.display = 'none'; selIdx = -1; }
+  function items() { return acEl.querySelectorAll('li'); }
+
+  function highlight(idx) {
+    items().forEach(function (li, i) { li.classList.toggle('ac-sel', i === idx); });
+    var sel = items()[idx];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pick(item, input) {
+    onPick(item, input);
+    hide();
+  }
+
+  function doFetch(q, input) {
+    if (q.length < 2) { hide(); return; }
+    fetch(fetchUrl + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (actInput !== input) return;
+        acEl.innerHTML = '';
+        if (!data.length) { hide(); return; }
+        var r = input.getBoundingClientRect();
+        acEl.style.left  = r.left + 'px';
+        acEl.style.top   = (r.bottom + 2) + 'px';
+        acEl.style.width = Math.max(r.width, 300) + 'px';
+        data.forEach(function (item) {
+          var li = document.createElement('li');
+          li.textContent = getLabel(item);
+          li.addEventListener('mouseenter', function () {
+            selIdx = Array.from(items()).indexOf(li);
+            highlight(selIdx);
+          });
+          li.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            pick(item, actInput);
+          });
+          acEl.appendChild(li);
+        });
+        acEl.style.display = 'block';
+        selIdx = -1;
+      })
+      .catch(hide);
+  }
+
+  return {
+    attach: function (input) {
+      input.addEventListener('input', function () {
+        actInput = input;
+        clearTimeout(timer);
+        timer = setTimeout(function () { doFetch(input.value.trim(), input); }, 220);
+      });
+      input.addEventListener('focusin',  function () { actInput = input; });
+      input.addEventListener('focusout', function () { setTimeout(hide, 160); });
+    },
+    keydown: function (e) {
+      if (!actInput || acEl.style.display === 'none') return;
+      var its = items();
+      if (e.key === 'ArrowDown') {
+        e.preventDefault(); selIdx = Math.min(selIdx + 1, its.length - 1); highlight(selIdx);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); highlight(selIdx);
+      } else if (e.key === 'Enter' && selIdx >= 0) {
+        e.preventDefault(); pick(its[selIdx]._item, actInput);
+      } else if (e.key === 'Escape') { hide(); }
+    },
+  };
+}
+
+/* ── Autocomplete de CUENTAS ── */
+(function () {
+  var ac = document.getElementById('banco-ac');
+  var ctrl = makeAC(
+    ac,
+    '/api/cuentas?q=',
+    function (item) { return item.codigo; },
+    function (item) { return item.nombre ? item.codigo + '  —  ' + item.nombre : item.codigo; },
+    function (item, input) { input.value = item.codigo; }
+  );
+
+  document.querySelectorAll('.banco-cuenta-ac, #cuentaBancoForm').forEach(function (inp) {
+    ctrl.attach(inp);
+  });
+  document.addEventListener('keydown', ctrl.keydown);
+  document.addEventListener('scroll', function () { ac.style.display = 'none'; }, true);
+}());
+
+/* ── Autocomplete NIT BANCO (header) ── */
+(function () {
+  var acEl = document.createElement('ul');
+  acEl.style.cssText = 'position:fixed;border:1px solid #9b59b6;background:#1a2d44;'
+    + 'border-radius:6px;list-style:none;margin:0;padding:4px 0;z-index:10000;'
+    + 'max-height:200px;overflow-y:auto;min-width:300px;display:none;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,.4);';
+  document.body.appendChild(acEl);
+
+  var actInput = null, timer = null;
+  function hide() { acEl.style.display = 'none'; }
+
+  function pick(item, input) {
+    input.value = item.nit;
+    document.getElementById('nitBancoNombreH').textContent = item.nombre || '';
+    document.getElementById('nitBancoHidden').value = item.nit;
+    hide();
+  }
+
+  var inp = document.getElementById('nitBancoHeader');
+  if (!inp) return;
+
+  inp.addEventListener('input', function () {
+    actInput = inp;
+    clearTimeout(timer);
+    var q = inp.value.trim();
+    if (q.length < 2) { hide(); return; }
+    timer = setTimeout(function () {
+      fetch('/api/terceros?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (actInput !== inp) return;
+          acEl.innerHTML = '';
+          if (!data.length) { hide(); return; }
+          var r = inp.getBoundingClientRect();
+          acEl.style.left  = r.left + 'px';
+          acEl.style.top   = (r.bottom + 2) + 'px';
+          acEl.style.width = Math.max(r.width, 320) + 'px';
+          data.forEach(function (item) {
+            var li = document.createElement('li');
+            li.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:0.8rem;color:var(--text)';
+            li.textContent = item.nombre ? item.nit + '  —  ' + item.nombre : item.nit;
+            li._item = item;
+            li.addEventListener('mouseover', function () { li.style.background='#9b59b6'; li.style.color='#fff'; });
+            li.addEventListener('mouseout',  function () { li.style.background=''; li.style.color='var(--text)'; });
+            li.addEventListener('mousedown', function (e) {
+              e.preventDefault();
+              pick(item, inp);
+            });
+            acEl.appendChild(li);
+          });
+          acEl.style.display = 'block';
+        })
+        .catch(hide);
+    }, 220);
+  });
+  inp.addEventListener('focusout', function () { setTimeout(hide, 160); });
+  inp.addEventListener('change', function () {
+    // Si el usuario escribe a mano sin autocomplete, sincronizar el hidden
+    document.getElementById('nitBancoHidden').value = inp.value.trim();
+  });
+  document.addEventListener('scroll', function () { acEl.style.display = 'none'; }, true);
+}());
+
+/* ── Botón "Aplicar a todos" — propaga NIT banco a filas bancarias ── */
+document.getElementById('btnAplicarBanco').addEventListener('click', function () {
+  var nit = document.getElementById('nitBancoHeader').value.trim();
+  if (!nit) {
+    alert('Primero ingresa o selecciona el NIT del banco.');
+    return;
+  }
+  // Actualizar campo hidden
+  document.getElementById('nitBancoHidden').value = nit;
+
+  // Seleccionar todos los inputs de NIT que tienen el atributo data-bancario
+  var bancarios = document.querySelectorAll('input.banco-nit-ac[data-bancario="1"]');
+  var count = 0;
+  bancarios.forEach(function (inp) {
+    inp.value = nit;
+    var idx = inp.dataset.idx;
+    var badge = document.getElementById('nit-nombre-' + idx);
+    if (badge) badge.innerHTML = '<span style="color:#9b59b6;font-size:0.7rem">🏦 banco</span>';
+    count++;
+  });
+
+  // Flash visual de confirmación
+  var btn = document.getElementById('btnAplicarBanco');
+  btn.textContent = '✔ Aplicado (' + count + ' filas)';
+  btn.style.background = 'rgba(46,204,113,.3)';
+  btn.style.borderColor = '#2ecc71';
+  btn.style.color = '#2ecc71';
+  setTimeout(function () {
+    btn.textContent = '✔ Aplicar a todos';
+    btn.style.background = '';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }, 2500);
+});
+
+/* ── Autocomplete de TERCEROS (NIT o nombre) ── */
+(function () {
+  var ac = document.getElementById('tercero-ac');
+
+  // Guardamos el item en el <li> para poder recuperarlo en keydown
+  var origMakeAC = makeAC;
+  var actInput = null;
+  var timer    = null;
+  var selIdx   = -1;
+
+  function hide() { ac.style.display = 'none'; selIdx = -1; }
+  function items() { return ac.querySelectorAll('li'); }
+
+  function highlight(idx) {
+    items().forEach(function (li, i) { li.classList.toggle('ac-sel', i === idx); });
+    var sel = items()[idx];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pick(item, input) {
+    input.value = item.nit;
+    // Mostrar badge con el nombre
+    var idx  = input.dataset.idx;
+    var badge = document.getElementById('nit-nombre-' + idx);
+    if (badge) badge.textContent = item.nombre || '';
+    hide();
+    input.focus();
+  }
+
+  function doFetch(q, input) {
+    if (q.length < 2) { hide(); return; }
+    fetch('/api/terceros?q=' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (actInput !== input) return;
+        ac.innerHTML = '';
+        if (!data.length) { hide(); return; }
+        var r = input.getBoundingClientRect();
+        ac.style.left  = r.left  + 'px';
+        ac.style.top   = (r.bottom + 2) + 'px';
+        ac.style.width = Math.max(r.width, 320) + 'px';
+        data.forEach(function (item) {
+          var li = document.createElement('li');
+          li._item = item;
+          li.textContent = item.nombre
+            ? item.nit + '  —  ' + item.nombre
+            : item.nit;
+          li.addEventListener('mouseenter', function () {
+            selIdx = Array.from(items()).indexOf(li);
+            highlight(selIdx);
+          });
+          li.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            pick(item, actInput);
+          });
+          ac.appendChild(li);
+        });
+        ac.style.display = 'block';
+        selIdx = -1;
+      })
+      .catch(hide);
+  }
+
+  document.querySelectorAll('.banco-nit-ac').forEach(function (input) {
+    input.addEventListener('input', function () {
+      actInput = input;
+      clearTimeout(timer);
+      timer = setTimeout(function () { doFetch(input.value.trim(), input); }, 220);
+    });
+    input.addEventListener('focusin',  function () { actInput = input; });
+    input.addEventListener('focusout', function () { setTimeout(hide, 160); });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!actInput || ac.style.display === 'none') return;
+    var its = items();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault(); selIdx = Math.min(selIdx + 1, its.length - 1); highlight(selIdx);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); highlight(selIdx);
+    } else if (e.key === 'Enter' && selIdx >= 0) {
+      e.preventDefault(); its[selIdx] && pick(its[selIdx]._item, actInput);
+    } else if (e.key === 'Escape') { hide(); }
+  });
+
+  document.addEventListener('scroll', function () { ac.style.display = 'none'; }, true);
+}());
+
+/* ── Color del select de tipo de comprobante ── */
+function actualizarPillTipo(select) {
+  /* no hace nada visualmente por ahora — reservado */
+}
+
+/* ── Loading al exportar ── */
+document.getElementById('bancoForm').addEventListener('submit', function () {
+  var overlay = document.getElementById('loadingOverlay');
+  if (overlay) {
+    overlay.querySelector('p').textContent = 'Generando archivo SIIGO…';
+    overlay.classList.add('visible');
+  }
+});
+</script>
+{% endblock %}

@@ -1,11 +1,931 @@
 """
-Rutas de la interfaz web (FASE 2 — scaffold).
+Rutas de la interfaz web — Fase 2.
 
-TODO Fase 2: Implementar con Flask o FastAPI:
-- GET  /              → dashboard principal
-- POST /procesar      → subir y procesar archivos
-- GET  /preasientos   → ver resultados del último proceso
-- POST /confirmar     → confirmar cuentas pendientes
-- GET  /historial     → ver historial de procesamiento
-- GET  /descargar     → descargar el Excel generado
+Blueprint con 6 rutas que reutilizan exactamente el mismo pipeline que el CLI.
 """
+
+import io
+import logging
+import os
+import tempfile
+from pathlib import Path
+
+from flask import (
+    Blueprint, flash, redirect, render_template,
+    request, send_file, session, url_for,
+)
+from werkzeug.utils import secure_filename
+
+from app.config import DATA_DIR, DB_PATH, OUTPUT_DIR, NOMBRE_EMPRESA, NIT_EMPRESA
+from app import storage as store
+
+logger = logging.getLogger(__name__)
+bp = Blueprint("web", __name__)
+
+ALLOWED_EXT     = {"xlsx", "xls"}
+ALLOWED_EXT_CSV = {"csv", "txt"}
+
+
+def _allowed(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
+
+
+def _allowed_csv(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT_CSV
+
+
+def _project_root() -> str:
+    """Retorna la ruta raíz del proyecto (contable-auto/)."""
+    # routes.py vive en &lt;root&gt;/app/web/routes.py → 3 niveles arriba
+    return os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+
+def _save_upload(file_bytes: bytes, filename: str, folder: str) -> str:
+    """Guarda los bytes de un archivo subido y retorna la referencia.
+
+    En modo cloud sube a Azure Blob Storage; en modo local guarda en disco.
+    """
+    fname = secure_filename(filename)
+    return store.save_file(file_bytes, "uploads", fname)
+
+
+# ---------------------------------------------------------------------------
+# GET /  — Dashboard
+# ---------------------------------------------------------------------------
+
+@bp.route("/")
+def index():
+    """Dashboard principal: estadísticas de la BD + formulario de upload."""
+    from app.database import get_connection, inicializar_db
+
+    db = DB_PATH
+    inicializar_db(db)
+
+    conn = get_connection(db)
+    try:
+        total_docs = conn.execute(
+            "SELECT COUNT(*) FROM documentos_importados"
+        ).fetchone()[0]
+
+        ultimas = conn.execute(
+            """
+            SELECT clasificacion, COUNT(*) as cnt
+            FROM documentos_importados
+            GROUP BY clasificacion
+            ORDER BY cnt DESC
+            """
+        ).fetchall()
+
+        ultima_fecha = conn.execute(
+            "SELECT MAX(fecha_proceso) FROM documentos_importados"
+        ).fetchone()[0]
+
+        total_historial = conn.execute(
+            "SELECT COUNT(*) FROM historial_cuentas"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    stats = {
+        "total_docs": total_docs,
+        "ultimas": [dict(r) for r in ultimas],
+        "ultima_fecha": (ultima_fecha or "")[:19].replace("T", " "),
+        "total_historial": total_historial,
+    }
+
+    return render_template("index.html",
+                           empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
+                           stats=stats)
+
+
+# ---------------------------------------------------------------------------
+# POST /procesar — Ejecuta el pipeline completo
+# ---------------------------------------------------------------------------
+
+@bp.route("/procesar", methods=["POST"])
+def procesar():
+    """Recibe archivos, corre el pipeline y guarda resultado en sesión."""
+    upload_folder = os.path.join(_project_root(), "uploads")
+    os.makedirs(upload_folder, exist_ok=True)
+
+    # Validar archivo RADIAN obligatorio
+    if "radian" not in request.files or request.files["radian"].filename == "":
+        flash("Debes seleccionar un archivo RADIAN.", "error")
+        return redirect(url_for("web.index"))
+
+    radian_file = request.files["radian"]
+    if not _allowed(radian_file.filename):
+        flash("El archivo RADIAN debe ser .xlsx o .xls", "error")
+        return redirect(url_for("web.index"))
+
+    # Leer bytes en memoria para evitar problemas de ruta en Windows
+    radian_bytes = radian_file.read()
+    radian_ref = _save_upload(radian_bytes, radian_file.filename, upload_folder)
+    radian_path = store.load_file(radian_ref)  # ruta local para el pipeline
+
+    # Archivos maestros opcionales
+    terceros_path = cuentas_path = comprobantes_path = None
+    for key, default_name in [
+        ("terceros",     "Listado_de_Terceros.xlsx"),
+        ("cuentas",      "Listado_de_Cuentas_Contables.xlsx"),
+        ("comprobantes", "Tipos_de_comprobante_contable.xlsx"),
+    ]:
+        f = request.files.get(key)
+        if f and f.filename and _allowed(f.filename):
+            file_bytes = f.read()
+            ref = _save_upload(file_bytes, f.filename, upload_folder)
+            path = store.load_file(ref)
+        else:
+            try:
+                path = store.get_local_data_path(default_name)
+            except FileNotFoundError:
+                path = str(Path(_project_root()) / DATA_DIR.rstrip("/") / default_name)
+        if key == "terceros":
+            terceros_path = path
+        elif key == "cuentas":
+            cuentas_path = path
+        else:
+            comprobantes_path = path
+
+    db = DB_PATH
+    incluir_dup = request.form.get("incluir_duplicados") == "on"
+
+    try:
+        resultado = _ejecutar_pipeline(
+            radian_path, terceros_path, cuentas_path,
+            comprobantes_path, db, incluir_dup,
+        )
+        session["ultimo_resultado"] = resultado
+        flash(f"✓ Procesados {resultado['n_docs']} documentos. "
+              f"{resultado['n_excepciones']} con excepciones.", "success")
+        return redirect(url_for("web.resultado"))
+
+    except Exception as exc:
+        logger.exception("Error en pipeline web")
+        flash(f"Error al procesar: {exc}", "error")
+        return redirect(url_for("web.index"))
+
+
+def _ejecutar_pipeline(
+    radian_path, terceros_path, cuentas_path,
+    comprobantes_path, db, incluir_duplicados,
+) -> dict:
+    """Ejecuta el pipeline completo y retorna un dict con los resultados."""
+    import pandas as pd
+    from app.database import inicializar_db, registrar_documento
+    from app import bitacora as bita
+    from app.importador import (
+        importar_radian, cargar_maestro_terceros,
+        cargar_maestro_cuentas, cargar_maestro_comprobantes,
+    )
+    from app.clasificador import clasificar_lote
+    from app.terceros import procesar_terceros_lote
+    from app.comprobantes import asignar_comprobantes_lote
+    from app.impuestos import procesar_impuestos_lote
+    from app.preasiento import generar_lote
+    from app.validaciones import validar_preasiento_completo
+    from app.exportador import exportar_excel
+    from app.sugerencias import registrar_lote_confirmaciones
+
+    inicializar_db(db)
+    bita.limpiar_sesion()
+
+    # 1. Importar
+    df = importar_radian(radian_path, db_path=db)
+    if not incluir_duplicados:
+        df = df[~df["_duplicado"]].copy()
+    if df.empty:
+        raise ValueError("No hay documentos nuevos para procesar.")
+
+    # 2-4. Maestros opcionales
+    def _carga(fn, path):
+        try:
+            return fn(path)
+        except Exception:
+            return None
+
+    df_terceros     = _carga(cargar_maestro_terceros, terceros_path)
+    df_cuentas      = _carga(cargar_maestro_cuentas, cuentas_path)
+    df_comprobantes = _carga(cargar_maestro_comprobantes, comprobantes_path)
+
+    # 5-8. Pipeline
+    df = clasificar_lote(df)
+    df = procesar_terceros_lote(df, df_terceros if df_terceros is not None else pd.DataFrame())
+    df = asignar_comprobantes_lote(df, df_comprobantes)
+    df = procesar_impuestos_lote(df)
+    preasientos = generar_lote(df, df_comprobantes, db_path=db)
+
+    # 9. Validar
+    excepciones = []
+    for p in preasientos:
+        errs = validar_preasiento_completo(p, df_cuentas, db)
+        if errs:
+            excepciones.append({
+                "cufe": p.cufe,
+                "tipo_documento": p.tipo_documento,
+                "clasificacion": p.clasificacion,
+                "tercero_nit": p.tercero_nit,
+                "total": p.total,
+                "errores": errs,
+            })
+
+    # 10. Registrar en BD
+    for _, row in df.iterrows():
+        try:
+            registrar_documento(
+                cufe=str(row.get("CUFE/CUDE", "")),
+                tipo_documento=str(row.get("Tipo de documento", "")),
+                clasificacion=str(row.get("clasificacion", "")),
+                folio=str(row.get("Folio", "")),
+                prefijo=str(row.get("Prefijo", "")),
+                nit_emisor=str(row.get("NIT Emisor", "")),
+                nombre_emisor=str(row.get("Nombre Emisor", "")),
+                nit_receptor=str(row.get("NIT Receptor", "")),
+                nombre_receptor=str(row.get("Nombre Receptor", "")),
+                total=float(row.get("Total", 0.0) or 0.0),
+                fecha_emision=row.get("Fecha Emisión"),
+                archivo_origen=radian_path,
+                db_path=db,
+            )
+        except Exception:
+            pass
+
+    # 11. Alimentar historial
+    registrar_lote_confirmaciones(preasientos, db_path=db)
+
+    # 12. Exportar Excel — ruta absoluta para que funcione desde cualquier CWD
+    ruta_excel = exportar_excel(
+        preasientos=preasientos,
+        excepciones=excepciones,
+        bitacora=bita.obtener_registros_sesion(),
+        output_path=os.path.join(_project_root(), "output"),
+        archivo_origen=radian_path,
+    )
+
+    # Serializar preasientos para la sesión (sólo datos necesarios para la vista)
+    preasientos_data = []
+    for p in preasientos:
+        lineas = []
+        for l in p.lineas:
+            lineas.append({
+                "numero_linea": l.numero_linea,
+                "cuenta": l.cuenta,
+                "descripcion_cuenta": l.descripcion_cuenta,
+                "debito": l.debito,
+                "credito": l.credito,
+                "concepto": l.concepto,
+                "es_pendiente": l.es_pendiente,
+                "es_sugerida": getattr(l, "es_sugerida", False),
+            })
+        preasientos_data.append({
+            "cufe": p.cufe[:30] + "…" if len(p.cufe) > 30 else p.cufe,
+            "cufe_full": p.cufe,
+            "clasificacion": p.clasificacion,
+            "tipo_documento": p.tipo_documento,
+            "titulo_comprobante": p.titulo_comprobante,
+            "fecha_emision": p.fecha_emision.strftime("%d/%m/%Y") if p.fecha_emision else "",
+            "folio": p.folio,
+            "prefijo": p.prefijo,
+            "tercero_nit": p.tercero_nit,
+            "tercero_nombre": p.tercero_nombre,
+            "tercero_encontrado": p.tercero_encontrado,
+            "total": p.total,
+            "cuadra": p.cuadra,
+            "excepciones": p.excepciones,
+            "lineas": lineas,
+        })
+
+    return {
+        "n_docs": len(preasientos),
+        "n_excepciones": len(excepciones),
+        "preasientos": preasientos_data,
+        "excepciones": excepciones,
+        "excel_path": ruta_excel,
+        "archivo_origen": radian_path,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /resultado — Tabla de preasientos
+# ---------------------------------------------------------------------------
+
+@bp.route("/resultado")
+def resultado():
+    """Muestra los preasientos y excepciones del último proceso."""
+    datos = session.get("ultimo_resultado")
+    if not datos:
+        flash("No hay resultados. Procesa primero un archivo RADIAN.", "info")
+        return redirect(url_for("web.index"))
+
+    return render_template("resultado.html",
+                           empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
+                           datos=datos)
+
+
+# ---------------------------------------------------------------------------
+# POST /confirmar — Registrar cuenta en historial
+# ---------------------------------------------------------------------------
+
+@bp.route("/confirmar", methods=["POST"])
+def confirmar():
+    """Registra una cuenta en el historial del motor de sugerencias."""
+    from app.sugerencias import registrar_confirmacion
+
+    clasificacion = request.form.get("clasificacion", "")
+    nit_tercero   = request.form.get("nit_tercero", "")
+    tipo_linea    = request.form.get("tipo_linea", "")
+    cuenta        = request.form.get("cuenta", "").strip()
+    cufe_full     = request.form.get("cufe_full", "")
+    numero_linea  = request.form.get("numero_linea", "")
+
+    if not all([clasificacion, nit_tercero, tipo_linea, cuenta]):
+        flash("Datos incompletos para confirmar la cuenta.", "error")
+    else:
+        registrar_confirmacion(clasificacion, nit_tercero, tipo_linea, cuenta, DB_PATH)
+
+        # Actualizar la cuenta en los datos de sesión para reflejarla en pantalla
+        resultado = session.get("ultimo_resultado")
+        if resultado and cufe_full and numero_linea:
+            try:
+                num = int(numero_linea)
+                for p in resultado.get("preasientos", []):
+                    if p.get("cufe_full") == cufe_full:
+                        for linea in p.get("lineas", []):
+                            if linea.get("numero_linea") == num:
+                                linea["cuenta"] = cuenta
+                                linea["es_pendiente"] = False
+                                break
+                        break
+                session["ultimo_resultado"] = resultado
+                session.modified = True
+            except (ValueError, TypeError):
+                pass
+
+        flash(f"✓ Cuenta {cuenta} confirmada para {clasificacion} / NIT {nit_tercero}.", "success")
+
+    return redirect(url_for("web.resultado"))
+
+
+# ---------------------------------------------------------------------------
+# GET /historial — Motor de sugerencias
+# ---------------------------------------------------------------------------
+
+@bp.route("/historial")
+def historial():
+    """Muestra las cuentas aprendidas por el motor de sugerencias."""
+    from app.database import get_connection
+
+    conn = get_connection(DB_PATH)
+    try:
+        rows = conn.execute(
+            """
+            SELECT clasificacion, nit_tercero, tipo_linea, cuenta, usos,
+                   SUBSTR(ultima_vez, 1, 10) as ultima_fecha
+            FROM historial_cuentas
+            ORDER BY usos DESC
+            LIMIT 200
+            """
+        ).fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM historial_cuentas").fetchone()[0]
+    finally:
+        conn.close()
+
+    entradas = [dict(r) for r in rows]
+    return render_template("historial.html",
+                           empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
+                           entradas=entradas, total=total)
+
+
+# ---------------------------------------------------------------------------
+# GET /descargar — Descargar Excel
+# ---------------------------------------------------------------------------
+
+@bp.route("/descargar")
+def descargar():
+    """Envía el archivo Excel generado como descarga."""
+    datos = session.get("ultimo_resultado")
+    if not datos or not datos.get("excel_path"):
+        flash("No hay archivo Excel disponible.", "error")
+        return redirect(url_for("web.index"))
+
+    excel_ref = datos["excel_path"]
+    if not store.file_exists(excel_ref):
+        flash("El archivo Excel ya no existe en el servidor.", "error")
+        return redirect(url_for("web.index"))
+
+    content = store.get_download_bytes(excel_ref)
+    return send_file(
+        io.BytesIO(content),
+        as_attachment=True,
+        download_name=Path(excel_ref.replace('blob://', '')).name,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /exportar-siigo — Generar archivo(s) SIIGO
+# ---------------------------------------------------------------------------
+
+@bp.route("/exportar-siigo", methods=["POST"])
+def exportar_siigo():
+    """Genera el Excel en formato SIIGO y lo envía como descarga (o ZIP si hay varios)."""
+    import zipfile
+    import io
+    from app.siigo.exportador_siigo import exportar_siigo as _exportar
+
+    datos = session.get("ultimo_resultado")
+    if not datos or not datos.get("preasientos"):
+        flash("No hay resultados para exportar. Procesa primero un archivo RADIAN.", "error")
+        return redirect(url_for("web.index"))
+
+    incluir_pendientes = request.form.get("incluir_pendientes") == "on"
+
+    # Re-construir la lista de PreasientoContable desde la sesión
+    preasientos = _deserializar_preasientos(datos["preasientos"])
+
+    # Cargar plan de cuentas para determinar columnas de vencimiento (cols 13-16)
+    from app.importador import cargar_maestro_cuentas
+    _cuentas_path = str(Path(_project_root()) / DATA_DIR.rstrip("/") / "Listado_de_Cuentas_Contables.xlsx")
+    try:
+        df_cuentas_siigo = cargar_maestro_cuentas(_cuentas_path)
+    except Exception:
+        df_cuentas_siigo = None
+
+    try:
+        rutas = _exportar(
+            preasientos,
+            output_path=os.path.join(_project_root(), "output"),
+            incluir_pendientes=incluir_pendientes,
+            df_cuentas=df_cuentas_siigo,
+        )
+    except Exception as exc:
+        logger.exception("Error generando archivo SIIGO")
+        flash(f"Error al generar archivo SIIGO: {exc}", "error")
+        return redirect(url_for("web.resultado"))
+
+    if len(rutas) == 1:
+        return send_file(
+            rutas[0],
+            as_attachment=True,
+            download_name=Path(rutas[0]).name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    # Múltiples archivos → empaquetar en ZIP
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for ruta in rutas:
+            zf.write(ruta, Path(ruta).name)
+    buf.seek(0)
+    ts = rutas[0].rsplit("_", 1)[0].split("/")[-1]
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=f"siigo_comprobantes.zip",
+        mimetype="application/zip",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics — Dashboard de reportería (Fase 4)
+# ---------------------------------------------------------------------------
+
+@bp.route("/analytics")
+def analytics():
+    """Dashboard de reportería y analytics contable."""
+    import json
+    from app.database import (
+        inicializar_db, get_connection,
+        obtener_kpis, obtener_evolucion_mensual,
+        obtener_distribucion_clasificacion,
+        obtener_top_terceros, obtener_actividad_reciente,
+    )
+
+    inicializar_db(DB_PATH)
+
+    kpis          = obtener_kpis(DB_PATH)
+    evolucion     = obtener_evolucion_mensual(DB_PATH, meses=12)
+    distribucion  = obtener_distribucion_clasificacion(DB_PATH)
+    top_proveed   = obtener_top_terceros(DB_PATH, limite=10, tipo="compra")
+    top_clientes  = obtener_top_terceros(DB_PATH, limite=10, tipo="venta")
+    actividad     = obtener_actividad_reciente(DB_PATH, limite=30)
+
+    # Serializar para Chart.js
+    charts = {
+        "evolucion": {
+            "labels":         [r["mes"] for r in evolucion],
+            "ventas_monto":   [round(r["ventas_monto"],  2) for r in evolucion],
+            "compras_monto":  [round(r["compras_monto"], 2) for r in evolucion],
+            "otros_monto":    [round(r["otros_monto"],   2) for r in evolucion],
+            "ventas_count":   [r["ventas_count"]  for r in evolucion],
+            "compras_count":  [r["compras_count"] for r in evolucion],
+        },
+        "distribucion": {
+            "labels": [r["clasificacion"].replace("_", " ") for r in distribucion],
+            "counts": [r["count"] for r in distribucion],
+            "montos": [round(r["monto"], 2) for r in distribucion],
+        },
+        "top_proveed": {
+            "labels": [r["nombre"][:25] for r in top_proveed],
+            "montos": [round(r["monto"], 2) for r in top_proveed],
+            "counts": [r["count"] for r in top_proveed],
+        },
+        "top_clientes": {
+            "labels": [r["nombre"][:25] for r in top_clientes],
+            "montos": [round(r["monto"], 2) for r in top_clientes],
+            "counts": [r["count"] for r in top_clientes],
+        },
+    }
+
+    return render_template(
+        "analytics.html",
+        empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
+        kpis=kpis,
+        actividad=actividad,
+        charts_json=json.dumps(charts, ensure_ascii=False),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/cuentas — Autocompletar cuentas contables
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/cuentas")
+def api_cuentas():
+    """Retorna cuentas que coincidan con el query por código o nombre. Máx 15."""
+    from flask import jsonify
+    from app.importador import cargar_maestro_cuentas
+    from app.config import COL_CUENTAS_CODIGO
+
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify([])
+
+    cuentas_path = str(
+        Path(_project_root()) / DATA_DIR.rstrip("/") / "Listado_de_Cuentas_Contables.xlsx"
+    )
+
+    try:
+        df = cargar_maestro_cuentas(cuentas_path)
+    except Exception:
+        return jsonify([])
+
+    q_lower = q.lower()
+    cod_col = COL_CUENTAS_CODIGO   # "Código"
+    nom_col = "Nombre"
+
+    codigos = df[cod_col].astype(str).str.strip()
+    mask = codigos.str.lower().str.startswith(q_lower)
+    if nom_col in df.columns:
+        mask |= df[nom_col].astype(str).str.lower().str.contains(q_lower, regex=False)
+
+    cols = [cod_col, nom_col] if nom_col in df.columns else [cod_col]
+    resultados = df[mask][cols].head(15)
+
+    out = [
+        {
+            "codigo": str(row[cod_col]).strip(),
+            "nombre": str(row[nom_col]).strip() if nom_col in df.columns else "",
+        }
+        for _, row in resultados.iterrows()
+    ]
+    return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/terceros — Autocompletar terceros por NIT o nombre
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/terceros")
+def api_terceros():
+    """Retorna terceros que coincidan con el query por NIT o nombre. Máx 15."""
+    from flask import jsonify
+    from app.importador import cargar_maestro_terceros
+
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify([])
+
+    terceros_path = str(
+        Path(_project_root()) / DATA_DIR.rstrip("/") / "Listado_de_Terceros.xlsx"
+    )
+
+    try:
+        df = cargar_maestro_terceros(terceros_path)
+    except Exception:
+        return jsonify([])
+
+    q_lower    = q.lower()
+    col_nit    = "Identificación"
+    col_nombre = "Nombre tercero"
+
+    if col_nit not in df.columns:
+        return jsonify([])
+
+    nits = df[col_nit].astype(str).str.strip()
+    mask = nits.str.lower().str.startswith(q_lower)
+
+    if col_nombre in df.columns:
+        mask |= df[col_nombre].astype(str).str.lower().str.contains(q_lower, regex=False)
+
+    cols = [col_nit, col_nombre] if col_nombre in df.columns else [col_nit]
+    resultados = df[mask][cols].head(15)
+
+    out = [
+        {
+            "nit":    str(row[col_nit]).strip(),
+            "nombre": str(row[col_nombre]).strip() if col_nombre in df.columns else "",
+        }
+        for _, row in resultados.iterrows()
+    ]
+    return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
+# GET /test-procesar — Prueba end-to-end sin file dialog (solo DEBUG)
+# ---------------------------------------------------------------------------
+
+@bp.route("/test-procesar")
+def test_procesar():
+    """Procesa el archivo RADIAN de input/ sin necesidad de subida. Solo para pruebas."""
+    import flask
+    if not flask.current_app.debug:
+        return "Solo disponible en modo DEBUG.", 403
+
+    root = _project_root()
+    input_dir = os.path.join(root, "input")
+
+    # Buscar el primer RADIAN disponible (preferir "RADIAN.xlsx" exacto)
+    radian_path = None
+    candidates = sorted(
+        [f for f in os.listdir(input_dir)
+         if f.lower().endswith((".xlsx", ".xls")) and f != ".gitkeep"],
+        # Primero archivos sin espacios (más simples y típicamente los válidos)
+        key=lambda f: (1 if " " in f else 0, f)
+    )
+    for fname in candidates:
+        radian_path = os.path.join(input_dir, fname)
+        break
+
+    if not radian_path:
+        flash("No se encontró un archivo RADIAN en input/.", "error")
+        return redirect(url_for("web.index"))
+
+    db = DB_PATH
+    data_dir = os.path.join(root, "data")
+
+    def _p(name):
+        path = os.path.join(data_dir, name)
+        return path if os.path.exists(path) else None
+
+    terceros_path     = _p("Listado_de_Terceros.xlsx")
+    cuentas_path      = _p("Listado_de_Cuentas_Contables.xlsx")
+    comprobantes_path = _p("Tipos_de_comprobante_contable.xlsx")
+
+    try:
+        resultado = _ejecutar_pipeline(
+            radian_path, terceros_path, cuentas_path,
+            comprobantes_path, db, incluir_duplicados=True,
+        )
+        session["ultimo_resultado"] = resultado
+        flash(
+            f"✓ (TEST) Procesados {resultado['n_docs']} documentos desde "
+            f"{os.path.basename(radian_path)}. "
+            f"{resultado['n_excepciones']} con excepciones.",
+            "success",
+        )
+        return redirect(url_for("web.resultado"))
+    except Exception as exc:
+        logger.exception("Error en test-procesar")
+        flash(f"Error en test-procesar: {exc}", "error")
+        return redirect(url_for("web.index"))
+
+
+def _deserializar_preasientos(preasientos_data: list[dict]):
+
+    """Reconstruye objetos PreasientoContable desde los datos serializados en sesión."""
+    from app.models import PreasientoContable, LineaContable
+    from datetime import datetime
+
+    resultado = []
+    for p in preasientos_data:
+        fecha = None
+        if p.get("fecha_emision"):
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+                try:
+                    fecha = datetime.strptime(p["fecha_emision"], fmt)
+                    break
+                except ValueError:
+                    pass
+
+        lineas = []
+        for l in p.get("lineas", []):
+            lineas.append(LineaContable(
+                cufe=p.get("cufe_full", p.get("cufe", "")),
+                numero_linea=l["numero_linea"],
+                cuenta=l["cuenta"],
+                descripcion_cuenta=l.get("descripcion_cuenta", ""),
+                debito=float(l.get("debito", 0)),
+                credito=float(l.get("credito", 0)),
+                concepto=l.get("concepto", ""),
+                tercero_nit=p.get("tercero_nit", ""),
+                tercero_nombre=p.get("tercero_nombre", ""),
+                es_pendiente=bool(l.get("es_pendiente", False)),
+                es_sugerida=bool(l.get("es_sugerida", False)),
+            ))
+
+        resultado.append(PreasientoContable(
+            cufe=p.get("cufe_full", p.get("cufe", "")),
+            tipo_documento=p.get("tipo_documento", ""),
+            clasificacion=p.get("clasificacion", ""),
+            codigo_comprobante=p.get("codigo_comprobante", ""),
+            titulo_comprobante=p.get("titulo_comprobante", ""),
+            fecha_emision=fecha,
+            folio=p.get("folio", ""),
+            prefijo=p.get("prefijo", ""),
+            tercero_nit=p.get("tercero_nit", ""),
+            tercero_nombre=p.get("tercero_nombre", ""),
+            tercero_encontrado=bool(p.get("tercero_encontrado", False)),
+            total=float(p.get("total", 0)),
+            base_gravable=0.0,
+            lineas=lineas,
+            cuadra=bool(p.get("cuadra", False)),
+            excepciones=p.get("excepciones", []),
+        ))
+    return resultado
+
+
+# ---------------------------------------------------------------------------
+# GET /banco — Formulario de upload del extracto bancario
+# ---------------------------------------------------------------------------
+
+@bp.route("/banco")
+def banco():
+    """Formulario para subir el CSV del banco."""
+    from app.config import BANCO_CUENTA_DEFAULT, SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO
+    return render_template(
+        "banco_upload.html",
+        empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
+        cuenta_default=BANCO_CUENTA_DEFAULT,
+        comp_ingreso=SIIGO_COMP_BANCO_INGRESO,
+        comp_egreso=SIIGO_COMP_BANCO_EGRESO,
+        comp_traslado=SIIGO_COMP_BANCO_TRASLADO,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /banco/previsualizar — Parsea el CSV y muestra la tabla editable
+# ---------------------------------------------------------------------------
+
+@bp.route("/banco/previsualizar", methods=["POST"])
+def banco_previsualizar():
+    """Recibe el CSV, lo parsea, agrupa 4x1000 y guarda en sesión."""
+    from app.banco.importador_banco import leer_csv_banco, a_dict
+    from app.config import BANCO_CUENTA_DEFAULT, SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO, BANCO_CUENTA_4X1000
+
+    if "csv_banco" not in request.files or request.files["csv_banco"].filename == "":
+        flash("Debes seleccionar el archivo CSV del banco.", "error")
+        return redirect(url_for("web.banco"))
+
+    csv_file = request.files["csv_banco"]
+
+    cuenta_banco = request.form.get("cuenta_banco", BANCO_CUENTA_DEFAULT).strip()
+    if not cuenta_banco:
+        cuenta_banco = BANCO_CUENTA_DEFAULT
+
+    nit_banco = request.form.get("nit_banco", "").strip()
+
+    upload_folder = os.path.join(_project_root(), "uploads")
+    os.makedirs(upload_folder, exist_ok=True)
+
+    csv_path = _save_upload(csv_file.read(), csv_file.filename, upload_folder)
+
+    try:
+        movimientos = leer_csv_banco(csv_path)
+    except Exception as exc:
+        logger.exception("Error al leer CSV del banco")
+        flash(f"Error al leer el CSV: {exc}", "error")
+        return redirect(url_for("web.banco"))
+
+    if not movimientos:
+        flash("El archivo CSV no contiene movimientos válidos.", "error")
+        return redirect(url_for("web.banco"))
+
+    session["banco_movimientos"]   = [a_dict(m) for m in movimientos]
+    session["banco_cuenta_banco"]  = cuenta_banco
+    session["banco_nit_banco"]     = nit_banco
+
+    # Preparar datos para el template
+    # Movimientos principales (no-4x1000 con padre); 4x1000 huérfanos SÍ aparecen
+    impuestos_por_padre: dict[int, list] = {}
+    for m in movimientos:
+        if m.es_4x1000 and m.idx_padre is not None:
+            impuestos_por_padre.setdefault(m.idx_padre, []).append(a_dict(m))
+
+    principales = []
+    for m in movimientos:
+        if m.es_4x1000 and m.idx_padre is not None:
+            continue  # agrupado bajo su padre, no aparece como fila propia
+        d = a_dict(m)
+        d["impuestos_4x1000"] = impuestos_por_padre.get(m.idx, [])
+        # Tipo comprobante y NIT por defecto
+        if m.es_4x1000 and m.idx_padre is None:
+            d["tipo_comp_default"] = SIIGO_COMP_BANCO_EGRESO
+            d["cuenta_auto"] = BANCO_CUENTA_4X1000
+            d["nit_auto"]    = nit_banco   # 4x1000 huérfano también usa NIT banco
+        elif m.es_bancario:
+            # Intereses, cuota de manejo, GMF: siempre NIT del banco
+            d["nit_auto"]    = nit_banco
+            d["cuenta_auto"] = ""
+            d["tipo_comp_default"] = SIIGO_COMP_BANCO_INGRESO if m.valor > 0 else SIIGO_COMP_BANCO_EGRESO
+        elif m.valor > 0:
+            d["tipo_comp_default"] = SIIGO_COMP_BANCO_INGRESO
+            d["cuenta_auto"] = ""
+            d["nit_auto"]    = ""
+        else:
+            d["tipo_comp_default"] = SIIGO_COMP_BANCO_EGRESO
+            d["cuenta_auto"] = ""
+            d["nit_auto"]    = ""
+        principales.append(d)
+
+    return render_template(
+        "banco_resultado.html",
+        empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
+        movimientos=principales,
+        cuenta_banco=cuenta_banco,
+        nit_banco=nit_banco,
+        n_total=len(movimientos),
+        n_principales=len(principales),
+        cuenta_4x1000=BANCO_CUENTA_4X1000,
+        comp_ingreso=SIIGO_COMP_BANCO_INGRESO,
+        comp_egreso=SIIGO_COMP_BANCO_EGRESO,
+        comp_traslado=SIIGO_COMP_BANCO_TRASLADO,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /banco/exportar — Genera el Excel SIIGO con las asignaciones del usuario
+# ---------------------------------------------------------------------------
+
+@bp.route("/banco/exportar", methods=["POST"])
+def banco_exportar():
+    """Recibe las asignaciones, genera el Excel SIIGO y lo envía como descarga."""
+    import zipfile, io
+    from app.banco.importador_banco import desde_dict
+    from app.banco.exportador_banco import exportar_banco_siigo
+    from app.config import BANCO_CUENTA_DEFAULT
+
+    movimientos_raw = session.get("banco_movimientos")
+    if not movimientos_raw:
+        flash("No hay movimientos en sesión. Sube el CSV primero.", "error")
+        return redirect(url_for("web.banco"))
+
+    movimientos = [desde_dict(d) for d in movimientos_raw]
+    cuenta_banco = request.form.get("cuenta_banco", BANCO_CUENTA_DEFAULT).strip() or BANCO_CUENTA_DEFAULT
+    nit_banco    = request.form.get("nit_banco",    "").strip()
+
+    # Recolectar asignaciones del formulario
+    asignaciones = []
+    for m in movimientos:
+        # Solo los principales (no-4x1000 agrupados) tienen inputs en el form
+        if m.es_4x1000 and m.idx_padre is not None:
+            continue
+        asig = {
+            "idx":                m.idx,
+            "cuenta_contrapartida": request.form.get(f"cuenta_{m.idx}", "").strip(),
+            "nit_tercero":         request.form.get(f"nit_{m.idx}", "").strip(),
+            "tipo_comprobante":    request.form.get(f"tipo_comp_{m.idx}", "").strip(),
+        }
+        asignaciones.append(asig)
+
+    try:
+        rutas = exportar_banco_siigo(
+            movimientos=movimientos,
+            cuenta_banco=cuenta_banco,
+            asignaciones=asignaciones,
+            nit_banco=nit_banco,
+            output_path=os.path.join(_project_root(), "output"),
+        )
+    except Exception as exc:
+        logger.exception("Error generando Excel banco SIIGO")
+        flash(f"Error al generar SIIGO: {exc}", "error")
+        return redirect(url_for("web.banco"))
+
+    if len(rutas) == 1:
+        return send_file(
+            rutas[0],
+            as_attachment=True,
+            download_name=Path(rutas[0]).name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for ruta in rutas:
+            zf.write(ruta, Path(ruta).name)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="siigo_banco.zip",
+                     mimetype="application/zip")
+

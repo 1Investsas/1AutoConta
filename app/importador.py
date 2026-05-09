@@ -64,8 +64,21 @@ def importar_radian(filepath: str, db_path: Optional[str] = None) -> pd.DataFram
         raise FileNotFoundError(f"Archivo RADIAN no encontrado: {filepath}")
 
     logger.info("Leyendo RADIAN: %s", filepath)
+    # Elegir motor según la extensión:
+    # .xls  → formato BIFF binario, requiere xlrd
+    # .xlsx → formato ZIP/OpenXML, requiere openpyxl
+    ext = path.suffix.lower()
+    engine = "xlrd" if ext == ".xls" else "openpyxl"
+
     try:
-        df = pd.read_excel(filepath, header=0, dtype=str)
+        df = pd.read_excel(filepath, header=0, dtype=str, engine=engine)
+    except ImportError as exc:
+        if "xlrd" in str(exc):
+            raise ValueError(
+                "Para leer archivos .xls (formato antiguo) instala xlrd: "
+                "pip install xlrd"
+            ) from exc
+        raise ValueError(f"Motor Excel no disponible: {exc}") from exc
     except Exception as exc:
         raise ValueError(f"No se pudo leer el archivo Excel: {exc}") from exc
 

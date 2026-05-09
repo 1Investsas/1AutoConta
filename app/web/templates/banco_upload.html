@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block title %}Extracto Bancario — contable-auto{% endblock %}
+{% block page_title %}🏦 Extracto Bancario{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Convierte el extracto bancario CSV al formato de importación SIIGO.
+      Detecta automáticamente el 4x1000 y lo agrupa con su egreso correspondiente.
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Ingresos → Recibo de caja</div>
+    <div class="card-value" style="color:var(--success); font-size:1.5rem">{{ comp_ingreso }}</div>
+    <div class="card-sub">débito cuenta banco / crédito contrapartida</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Egresos → Recibo de pago</div>
+    <div class="card-value" style="color:var(--danger); font-size:1.5rem">{{ comp_egreso }}</div>
+    <div class="card-sub">crédito cuenta banco / débito contrapartida</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Traslados</div>
+    <div class="card-value" style="color:var(--accent); font-size:1.5rem">{{ comp_traslado }}</div>
+    <div class="card-sub">seleccionable manualmente por movimiento</div>
+  </div>
+</div>
+
+<div class="form-section">
+  <h2>⬆ Subir extracto bancario CSV</h2>
+
+  <form method="POST" action="{{ url_for('web.banco_previsualizar') }}"
+        enctype="multipart/form-data" data-loading="true">
+
+    <!-- Drag & Drop CSV -->
+    <div class="drop-zone" id="dropZoneBanco">
+      <div class="drop-icon">🏦</div>
+      <div class="drop-text">
+        Arrastra el <strong>CSV del banco</strong> aquí<br>
+        o <strong><label for="csvBanco">haz click para elegir</label></strong>
+      </div>
+      <input type="file" id="csvBanco" name="csv_banco" accept=".csv,.txt" required>
+      <div class="file-chosen" id="bancoChosen"></div>
+    </div>
+
+    <!-- Cuenta bancaria + NIT del banco -->
+    <div class="form-grid" style="margin-top:20px">
+      <div class="form-group">
+        <label for="cuentaBanco">
+          Cuenta contable del banco
+          <small style="color:var(--text-dim); font-weight:400">
+            — aplica a todos los movimientos
+          </small>
+        </label>
+        <div style="display:flex; gap:8px; align-items:center">
+          <input type="text" id="cuentaBanco" name="cuenta_banco"
+                 value="{{ cuenta_default }}"
+                 placeholder="ej. 11100501"
+                 style="font-family:monospace; font-size:1rem; width:180px"
+                 autocomplete="off">
+          <span style="color:var(--text-dim); font-size:0.82rem">
+            — Bancos y corporaciones financieras
+          </span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="nitBanco">
+          NIT del banco
+          <small style="color:var(--text-dim); font-weight:400">
+            — se usa en 4x1000, intereses y gastos bancarios
+          </small>
+        </label>
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <input type="text" id="nitBanco" name="nit_banco"
+                 placeholder="NIT o nombre del banco (ej. Bancolombia)"
+                 style="width:280px"
+                 autocomplete="off"
+                 class="banco-nit-upload-ac"
+                 data-badge="nitBancoNombre">
+          <span id="nitBancoNombre"
+                style="font-size:0.78rem; color:#9b59b6; min-height:1em"></span>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:24px">
+      <button type="submit" class="btn btn-primary" id="btnPrevisualizar">
+        <span>🔍</span> Previsualizar movimientos
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Guía rápida -->
+<div style="margin-top:28px">
+  <div class="section-header"><h2>📋 Guía rápida</h2></div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Tipo</th>
+          <th>Valor en CSV</th>
+          <th>Comprobante</th>
+          <th>Banco</th>
+          <th>Contrapartida</th>
+          <th>4x1000 (cod. 3339)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pill pill-ok">Ingreso</span></td>
+          <td style="color:var(--success); font-family:monospace">+ positivo</td>
+          <td>Recibo de caja ({{ comp_ingreso }})</td>
+          <td>DÉBITO 11100501</td>
+          <td>CRÉDITO (seleccionar)</td>
+          <td>N/A</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-pendiente">Egreso</span></td>
+          <td style="color:var(--danger); font-family:monospace">- negativo</td>
+          <td>Recibo de pago ({{ comp_egreso }})</td>
+          <td>CRÉDITO 11100501</td>
+          <td>DÉBITO (seleccionar)</td>
+          <td>Auto-agrupado: crédito banco + débito 53152001</td>
+        </tr>
+        <tr>
+          <td><span class="pill" style="background:rgba(100,100,255,.15);color:#9999ff">Traslado</span></td>
+          <td style="color:var(--accent); font-family:monospace">+ o -</td>
+          <td>Traslado ({{ comp_traslado }}) — manual</td>
+          <td>según signo</td>
+          <td>DÉBITO/CRÉDITO (seleccionar)</td>
+          <td>N/A</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Autocomplete reutilizable para cuentas Y terceros
+function makeSimpleAC(acEl, fetchUrl, getLabel, onPick, borderColor) {
+  acEl.style.cssText = 'position:fixed;border:1px solid ' + borderColor + ';'
+    + 'background:#1a2d44;border-radius:6px;list-style:none;margin:0;padding:4px 0;'
+    + 'z-index:9999;max-height:200px;overflow-y:auto;min-width:280px;display:none;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,.35);';
+  document.body.appendChild(acEl);
+
+  var actInput = null, timer = null;
+
+  function hide() { acEl.style.display = 'none'; }
+
+  return function attach(input) {
+    input.addEventListener('input', function () {
+      actInput = input;
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (q.length < 2) { hide(); return; }
+      timer = setTimeout(function () {
+        fetch(fetchUrl + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (actInput !== input) return;
+            acEl.innerHTML = '';
+            if (!data.length) { hide(); return; }
+            var r = input.getBoundingClientRect();
+            acEl.style.left  = r.left + 'px';
+            acEl.style.top   = (r.bottom + 2) + 'px';
+            acEl.style.width = Math.max(r.width, 290) + 'px';
+            data.forEach(function (item) {
+              var li = document.createElement('li');
+              li.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:0.8rem;color:var(--text)';
+              li.textContent = getLabel(item);
+              li.addEventListener('mouseover', function () { li.style.background = borderColor; li.style.color='#fff'; });
+              li.addEventListener('mouseout',  function () { li.style.background = ''; li.style.color = 'var(--text)'; });
+              li.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                onPick(item, input);
+                hide();
+              });
+              acEl.appendChild(li);
+            });
+            acEl.style.display = 'block';
+          })
+          .catch(hide);
+      }, 220);
+    });
+    input.addEventListener('focusout', function () { setTimeout(hide, 160); });
+  };
+}
+
+// Autocomplete de CUENTAS para la cuenta del banco
+var acCuentasEl = document.createElement('ul');
+var attachCuenta = makeSimpleAC(
+  acCuentasEl,
+  '/api/cuentas?q=',
+  function (i) { return i.nombre ? i.codigo + '  —  ' + i.nombre : i.codigo; },
+  function (i, inp) { inp.value = i.codigo; },
+  'var(--accent)'
+);
+attachCuenta(document.getElementById('cuentaBanco'));
+
+// Autocomplete de TERCEROS (NIT o nombre) para el NIT del banco
+var acTercerosEl = document.createElement('ul');
+var attachTercero = makeSimpleAC(
+  acTercerosEl,
+  '/api/terceros?q=',
+  function (i) { return i.nombre ? i.nit + '  —  ' + i.nombre : i.nit; },
+  function (i, inp) {
+    inp.value = i.nit;
+    var badgeId = inp.dataset.badge;
+    if (badgeId) document.getElementById(badgeId).textContent = i.nombre || '';
+  },
+  '#9b59b6'
+);
+document.querySelectorAll('.banco-nit-upload-ac').forEach(attachTercero);
+
+document.addEventListener('scroll', function () {
+  acCuentasEl.style.display = 'none';
+  acTercerosEl.style.display = 'none';
+}, true);
+</script>
+{% endblock %}

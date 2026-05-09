@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Error — contable-auto{% endblock %}
+{% block page_title %}Algo salió mal{% endblock %}
+
+{% block content %}
+<div style="text-align:center; padding:80px 40px">
+  <div style="font-size:4rem; margin-bottom:16px">⚠️</div>
+  <h2 style="color:var(--danger); margin-bottom:12px">{{ error or 'Error inesperado' }}</h2>
+  <p class="text-dim" style="margin-bottom:28px; max-width:480px; margin-inline:auto">
+    Ocurrió un problema durante el procesamiento. Revisa que el archivo RADIAN
+    tenga el formato correcto y vuelve a intentarlo.
+  </p>
+  <a href="{{ url_for('web.index') }}" class="btn btn-primary">← Volver al dashboard</a>
+</div>
+{% endblock %}

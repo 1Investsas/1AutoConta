@@ -191,29 +191,21 @@ def _generar_lineas_nomina(
     impuestos: list[dict],
 ) -> list[LineaContable]:
     """
-    Estructura del asiento para Nómina Individual:
-    1. [PENDIENTE] Gasto de nómina  → DÉBITO Total
-    2. 25050501 Salarios por pagar  → CRÉDITO Total
-    3. Impuestos si aplican
+    Estructura del asiento para Pago de Nómina Individual (RADIAN):
+    El RADIAN refleja el PAGO de nómina, no la causación.
+    1. 25050501 Salarios por pagar  → DÉBITO Total  (cancelación CxP)
+    2. [PENDIENTE] Cuenta disponible → CRÉDITO Total (banco/caja, selección manual)
     """
     lineas = []
     n = 1
 
-    lineas.append(_linea(cufe, n, CUENTA_PENDIENTE, "Gasto de nómina",
-                         total, 0.0, "Gasto nómina", tercero_nit, tercero_nombre))
-    n += 1
-
     lineas.append(_linea(cufe, n, "25050501", "Salarios por pagar",
-                         0.0, total, "Salarios por pagar", tercero_nit, tercero_nombre))
+                         total, 0.0, "Pago nómina", tercero_nit, tercero_nombre))
     n += 1
 
-    for imp in impuestos:
-        lineas.append(_linea(cufe, n, imp["cuenta_sugerida"] or CUENTA_PENDIENTE,
-                             imp["nombre_impuesto"],
-                             0.0, imp["valor"],
-                             imp["nombre_impuesto"],
-                             tercero_nit, tercero_nombre))
-        n += 1
+    lineas.append(_linea(cufe, n, CUENTA_PENDIENTE, "Cuenta disponible (banco/caja)",
+                         0.0, total, "Cuenta disponible", tercero_nit, tercero_nombre))
+    n += 1
 
     return lineas
 
@@ -319,6 +311,7 @@ def generar_preasiento(
 def generar_lote(
     df: pd.DataFrame,
     df_comprobantes: Optional[pd.DataFrame] = None,
+    db_path: Optional[str] = None,
 ) -> list[PreasientoContable]:
     """
     Genera los preasientos para todo el DataFrame procesado.
@@ -329,6 +322,8 @@ def generar_lote(
     Args:
         df:               DataFrame RADIAN enriquecido.
         df_comprobantes:  Maestro de comprobantes (opcional).
+        db_path:          Ruta a la BD SQLite para enriquecer con sugerencias
+                          (opcional, Fase 2). Si es None, se omite el motor.
 
     Returns:
         Lista de PreasientoContable, uno por cada fila del DataFrame.
@@ -355,4 +350,11 @@ def generar_lote(
         preasientos.append(preasiento)
 
     logger.info("Preasientos generados: %d", len(preasientos))
+
+    # --- Fase 2: enriquecer con sugerencias del historial ---
+    if db_path:
+        from app.sugerencias import enriquecer_con_sugerencias
+        preasientos = enriquecer_con_sugerencias(preasientos, db_path)
+
     return preasientos
+

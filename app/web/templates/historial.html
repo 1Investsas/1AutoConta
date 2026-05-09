@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Historial — contable-auto{% endblock %}
+{% block page_title %}Motor de Sugerencias — Historial{% endblock %}
+
+{% block content %}
+
+<div class="section-header">
+  <h2>Cuentas aprendidas</h2>
+  <span class="pill pill-ok">{{ total }} reglas en total</span>
+</div>
+
+<p class="text-dim mb-4" style="font-size:0.85rem">
+  El motor aprende automáticamente en cada procesamiento. Cuando aparece un tercero
+  conocido, la cuenta de mayor frecuencia reemplaza los campos <strong>[PENDIENTE]</strong>.
+</p>
+
+{% if entradas %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Clasificación</th>
+        <th>NIT Tercero</th>
+        <th>Tipo de línea</th>
+        <th>Cuenta sugerida</th>
+        <th class="text-right">Usos</th>
+        <th>Última vez</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entradas %}
+      <tr>
+        <td>
+          <span class="pill pill-ok" style="font-size:0.68rem">
+            {{ e.clasificacion | replace('_',' ') }}
+          </span>
+        </td>
+        <td><code style="font-size:0.8rem">{{ e.nit_tercero }}</code></td>
+        <td>{{ e.tipo_linea }}</td>
+        <td><code style="font-size:0.8rem; color:var(--success)">{{ e.cuenta }}</code></td>
+        <td class="text-right">
+          <strong>{{ e.usos }}</strong>
+        </td>
+        <td class="text-dim">{{ e.ultima_fecha or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div style="text-align:center; padding:60px; color:var(--text-dim)">
+  <div style="font-size:3rem; margin-bottom:12px">🧠</div>
+  <p>El historial está vacío.</p>
+  <p style="font-size:0.85rem; margin-top:8px">
+    Procesa al menos un archivo RADIAN para que el motor empiece a aprender.
+  </p>
+  <a href="{{ url_for('web.index') }}" class="btn btn-primary" style="margin-top:20px">
+    ⚡ Procesar RADIAN
+  </a>
+</div>
+{% endif %}
+
+{% endblock %}

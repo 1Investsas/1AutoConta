@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics — contable-auto{% endblock %}
+{% block page_title %}Reportería & Analytics{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .kpi-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .kpi-card.accent-blue::before   { background: var(--accent); }
+  .kpi-card.accent-green::before  { background: var(--success); }
+  .kpi-card.accent-orange::before { background: var(--orange); }
+  .kpi-card.accent-yellow::before { background: var(--warning); }
+
+  .kpi-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .kpi-value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+  }
+  .kpi-value.small { font-size: 1.2rem; padding-top: 4px; }
+  .kpi-sub {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  .charts-grid .full-width { grid-column: 1 / -1; }
+
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+  .chart-card h3 {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .chart-card canvas { max-height: 280px; }
+  .chart-card.tall canvas { max-height: 340px; }
+
+  .chart-toggle {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .chart-toggle button {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    font-family: var(--font);
+  }
+  .chart-toggle button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    gap: 10px;
+  }
+  .empty-state .icon { font-size: 2.5rem; }
+
+  @media (max-width: 900px) {
+    .charts-grid { grid-template-columns: 1fr; }
+    .charts-grid .full-width { grid-column: 1; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── KPI Cards ──────────────────────────────────────── -->
+<div class="kpi-grid">
+  <div class="kpi-card accent-blue">
+    <div class="kpi-label">Total documentos</div>
+    <div class="kpi-value">{{ "{:,}".format(kpis.total_docs) }}</div>
+    <div class="kpi-sub">{{ kpis.docs_este_mes }} este mes</div>
+  </div>
+  <div class="kpi-card accent-green">
+    <div class="kpi-label">Monto en ventas</div>
+    <div class="kpi-value small">${{ "{:,.0f}".format(kpis.monto_ventas) }}</div>
+    <div class="kpi-sub">{{ kpis.total_ventas }} documentos</div>
+  </div>
+  <div class="kpi-card accent-orange">
+    <div class="kpi-label">Monto en compras</div>
+    <div class="kpi-value small">${{ "{:,.0f}".format(kpis.monto_compras) }}</div>
+    <div class="kpi-sub">{{ kpis.total_compras }} documentos</div>
+  </div>
+  <div class="kpi-card accent-yellow">
+    <div class="kpi-label">Promedio por doc</div>
+    <div class="kpi-value small">${{ "{:,.0f}".format(kpis.promedio_por_doc) }}</div>
+    <div class="kpi-sub">{{ kpis.archivos_procesados }} archivo(s) procesado(s)</div>
+  </div>
+</div>
+
+{% if kpis.total_docs == 0 %}
+<div class="chart-card">
+  <div class="empty-state">
+    <div class="icon">📊</div>
+    <strong>Sin datos aún</strong>
+    <span>Procesa un archivo RADIAN para ver las métricas aquí.</span>
+    <a href="{{ url_for('web.index') }}" class="btn btn-primary" style="margin-top:8px">⚡ Ir al Dashboard</a>
+  </div>
+</div>
+{% else %}
+
+<!-- ── Gráficas ───────────────────────────────────────── -->
+<div class="charts-grid">
+
+  <!-- Evolución mensual (full width) -->
+  <div class="chart-card full-width tall">
+    <h3>
+      Evolución mensual — últimos 12 meses
+      <div class="chart-toggle">
+        <button class="active" id="btnMonto" onclick="toggleEvolucion('monto', this)">Monto</button>
+        <button id="btnCount" onclick="toggleEvolucion('count', this)">Documentos</button>
+      </div>
+    </h3>
+    <canvas id="chartEvolucion"></canvas>
+  </div>
+
+  <!-- Distribución por clasificación -->
+  <div class="chart-card">
+    <h3>Distribución por tipo</h3>
+    <canvas id="chartDistribucion"></canvas>
+  </div>
+
+  <!-- Top proveedores -->
+  <div class="chart-card">
+    <h3>Top proveedores (compras)</h3>
+    <canvas id="chartProveedores"></canvas>
+  </div>
+
+  <!-- Top clientes -->
+  <div class="chart-card">
+    <h3>Top clientes (ventas)</h3>
+    <canvas id="chartClientes"></canvas>
+  </div>
+
+</div>
+
+<!-- ── Actividad reciente ────────────────────────────── -->
+<div class="chart-card" style="margin-bottom:0">
+  <h3>Actividad reciente</h3>
+  {% if actividad %}
+  <div class="table-wrapper" style="margin-top:4px">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha emisión</th>
+          <th>Clasificación</th>
+          <th>Emisor</th>
+          <th>Receptor</th>
+          <th class="text-right">Total</th>
+          <th>Procesado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in actividad %}
+        <tr>
+          <td>{{ r.fecha_emision or '—' }}</td>
+          <td><span class="pill pill-ok">{{ (r.clasificacion or '').replace('_',' ') }}</span></td>
+          <td class="text-dim">{{ r.nombre_emisor or '—' }}</td>
+          <td class="text-dim">{{ r.nombre_receptor or '—' }}</td>
+          <td class="text-right moneda">${{ "{:,.0f}".format(r.total or 0) }}</td>
+          <td class="text-dim">{{ r.fecha_proceso or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state" style="padding:24px"><span>Sin actividad registrada.</span></div>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const DATA = {{ charts_json | safe }};
+
+/* ── Colores ─────────────────────────────────────── */
+const C = {
+  accent:  '#00c2ff',
+  green:   '#22c55e',
+  orange:  '#f97316',
+  yellow:  '#f59e0b',
+  purple:  '#a78bfa',
+  pink:    '#f472b6',
+  teal:    '#2dd4bf',
+  red:     '#ef4444',
+  border:  '#243a55',
+  textDim: '#64839e',
+};
+
+Chart.defaults.color = C.textDim;
+Chart.defaults.borderColor = C.border;
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+Chart.defaults.font.size   = 11;
+
+function fmtCOP(v) {
+  return '$' + Math.round(v).toLocaleString('es-CO');
+}
+
+/* ── Evolución mensual ───────────────────────────── */
+let evolMode = 'monto';
+const evolCtx = document.getElementById('chartEvolucion').getContext('2d');
+const evolChart = new Chart(evolCtx, {
+  type: 'bar',
+  data: {
+    labels: DATA.evolucion.labels,
+    datasets: [
+      {
+        label: 'Ventas',
+        data: DATA.evolucion.ventas_monto,
+        backgroundColor: 'rgba(34,197,94,0.7)',
+        borderColor: C.green,
+        borderWidth: 1,
+        borderRadius: 4,
+      },
+      {
+        label: 'Compras',
+        data: DATA.evolucion.compras_monto,
+        backgroundColor: 'rgba(249,115,22,0.7)',
+        borderColor: C.orange,
+        borderWidth: 1,
+        borderRadius: 4,
+      },
+      {
+        label: 'Otros',
+        data: DATA.evolucion.otros_monto,
+        backgroundColor: 'rgba(0,194,255,0.5)',
+        borderColor: C.accent,
+        borderWidth: 1,
+        borderRadius: 4,
+      },
+    ],
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: { position: 'top' },
+      tooltip: {
+        callbacks: {
+          label: ctx => ` ${ctx.dataset.label}: ${fmtCOP(ctx.parsed.y)}`,
+        },
+      },
+    },
+    scales: {
+      x: { grid: { color: C.border } },
+      y: {
+        grid: { color: C.border },
+        ticks: { callback: v => fmtCOP(v) },
+      },
+    },
+  },
+});
+
+function toggleEvolucion(mode, btn) {
+  evolMode = mode;
+  document.querySelectorAll('.chart-toggle button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  if (mode === 'monto') {
+    evolChart.data.datasets[0].data = DATA.evolucion.ventas_monto;
+    evolChart.data.datasets[1].data = DATA.evolucion.compras_monto;
+    evolChart.data.datasets[2].data = DATA.evolucion.otros_monto;
+    evolChart.options.scales.y.ticks.callback = v => fmtCOP(v);
+    evolChart.options.plugins.tooltip.callbacks.label = ctx =>
+      ` ${ctx.dataset.label}: ${fmtCOP(ctx.parsed.y)}`;
+  } else {
+    evolChart.data.datasets[0].data = DATA.evolucion.ventas_count;
+    evolChart.data.datasets[1].data = DATA.evolucion.compras_count;
+    evolChart.data.datasets[2].data = [];
+    evolChart.options.scales.y.ticks.callback = v => v;
+    evolChart.options.plugins.tooltip.callbacks.label = ctx =>
+      ` ${ctx.dataset.label}: ${ctx.parsed.y} docs`;
+  }
+  evolChart.update();
+}
+
+/* ── Distribución donut ──────────────────────────── */
+if (DATA.distribucion.labels.length > 0) {
+  const palette = [C.accent, C.green, C.orange, C.yellow, C.purple, C.pink, C.teal, C.red];
+  new Chart(document.getElementById('chartDistribucion'), {
+    type: 'doughnut',
+    data: {
+      labels: DATA.distribucion.labels,
+      datasets: [{
+        data: DATA.distribucion.counts,
+        backgroundColor: DATA.distribucion.labels.map((_, i) => palette[i % palette.length]),
+        borderColor: '#152233',
+        borderWidth: 2,
+        hoverOffset: 8,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth: 12, padding: 14 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.parsed} docs — ${fmtCOP(DATA.distribucion.montos[ctx.dataIndex])}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+/* ── Top proveedores bar horizontal ─────────────── */
+function buildHBar(canvasId, dataset) {
+  if (!dataset.labels.length) return;
+  new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels: dataset.labels,
+      datasets: [{
+        label: 'Monto',
+        data: dataset.montos,
+        backgroundColor: 'rgba(0,194,255,0.65)',
+        borderColor: C.accent,
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${fmtCOP(ctx.parsed.x)} (${dataset.counts[ctx.dataIndex]} docs)`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: C.border },
+          ticks: { callback: v => fmtCOP(v) },
+        },
+        y: { grid: { display: false } },
+      },
+    },
+  });
+}
+
+buildHBar('chartProveedores', DATA.top_proveed);
+buildHBar('chartClientes',    DATA.top_clientes);
+</script>
+{% endblock %}

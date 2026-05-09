@@ -98,6 +98,7 @@ class LineaContable:
     tercero_nit: str
     tercero_nombre: str
     es_pendiente: bool = False  # True si la cuenta aún debe definir el usuario
+    es_sugerida: bool = False   # True si la cuenta fue sugerida por el motor (Fase 2)
 
 
 @dataclass

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}contable-auto{% endblock %}</title>
+  <meta name="description" content="Sistema de automatización contable para {{ empresa }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="brand">contable-auto</div>
+    <div class="sub">{{ empresa }}</div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">Principal</div>
+    <a href="{{ url_for('web.index') }}"
+       class="nav-link {% if request.endpoint == 'web.index' %}active{% endif %}">
+      <span class="nav-icon">🏠</span> Dashboard
+    </a>
+    {% if session.get('ultimo_resultado') %}
+    <a href="{{ url_for('web.resultado') }}"
+       class="nav-link {% if request.endpoint == 'web.resultado' %}active{% endif %}">
+      <span class="nav-icon">📊</span> Último resultado
+    </a>
+    {% endif %}
+
+    <div class="nav-section">Motor</div>
+    <a href="{{ url_for('web.historial') }}"
+       class="nav-link {% if request.endpoint == 'web.historial' %}active{% endif %}">
+      <span class="nav-icon">🧠</span> Historial
+    </a>
+    {% if session.get('ultimo_resultado') %}
+    <a href="{{ url_for('web.descargar') }}"
+       class="nav-link">
+      <span class="nav-icon">⬇️</span> Descargar Excel
+    </a>
+    {% endif %}
+
+    <div class="nav-section">Reportería</div>
+    <a href="{{ url_for('web.analytics') }}"
+       class="nav-link {% if request.endpoint == 'web.analytics' %}active{% endif %}">
+      <span class="nav-icon">📈</span> Analytics
+    </a>
+
+    <div class="nav-section">Bancos</div>
+    <a href="{{ url_for('web.banco') }}"
+       class="nav-link {% if request.endpoint in ('web.banco','web.banco_previsualizar') %}active{% endif %}">
+      <span class="nav-icon">🏦</span> Extracto Banco
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    NIT {{ nit }}<br>
+    v1.0 — Fase 4
+  </div>
+</aside>
+
+<!-- ===== MAIN ===== -->
+<div class="main">
+  <header class="topbar">
+    <h1>{% block page_title %}contable-auto{% endblock %}</h1>
+    <span class="badge">{{ empresa }}</span>
+  </header>
+
+  <!-- Flash messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flash-container" id="flashContainer">
+    {% for cat, msg in messages %}
+    <div class="flash {{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endwith %}
+
+  <main class="page-content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loader"></div>
+  <p>Procesando RADIAN… esto puede tardar unos segundos</p>
+</div>
+
+<script>
+// Auto-dismiss flash messages
+setTimeout(() => {
+  const fc = document.getElementById('flashContainer');
+  if (fc) fc.style.opacity = '0', fc.style.transition = 'opacity 0.5s', setTimeout(() => fc.remove(), 500);
+}, 4500);
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const group = btn.dataset.tab;
+    document.querySelectorAll(`.tab-btn[data-tab="${group}"]`).forEach(b => b.classList.remove('active'));
+    document.querySelectorAll(`.tab-panel[data-tab="${group}"]`).forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+  });
+});
+
+// Drop-zone
+document.querySelectorAll('.drop-zone').forEach(zone => {
+  const input = zone.querySelector('input[type=file]');
+  const label = zone.querySelector('.file-chosen');
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) {
+      input.files = e.dataTransfer.files;
+      if (label) label.textContent = '📄 ' + input.files[0].name;
+    }
+  });
+  if (input) input.addEventListener('change', () => {
+    if (label && input.files[0]) label.textContent = '📄 ' + input.files[0].name;
+  });
+});
+
+// Show loading on form submit
+document.querySelectorAll('form[data-loading]').forEach(form => {
+  form.addEventListener('submit', () => {
+    document.getElementById('loadingOverlay').classList.add('visible');
+  });
+});
+</script>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -229,9 +229,9 @@ def procesar(radian, terceros, cuentas, comprobantes, output, db,
     # 6. Generar preasientos
     # ------------------------------------------------------------------
     from app.preasiento import generar_lote
-    console.print("\n[bold]6/8[/bold] Generando preasientos…")
-    preasientos = generar_lote(df, df_comp)
-    console.print(f"  [green]✓[/green] {len(preasientos)} preasientos generados.")
+    console.print("\n[bold]6/8[/bold] Generando preasientos\u2026")
+    preasientos = generar_lote(df, df_comp, db_path=db)
+    console.print(f"  [green]\u2713[/green] {len(preasientos)} preasientos generados.")
 
     # ------------------------------------------------------------------
     # 7. Validar y recopilar excepciones
@@ -299,10 +299,80 @@ def procesar(radian, terceros, cuentas, comprobantes, output, db,
         sys.exit(1)
 
     # ------------------------------------------------------------------
+    # Alimentar historial para mejorar sugerencias futuras
+    # ------------------------------------------------------------------
+    from app.sugerencias import registrar_lote_confirmaciones
+    n_confirmaciones = registrar_lote_confirmaciones(preasientos, db_path=db)
+    if n_confirmaciones:
+        console.print(f"  [dim]Motor de sugerencias: {n_confirmaciones} cuenta(s) registradas en historial.[/dim]")
+
+    # ------------------------------------------------------------------
     # Resumen final
     # ------------------------------------------------------------------
     console.print()
     _imprimir_resumen_final(preasientos, excepciones, ruta_salida)
+
+
+@cli.command("historial")
+@click.option(
+    "--db",
+    default=DB_PATH,
+    help=f"Ruta a la base de datos SQLite. [default: {DB_PATH}]",
+    show_default=True,
+)
+@click.option(
+    "--top", "-n",
+    default=20,
+    help="Número de entradas a mostrar.",
+    show_default=True,
+)
+def historial(db, top):
+    """
+    Muestra las cuentas contables aprendidas por el motor de sugerencias.
+
+    Lista las combinaciones (clasificación, tercero, tipo de línea) con
+    más confirmaciones, en orden descendente de uso.
+    """
+    from app.database import get_connection
+    conn = get_connection(db)
+    try:
+        rows = conn.execute(
+            """
+            SELECT clasificacion, nit_tercero, tipo_linea, cuenta, usos, ultima_vez
+            FROM historial_cuentas
+            ORDER BY usos DESC
+            LIMIT ?
+            """,
+            (top,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        console.print("[yellow]El historial está vacío. Procesa al menos un RADIAN primero.[/yellow]")
+        return
+
+    tabla = Table(title="Motor de Sugerencias — Historial de Cuentas", box=box.SIMPLE)
+    tabla.add_column("Clasificación",  style="cyan",   no_wrap=True)
+    tabla.add_column("NIT Tercero",    style="magenta", no_wrap=True)
+    tabla.add_column("Tipo Línea",    style="yellow",  no_wrap=True)
+    tabla.add_column("Cuenta",         style="green",   no_wrap=True)
+    tabla.add_column("Usos",           justify="right")
+    tabla.add_column("Última vez",     style="dim")
+
+    for row in rows:
+        tabla.add_row(
+            row["clasificacion"],
+            row["nit_tercero"],
+            row["tipo_linea"],
+            row["cuenta"],
+            str(row["usos"]),
+            (row["ultima_vez"] or "")[:19],
+        )
+
+    console.print(tabla)
+
+
 
 
 def _cargar_opcional(funcion, filepath: str, nombre: str, db_path: str):
