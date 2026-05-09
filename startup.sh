@@ -15,4 +15,4 @@ fi
 
 # Start gunicorn - use PORT env var set by Azure
 PORT="${PORT:-8000}"
-exec gunicorn --bind=0.0.0.0:"$PORT" --timeout=600 --workers=2 --access-logfile=- --error-logfile=- "app:app"
+exec gunicorn --bind=0.0.0.0:"$PORT" --timeout=600 --workers=2 --access-logfile=- --error-logfile=- "application:app"
