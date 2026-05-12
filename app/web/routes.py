@@ -568,16 +568,10 @@ def api_cuentas():
 
         q_lower = q.lower()
 
-        # Detectar columna de código (primera columna con "dig" o "cod" o la primera del df)
-        cod_col = next(
-            (c for c in df.columns if "dig" in c.lower() or "cód" in c.lower() or "cod" in c.lower()),
-            df.columns[0],
-        )
-        # Detectar columna de nombre
-        nom_col = next(
-            (c for c in df.columns if "nombre" in c.lower() or "descrip" in c.lower()),
-            None,
-        )
+        # Las primeras 2 columnas no-Unnamed son: código y nombre
+        valid_cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
+        cod_col = valid_cols[0] if valid_cols else df.columns[0]
+        nom_col = valid_cols[1] if len(valid_cols) > 1 else None
 
         codigos = df[cod_col].astype(str).str.strip()
         mask = codigos.str.lower().str.startswith(q_lower)
