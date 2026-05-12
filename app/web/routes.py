@@ -563,11 +563,8 @@ def api_cuentas():
     if len(q) < 2:
         return jsonify([])
 
-    cuentas_path = str(
-        Path(_project_root()) / DATA_DIR.rstrip("/") / "Listado_de_Cuentas_Contables.xlsx"
-    )
-
     try:
+        cuentas_path = store.get_local_data_path("Listado_de_Cuentas_Contables.xlsx")
         df = cargar_maestro_cuentas(cuentas_path)
     except Exception:
         return jsonify([])
@@ -608,11 +605,8 @@ def api_terceros():
     if len(q) < 2:
         return jsonify([])
 
-    terceros_path = str(
-        Path(_project_root()) / DATA_DIR.rstrip("/") / "Listado_de_Terceros.xlsx"
-    )
-
     try:
+        terceros_path = store.get_local_data_path("Listado_de_Terceros.xlsx")
         df = cargar_maestro_terceros(terceros_path)
     except Exception:
         return jsonify([])
