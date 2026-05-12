@@ -571,20 +571,25 @@ def api_cuentas():
 
     q_lower = q.lower()
     cod_col = COL_CUENTAS_CODIGO   # "Código"
-    nom_col = "Nombre"
+
+    # Detectar columna de nombre — el export de SIIGO puede variar
+    nom_col = next(
+        (c for c in df.columns if c.strip().lower() in ("nombre", "nombre cuenta", "descripción", "descripcion")),
+        None,
+    )
 
     codigos = df[cod_col].astype(str).str.strip()
     mask = codigos.str.lower().str.startswith(q_lower)
-    if nom_col in df.columns:
+    if nom_col:
         mask |= df[nom_col].astype(str).str.lower().str.contains(q_lower, regex=False)
 
-    cols = [cod_col, nom_col] if nom_col in df.columns else [cod_col]
+    cols = [cod_col, nom_col] if nom_col else [cod_col]
     resultados = df[mask][cols].head(15)
 
     out = [
         {
             "codigo": str(row[cod_col]).strip(),
-            "nombre": str(row[nom_col]).strip() if nom_col in df.columns else "",
+            "nombre": str(row[nom_col]).strip() if nom_col else "",
         }
         for _, row in resultados.iterrows()
     ]
