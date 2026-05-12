@@ -135,7 +135,7 @@ def procesar():
         f = request.files.get(key)
         if f and f.filename and _allowed(f.filename):
             file_bytes = f.read()
-            ref = _save_upload(file_bytes, f.filename, upload_folder)
+            ref = store.save_file(file_bytes, "data", default_name)
             path = store.load_file(ref)
         else:
             try:
