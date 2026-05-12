@@ -557,7 +557,6 @@ def api_cuentas():
     """Retorna cuentas que coincidan con el query por código o nombre. Máx 15."""
     from flask import jsonify
     from app.importador import cargar_maestro_cuentas
-    from app.config import COL_CUENTAS_CODIGO
 
     q = request.args.get("q", "").strip()
     if len(q) < 2:
@@ -566,34 +565,40 @@ def api_cuentas():
     try:
         cuentas_path = store.get_local_data_path("Listado_de_Cuentas_Contables.xlsx")
         df = cargar_maestro_cuentas(cuentas_path)
-    except Exception:
+
+        q_lower = q.lower()
+
+        # Detectar columna de código (primera columna con "dig" o "cod" o la primera del df)
+        cod_col = next(
+            (c for c in df.columns if "dig" in c.lower() or "cód" in c.lower() or "cod" in c.lower()),
+            df.columns[0],
+        )
+        # Detectar columna de nombre
+        nom_col = next(
+            (c for c in df.columns if "nombre" in c.lower() or "descrip" in c.lower()),
+            None,
+        )
+
+        codigos = df[cod_col].astype(str).str.strip()
+        mask = codigos.str.lower().str.startswith(q_lower)
+        if nom_col:
+            mask |= df[nom_col].astype(str).str.lower().str.contains(q_lower, regex=False)
+
+        cols = [cod_col, nom_col] if nom_col else [cod_col]
+        resultados = df[mask][cols].head(15)
+
+        out = [
+            {
+                "codigo": str(row[cod_col]).strip(),
+                "nombre": str(row[nom_col]).strip() if nom_col else "",
+            }
+            for _, row in resultados.iterrows()
+        ]
+        return jsonify(out)
+    except Exception as exc:
+        logger.exception("Error en /api/cuentas")
         return jsonify([])
 
-    q_lower = q.lower()
-    cod_col = COL_CUENTAS_CODIGO   # "Código"
-
-    # Detectar columna de nombre — el export de SIIGO puede variar
-    nom_col = next(
-        (c for c in df.columns if c.strip().lower() in ("nombre", "nombre cuenta", "descripción", "descripcion")),
-        None,
-    )
-
-    codigos = df[cod_col].astype(str).str.strip()
-    mask = codigos.str.lower().str.startswith(q_lower)
-    if nom_col:
-        mask |= df[nom_col].astype(str).str.lower().str.contains(q_lower, regex=False)
-
-    cols = [cod_col, nom_col] if nom_col else [cod_col]
-    resultados = df[mask][cols].head(15)
-
-    out = [
-        {
-            "codigo": str(row[cod_col]).strip(),
-            "nombre": str(row[nom_col]).strip() if nom_col else "",
-        }
-        for _, row in resultados.iterrows()
-    ]
-    return jsonify(out)
 
 
 # ---------------------------------------------------------------------------
@@ -601,21 +606,6 @@ def api_cuentas():
 # ---------------------------------------------------------------------------
 
 
-
-@bp.route("/api/debug-cuentas")
-def api_debug_cuentas():
-    from flask import jsonify
-    from app.importador import cargar_maestro_cuentas
-    try:
-        cuentas_path = store.get_local_data_path("Listado_de_Cuentas_Contables.xlsx")
-        df = cargar_maestro_cuentas(cuentas_path)
-        return jsonify({
-            "filas": len(df),
-            "columnas": list(df.columns),
-            "muestra": df.head(3).to_dict(orient="records"),
-        })
-    except Exception as exc:
-        return jsonify({"error": str(exc)})
 @bp.route("/api/terceros")
 def api_terceros():
     """Retorna terceros que coincidan con el query por NIT o nombre. Máx 15."""
