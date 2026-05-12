@@ -801,9 +801,10 @@ def banco_previsualizar():
     os.makedirs(upload_folder, exist_ok=True)
 
     csv_path = _save_upload(csv_file.read(), csv_file.filename, upload_folder)
+    csv_local_path = store.load_file(csv_path)
 
     try:
-        movimientos = leer_csv_banco(csv_path)
+        movimientos = leer_csv_banco(csv_local_path)
     except Exception as exc:
         logger.exception("Error al leer CSV del banco")
         flash(f"Error al leer el CSV: {exc}", "error")
