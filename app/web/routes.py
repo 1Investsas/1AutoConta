@@ -600,6 +600,22 @@ def api_cuentas():
 # GET /api/terceros — Autocompletar terceros por NIT o nombre
 # ---------------------------------------------------------------------------
 
+
+
+@bp.route("/api/debug-cuentas")
+def api_debug_cuentas():
+    from flask import jsonify
+    from app.importador import cargar_maestro_cuentas
+    try:
+        cuentas_path = store.get_local_data_path("Listado_de_Cuentas_Contables.xlsx")
+        df = cargar_maestro_cuentas(cuentas_path)
+        return jsonify({
+            "filas": len(df),
+            "columnas": list(df.columns),
+            "muestra": df.head(3).to_dict(orient="records"),
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)})
 @bp.route("/api/terceros")
 def api_terceros():
     """Retorna terceros que coincidan con el query por NIT o nombre. Máx 15."""
