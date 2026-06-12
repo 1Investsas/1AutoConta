@@ -29,15 +29,18 @@ load_dotenv(Path(__file__).parent / ".env")
 
 
 def _check_secret_key() -> None:
-    """Avisa si se está usando la clave de desarrollo en producción."""
+    """Aborta el arranque si no hay una clave secreta segura configurada."""
     key = os.getenv("FLASK_SECRET_KEY", "")
     if not key or "dev" in key.lower() or "cambiar" in key.lower():
         print(
-            "\n  ⚠️  ADVERTENCIA: FLASK_SECRET_KEY no configurada o usa el valor de desarrollo.\n"
-            "     Agrega una clave segura a tu archivo .env:\n"
-            "     FLASK_SECRET_KEY=<cadena aleatoria larga>\n",
+            "\n  ✗ ERROR: FLASK_SECRET_KEY no configurada o usa el valor de desarrollo.\n"
+            "    En producción es obligatoria una clave segura. Genera una con:\n"
+            "      python -c \"import secrets; print(secrets.token_hex(32))\"\n"
+            "    y agrégala a tu archivo .env:\n"
+            "      FLASK_SECRET_KEY=<cadena generada>\n",
             file=sys.stderr,
         )
+        sys.exit(1)
 
 
 def _setup_logging(level: str) -> None:

@@ -35,6 +35,7 @@
 
   <form method="POST" action="{{ url_for('web.banco_previsualizar') }}"
         enctype="multipart/form-data" data-loading="true">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
     <!-- Drag & Drop CSV -->
     <div class="drop-zone" id="dropZoneBanco">

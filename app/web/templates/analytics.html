@@ -234,7 +234,7 @@
 
 {% block extra_scripts %}
 <script>
-const DATA = {{ charts_json | safe }};
+const DATA = {{ charts | tojson }};
 
 /* ── Colores ─────────────────────────────────────── */
 const C = {

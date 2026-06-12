@@ -105,18 +105,21 @@ class TestGenerarPreasientoFacturaVenta:
 
 
 class TestGenerarPreasientoNomina:
-    def test_primera_linea_pendiente_debito(self):
+    # El RADIAN refleja el PAGO de la nómina, no la causación:
+    # línea 1 = 25050501 Salarios por pagar al débito (cancela la CxP),
+    # línea 2 = [PENDIENTE] al crédito (banco/caja, selección manual).
+    def test_primera_linea_salarios_debito(self):
         doc = _documento_base("NOMINA", NIT_EMPRESA_TEST, "99887766", total=2000000.0)
         tercero = {"nit": "99887766", "nombre": "EMPLEADO"}
         p = generar_preasiento(doc, tercero, [], 2000000.0, "NOMINA")
-        assert p.lineas[0].cuenta == CUENTA_PENDIENTE
+        assert p.lineas[0].cuenta == "25050501"
         assert p.lineas[0].debito == 2000000.0
 
-    def test_segunda_linea_salarios(self):
+    def test_segunda_linea_pendiente_credito(self):
         doc = _documento_base("NOMINA", NIT_EMPRESA_TEST, "99887766", total=2000000.0)
         tercero = {"nit": "99887766", "nombre": "EMPLEADO"}
         p = generar_preasiento(doc, tercero, [], 2000000.0, "NOMINA")
-        assert p.lineas[1].cuenta == "25050501"
+        assert p.lineas[1].cuenta == CUENTA_PENDIENTE
         assert p.lineas[1].credito == 2000000.0
 
 

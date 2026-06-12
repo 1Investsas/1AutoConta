@@ -41,6 +41,7 @@
 
   <form method="POST" action="{{ url_for('web.procesar') }}"
         enctype="multipart/form-data" data-loading="true">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
     <!-- Drag & Drop RADIAN -->
     <div class="drop-zone" id="dropZoneRadian">

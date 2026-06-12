@@ -4,6 +4,7 @@ __pycache__/
 *.pyd
 .env
 db/*.db
+db/.flask_secret_key
 output/*.xlsx
 input/*.xlsx
 data/*.xlsx
@@ -17,5 +18,6 @@ build/
 .DS_Store
 Thumbs.db
 uploads/
+web_sessions/
 .azure/
 *.tmp

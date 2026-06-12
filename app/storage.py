@@ -146,6 +146,19 @@ def get_download_bytes(reference: str) -> bytes:
         return Path(reference).read_bytes()
 
 
+def delete_file(reference: str) -> None:
+    """Elimina un archivo del almacenamiento (ignora errores si no existe)."""
+    try:
+        if reference.startswith("blob://"):
+            blob_name = reference[7:]
+            container = _get_container_client()
+            container.delete_blob(blob_name)
+        else:
+            Path(reference).unlink(missing_ok=True)
+    except Exception:
+        logger.debug("No se pudo eliminar la referencia: %s", reference)
+
+
 def file_exists(reference: str) -> bool:
     """Verifica si un archivo existe en el almacenamiento."""
     if reference.startswith("blob://"):

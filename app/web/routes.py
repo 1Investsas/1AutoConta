@@ -7,7 +7,7 @@ Blueprint con 6 rutas que reutilizan exactamente el mismo pipeline que el CLI.
 import io
 import logging
 import os
-import tempfile
+import uuid
 from pathlib import Path
 
 from flask import (
@@ -16,14 +16,20 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from app.config import DATA_DIR, DB_PATH, OUTPUT_DIR, NOMBRE_EMPRESA, NIT_EMPRESA
+from app.config import DATA_DIR, DB_PATH, NOMBRE_EMPRESA, NIT_EMPRESA
 from app import storage as store
+from app.web import session_store
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("web", __name__)
 
 ALLOWED_EXT     = {"xlsx", "xls"}
 ALLOWED_EXT_CSV = {"csv", "txt"}
+
+# Claves de sesión: solo guardan una referencia pequeña; los datos completos
+# viven server-side (ver app/web/session_store.py).
+KEY_RESULTADO = "resultado_ref"
+KEY_BANCO     = "banco_ref"
 
 
 def _allowed(filename: str) -> bool:
@@ -42,13 +48,31 @@ def _project_root() -> str:
     )
 
 
-def _save_upload(file_bytes: bytes, filename: str, folder: str) -> str:
+def _save_upload(file_bytes: bytes, filename: str) -> str:
     """Guarda los bytes de un archivo subido y retorna la referencia.
 
     En modo cloud sube a Azure Blob Storage; en modo local guarda en disco.
+    El nombre lleva un prefijo único para que dos usuarios concurrentes
+    no se sobreescriban los archivos entre sí.
     """
     fname = secure_filename(filename)
-    return store.save_file(file_bytes, "uploads", fname)
+    return store.save_file(file_bytes, "uploads", f"{uuid.uuid4().hex[:8]}_{fname}")
+
+
+# Cache en memoria de los maestros Excel para los endpoints de autocompletar,
+# invalidado por fecha de modificación del archivo.
+_MAESTROS_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def _cargar_maestro_cacheado(loader, path: str):
+    mtime = os.path.getmtime(path)
+    key = f"{loader.__name__}:{path}"
+    hit = _MAESTROS_CACHE.get(key)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    df = loader(path)
+    _MAESTROS_CACHE[key] = (mtime, df)
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -58,12 +82,9 @@ def _save_upload(file_bytes: bytes, filename: str, folder: str) -> str:
 @bp.route("/")
 def index():
     """Dashboard principal: estadísticas de la BD + formulario de upload."""
-    from app.database import get_connection, inicializar_db
+    from app.database import get_connection
 
-    db = DB_PATH
-    inicializar_db(db)
-
-    conn = get_connection(db)
+    conn = get_connection(DB_PATH)
     try:
         total_docs = conn.execute(
             "SELECT COUNT(*) FROM documentos_importados"
@@ -106,10 +127,7 @@ def index():
 
 @bp.route("/procesar", methods=["POST"])
 def procesar():
-    """Recibe archivos, corre el pipeline y guarda resultado en sesión."""
-    upload_folder = os.path.join(_project_root(), "uploads")
-    os.makedirs(upload_folder, exist_ok=True)
-
+    """Recibe archivos, corre el pipeline y guarda el resultado server-side."""
     # Validar archivo RADIAN obligatorio
     if "radian" not in request.files or request.files["radian"].filename == "":
         flash("Debes seleccionar un archivo RADIAN.", "error")
@@ -122,7 +140,7 @@ def procesar():
 
     # Leer bytes en memoria para evitar problemas de ruta en Windows
     radian_bytes = radian_file.read()
-    radian_ref = _save_upload(radian_bytes, radian_file.filename, upload_folder)
+    radian_ref = _save_upload(radian_bytes, radian_file.filename)
     radian_path = store.load_file(radian_ref)  # ruta local para el pipeline
 
     # Archivos maestros opcionales
@@ -157,7 +175,7 @@ def procesar():
             radian_path, terceros_path, cuentas_path,
             comprobantes_path, db, incluir_dup,
         )
-        session["ultimo_resultado"] = resultado
+        session_store.guardar(KEY_RESULTADO, resultado)
         flash(f"✓ Procesados {resultado['n_docs']} documentos. "
               f"{resultado['n_excepciones']} con excepciones.", "success")
         return redirect(url_for("web.resultado"))
@@ -250,7 +268,10 @@ def _ejecutar_pipeline(
                 db_path=db,
             )
         except Exception:
-            pass
+            logger.exception(
+                "No se pudo registrar el documento CUFE=%s en la BD",
+                row.get("CUFE/CUDE", ""),
+            )
 
     # 11. Alimentar historial
     registrar_lote_confirmaciones(preasientos, db_path=db)
@@ -284,7 +305,9 @@ def _ejecutar_pipeline(
             "cufe_full": p.cufe,
             "clasificacion": p.clasificacion,
             "tipo_documento": p.tipo_documento,
+            "codigo_comprobante": p.codigo_comprobante,
             "titulo_comprobante": p.titulo_comprobante,
+            "base_gravable": p.base_gravable,
             "fecha_emision": p.fecha_emision.strftime("%d/%m/%Y") if p.fecha_emision else "",
             "folio": p.folio,
             "prefijo": p.prefijo,
@@ -314,7 +337,7 @@ def _ejecutar_pipeline(
 @bp.route("/resultado")
 def resultado():
     """Muestra los preasientos y excepciones del último proceso."""
-    datos = session.get("ultimo_resultado")
+    datos = session_store.cargar(KEY_RESULTADO)
     if not datos:
         flash("No hay resultados. Procesa primero un archivo RADIAN.", "info")
         return redirect(url_for("web.index"))
@@ -345,8 +368,8 @@ def confirmar():
     else:
         registrar_confirmacion(clasificacion, nit_tercero, tipo_linea, cuenta, DB_PATH)
 
-        # Actualizar la cuenta en los datos de sesión para reflejarla en pantalla
-        resultado = session.get("ultimo_resultado")
+        # Actualizar la cuenta en el resultado guardado para reflejarla en pantalla
+        resultado = session_store.cargar(KEY_RESULTADO)
         if resultado and cufe_full and numero_linea:
             try:
                 num = int(numero_linea)
@@ -358,8 +381,7 @@ def confirmar():
                                 linea["es_pendiente"] = False
                                 break
                         break
-                session["ultimo_resultado"] = resultado
-                session.modified = True
+                session_store.guardar(KEY_RESULTADO, resultado)
             except (ValueError, TypeError):
                 pass
 
@@ -405,7 +427,7 @@ def historial():
 @bp.route("/descargar")
 def descargar():
     """Envía el archivo Excel generado como descarga."""
-    datos = session.get("ultimo_resultado")
+    datos = session_store.cargar(KEY_RESULTADO)
     if not datos or not datos.get("excel_path"):
         flash("No hay archivo Excel disponible.", "error")
         return redirect(url_for("web.index"))
@@ -432,10 +454,9 @@ def descargar():
 def exportar_siigo():
     """Genera el Excel en formato SIIGO y lo envía como descarga (o ZIP si hay varios)."""
     import zipfile
-    import io
     from app.siigo.exportador_siigo import exportar_siigo as _exportar
 
-    datos = session.get("ultimo_resultado")
+    datos = session_store.cargar(KEY_RESULTADO)
     if not datos or not datos.get("preasientos"):
         flash("No hay resultados para exportar. Procesa primero un archivo RADIAN.", "error")
         return redirect(url_for("web.index"))
@@ -479,11 +500,10 @@ def exportar_siigo():
         for ruta in rutas:
             zf.write(ruta, Path(ruta).name)
     buf.seek(0)
-    ts = rutas[0].rsplit("_", 1)[0].split("/")[-1]
     return send_file(
         buf,
         as_attachment=True,
-        download_name=f"siigo_comprobantes.zip",
+        download_name="siigo_comprobantes.zip",
         mimetype="application/zip",
     )
 
@@ -495,15 +515,11 @@ def exportar_siigo():
 @bp.route("/analytics")
 def analytics():
     """Dashboard de reportería y analytics contable."""
-    import json
     from app.database import (
-        inicializar_db, get_connection,
         obtener_kpis, obtener_evolucion_mensual,
         obtener_distribucion_clasificacion,
         obtener_top_terceros, obtener_actividad_reciente,
     )
-
-    inicializar_db(DB_PATH)
 
     kpis          = obtener_kpis(DB_PATH)
     evolucion     = obtener_evolucion_mensual(DB_PATH, meses=12)
@@ -544,7 +560,7 @@ def analytics():
         empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
         kpis=kpis,
         actividad=actividad,
-        charts_json=json.dumps(charts, ensure_ascii=False),
+        charts=charts,
     )
 
 
@@ -564,7 +580,7 @@ def api_cuentas():
 
     try:
         cuentas_path = store.get_local_data_path("Listado_de_Cuentas_Contables.xlsx")
-        df = cargar_maestro_cuentas(cuentas_path)
+        df = _cargar_maestro_cacheado(cargar_maestro_cuentas, cuentas_path)
 
         q_lower = q.lower()
 
@@ -612,7 +628,7 @@ def api_terceros():
 
     try:
         terceros_path = store.get_local_data_path("Listado_de_Terceros.xlsx")
-        df = cargar_maestro_terceros(terceros_path)
+        df = _cargar_maestro_cacheado(cargar_maestro_terceros, terceros_path)
     except Exception:
         return jsonify([])
 
@@ -688,7 +704,7 @@ def test_procesar():
             radian_path, terceros_path, cuentas_path,
             comprobantes_path, db, incluir_duplicados=True,
         )
-        session["ultimo_resultado"] = resultado
+        session_store.guardar(KEY_RESULTADO, resultado)
         flash(
             f"✓ (TEST) Procesados {resultado['n_docs']} documentos desde "
             f"{os.path.basename(radian_path)}. "
@@ -796,10 +812,7 @@ def banco_previsualizar():
 
     nit_banco = request.form.get("nit_banco", "").strip()
 
-    upload_folder = os.path.join(_project_root(), "uploads")
-    os.makedirs(upload_folder, exist_ok=True)
-
-    csv_path = _save_upload(csv_file.read(), csv_file.filename, upload_folder)
+    csv_path = _save_upload(csv_file.read(), csv_file.filename)
     csv_local_path = store.load_file(csv_path)
 
     try:
@@ -813,9 +826,11 @@ def banco_previsualizar():
         flash("El archivo CSV no contiene movimientos válidos.", "error")
         return redirect(url_for("web.banco"))
 
-    session["banco_movimientos"]   = [a_dict(m) for m in movimientos]
-    session["banco_cuenta_banco"]  = cuenta_banco
-    session["banco_nit_banco"]     = nit_banco
+    session_store.guardar(KEY_BANCO, {
+        "movimientos":  [a_dict(m) for m in movimientos],
+        "cuenta_banco": cuenta_banco,
+        "nit_banco":    nit_banco,
+    })
 
     # Preparar datos para el template
     # Movimientos principales (no-4x1000 con padre); 4x1000 huérfanos SÍ aparecen
@@ -872,17 +887,17 @@ def banco_previsualizar():
 @bp.route("/banco/exportar", methods=["POST"])
 def banco_exportar():
     """Recibe las asignaciones, genera el Excel SIIGO y lo envía como descarga."""
-    import zipfile, io
+    import zipfile
     from app.banco.importador_banco import desde_dict
     from app.banco.exportador_banco import exportar_banco_siigo
     from app.config import BANCO_CUENTA_DEFAULT
 
-    movimientos_raw = session.get("banco_movimientos")
-    if not movimientos_raw:
+    datos_banco = session_store.cargar(KEY_BANCO)
+    if not datos_banco or not datos_banco.get("movimientos"):
         flash("No hay movimientos en sesión. Sube el CSV primero.", "error")
         return redirect(url_for("web.banco"))
 
-    movimientos = [desde_dict(d) for d in movimientos_raw]
+    movimientos = [desde_dict(d) for d in datos_banco["movimientos"]]
     cuenta_banco = request.form.get("cuenta_banco", BANCO_CUENTA_DEFAULT).strip() or BANCO_CUENTA_DEFAULT
     nit_banco    = request.form.get("nit_banco",    "").strip()
 

@@ -108,6 +108,7 @@
                 <!-- Inline confirm form -->
                 <form class="confirm-form" method="POST"
                       action="{{ url_for('web.confirmar') }}">
+                  <input type="hidden" name="csrf_token"     value="{{ csrf_token() }}">
                   <input type="hidden" name="clasificacion"  value="{{ p.clasificacion }}">
                   <input type="hidden" name="nit_tercero"    value="{{ p.tercero_nit }}">
                   <input type="hidden" name="tipo_linea"     value="{{ linea.concepto | lower | replace(' ','_') }}">
@@ -136,6 +137,7 @@
                 <div id="edit_{{ edit_id }}" style="display:none">
                   <form class="confirm-form" method="POST"
                         action="{{ url_for('web.confirmar') }}">
+                    <input type="hidden" name="csrf_token"     value="{{ csrf_token() }}">
                     <input type="hidden" name="clasificacion"  value="{{ p.clasificacion }}">
                     <input type="hidden" name="nit_tercero"    value="{{ p.tercero_nit }}">
                     <input type="hidden" name="tipo_linea"     value="{{ linea.concepto | lower | replace(' ','_') }}">
@@ -225,6 +227,7 @@
       Si supera las 500 filas se descargará un ZIP con varios archivos.
     </p>
     <form method="POST" action="{{ url_for('web.exportar_siigo') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label class="form-check" style="margin-bottom:16px">
         <input type="checkbox" name="incluir_pendientes" checked>
         Incluir líneas con cuenta <strong>[PENDIENTE]</strong>
