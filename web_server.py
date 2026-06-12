@@ -14,7 +14,9 @@ from app.web import create_app
 @click.command()
 @click.option("--host", default="127.0.0.1", show_default=True, help="Host del servidor.")
 @click.option("--port", default=5000, show_default=True, help="Puerto del servidor.")
-@click.option("--debug/--no-debug", default=True, show_default=True, help="Modo debug con hot-reload.")
+@click.option("--debug/--no-debug", default=False, show_default=True,
+              help="Modo debug con hot-reload. NO usar en producción: "
+                   "el debugger de Werkzeug permite ejecutar código remoto.")
 def serve(host, port, debug):
     """Arranca el servidor web de contable-auto."""
     app = create_app()

@@ -202,6 +202,7 @@
 
 <!-- Encabezado con cuenta bancaria editable -->
 <form method="POST" action="{{ url_for('web.banco_exportar') }}" id="bancoForm">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
 <div class="banco-header">
   <span style="font-weight:600; font-size:0.95rem">Cuenta bancaria:</span>
