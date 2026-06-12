@@ -132,6 +132,7 @@ def validar_cuenta_transaccional(
 def validar_coherencia_emisor(
     clasificacion: str,
     nit_emisor: str,
+    nit_empresa: Optional[str] = None,
 ) -> bool:
     """
     Verifica que la clasificación sea coherente con el NIT emisor.
@@ -147,7 +148,8 @@ def validar_coherencia_emisor(
         True si la combinación es coherente.
     """
     nit = nit_emisor.strip()
-    es_empresa = nit == NIT_EMPRESA.strip()
+    nit_propio = (nit_empresa if nit_empresa is not None else NIT_EMPRESA).strip()
+    es_empresa = nit == nit_propio
 
     emitidos_por_empresa = {
         "FACTURA_VENTA", "DOCUMENTO_SOPORTE", "NOMINA",

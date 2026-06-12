@@ -16,8 +16,12 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from app.config import DATA_DIR, DB_PATH, NOMBRE_EMPRESA, NIT_EMPRESA
+from app.config import DATA_DIR, DB_PATH
 from app import storage as store
+from app.empresas import (
+    listar_empresas, obtener_empresa, crear_empresa, eliminar_empresa,
+    FORMATO_BANCO_DEFAULT,
+)
 from app.web import session_store
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,24 @@ ALLOWED_EXT_CSV = {"csv", "txt"}
 # viven server-side (ver app/web/session_store.py).
 KEY_RESULTADO = "resultado_ref"
 KEY_BANCO     = "banco_ref"
+KEY_EMPRESA   = "empresa_id"
+
+
+def _empresa_actual():
+    """Retorna la Empresa seleccionada en la sesión (o la principal)."""
+    return obtener_empresa(session.get(KEY_EMPRESA))
+
+
+@bp.app_context_processor
+def _inyectar_empresas():
+    """Hace disponibles la empresa actual y la lista en todos los templates."""
+    emp = _empresa_actual()
+    return {
+        "empresa_actual": emp,
+        "empresas_disponibles": listar_empresas(),
+        "empresa": emp.nombre,
+        "nit": emp.nit,
+    }
 
 
 def _allowed(filename: str) -> bool:
@@ -82,9 +104,11 @@ def _cargar_maestro_cacheado(loader, path: str):
 @bp.route("/")
 def index():
     """Dashboard principal: estadísticas de la BD + formulario de upload."""
-    from app.database import get_connection
+    from app.database import get_connection, inicializar_db
 
-    conn = get_connection(DB_PATH)
+    emp = _empresa_actual()
+    inicializar_db(emp.db_path)
+    conn = get_connection(emp.db_path)
     try:
         total_docs = conn.execute(
             "SELECT COUNT(*) FROM documentos_importados"
@@ -116,9 +140,7 @@ def index():
         "total_historial": total_historial,
     }
 
-    return render_template("index.html",
-                           empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
-                           stats=stats)
+    return render_template("index.html", stats=stats)
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +165,8 @@ def procesar():
     radian_ref = _save_upload(radian_bytes, radian_file.filename)
     radian_path = store.load_file(radian_ref)  # ruta local para el pipeline
 
-    # Archivos maestros opcionales
+    # Archivos maestros opcionales (propios de la empresa seleccionada)
+    emp = _empresa_actual()
     terceros_path = cuentas_path = comprobantes_path = None
     for key, default_name in [
         ("terceros",     "Listado_de_Terceros.xlsx"),
@@ -153,13 +176,13 @@ def procesar():
         f = request.files.get(key)
         if f and f.filename and _allowed(f.filename):
             file_bytes = f.read()
-            ref = store.save_file(file_bytes, "data", default_name)
+            ref = store.save_file(file_bytes, emp.data_category, default_name)
             path = store.load_file(ref)
         else:
             try:
-                path = store.get_local_data_path(default_name)
+                path = emp.ruta_maestro(default_name)
             except FileNotFoundError:
-                path = str(Path(_project_root()) / DATA_DIR.rstrip("/") / default_name)
+                path = str(Path(_project_root()) / emp.data_category / default_name)
         if key == "terceros":
             terceros_path = path
         elif key == "cuentas":
@@ -167,13 +190,13 @@ def procesar():
         else:
             comprobantes_path = path
 
-    db = DB_PATH
+    db = emp.db_path
     incluir_dup = request.form.get("incluir_duplicados") == "on"
 
     try:
         resultado = _ejecutar_pipeline(
             radian_path, terceros_path, cuentas_path,
-            comprobantes_path, db, incluir_dup,
+            comprobantes_path, db, incluir_dup, empresa=emp,
         )
         session_store.guardar(KEY_RESULTADO, resultado)
         flash(f"✓ Procesados {resultado['n_docs']} documentos. "
@@ -188,7 +211,7 @@ def procesar():
 
 def _ejecutar_pipeline(
     radian_path, terceros_path, cuentas_path,
-    comprobantes_path, db, incluir_duplicados,
+    comprobantes_path, db, incluir_duplicados, empresa=None,
 ) -> dict:
     """Ejecuta el pipeline completo y retorna un dict con los resultados."""
     import pandas as pd
@@ -206,6 +229,9 @@ def _ejecutar_pipeline(
     from app.validaciones import validar_preasiento_completo
     from app.exportador import exportar_excel
     from app.sugerencias import registrar_lote_confirmaciones
+
+    if empresa is None:
+        empresa = _empresa_actual()
 
     inicializar_db(db)
     bita.limpiar_sesion()
@@ -228,12 +254,15 @@ def _ejecutar_pipeline(
     df_cuentas      = _carga(cargar_maestro_cuentas, cuentas_path)
     df_comprobantes = _carga(cargar_maestro_comprobantes, comprobantes_path)
 
-    # 5-8. Pipeline
-    df = clasificar_lote(df)
+    # 5-8. Pipeline (con NIT y cuentas propias de la empresa)
+    df = clasificar_lote(df, nit_empresa=empresa.nit)
     df = procesar_terceros_lote(df, df_terceros if df_terceros is not None else pd.DataFrame())
     df = asignar_comprobantes_lote(df, df_comprobantes)
-    df = procesar_impuestos_lote(df)
-    preasientos = generar_lote(df, df_comprobantes, db_path=db)
+    df = procesar_impuestos_lote(df, cuentas_impuestos=empresa.cuentas_impuestos_efectivas())
+    preasientos = generar_lote(
+        df, df_comprobantes, db_path=db,
+        cuentas_contraparte=empresa.cuentas_contraparte_efectivas(),
+    )
 
     # 9. Validar
     excepciones = []
@@ -342,9 +371,7 @@ def resultado():
         flash("No hay resultados. Procesa primero un archivo RADIAN.", "info")
         return redirect(url_for("web.index"))
 
-    return render_template("resultado.html",
-                           empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
-                           datos=datos)
+    return render_template("resultado.html", datos=datos)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +393,8 @@ def confirmar():
     if not all([clasificacion, nit_tercero, tipo_linea, cuenta]):
         flash("Datos incompletos para confirmar la cuenta.", "error")
     else:
-        registrar_confirmacion(clasificacion, nit_tercero, tipo_linea, cuenta, DB_PATH)
+        registrar_confirmacion(clasificacion, nit_tercero, tipo_linea, cuenta,
+                               _empresa_actual().db_path)
 
         # Actualizar la cuenta en el resultado guardado para reflejarla en pantalla
         resultado = session_store.cargar(KEY_RESULTADO)
@@ -397,9 +425,11 @@ def confirmar():
 @bp.route("/historial")
 def historial():
     """Muestra las cuentas aprendidas por el motor de sugerencias."""
-    from app.database import get_connection
+    from app.database import get_connection, inicializar_db
 
-    conn = get_connection(DB_PATH)
+    db_path = _empresa_actual().db_path
+    inicializar_db(db_path)
+    conn = get_connection(db_path)
     try:
         rows = conn.execute(
             """
@@ -415,9 +445,7 @@ def historial():
         conn.close()
 
     entradas = [dict(r) for r in rows]
-    return render_template("historial.html",
-                           empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
-                           entradas=entradas, total=total)
+    return render_template("historial.html", entradas=entradas, total=total)
 
 
 # ---------------------------------------------------------------------------
@@ -468,8 +496,8 @@ def exportar_siigo():
 
     # Cargar plan de cuentas para determinar columnas de vencimiento (cols 13-16)
     from app.importador import cargar_maestro_cuentas
-    _cuentas_path = str(Path(_project_root()) / DATA_DIR.rstrip("/") / "Listado_de_Cuentas_Contables.xlsx")
     try:
+        _cuentas_path = _empresa_actual().ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
         df_cuentas_siigo = cargar_maestro_cuentas(_cuentas_path)
     except Exception:
         df_cuentas_siigo = None
@@ -521,12 +549,16 @@ def analytics():
         obtener_top_terceros, obtener_actividad_reciente,
     )
 
-    kpis          = obtener_kpis(DB_PATH)
-    evolucion     = obtener_evolucion_mensual(DB_PATH, meses=12)
-    distribucion  = obtener_distribucion_clasificacion(DB_PATH)
-    top_proveed   = obtener_top_terceros(DB_PATH, limite=10, tipo="compra")
-    top_clientes  = obtener_top_terceros(DB_PATH, limite=10, tipo="venta")
-    actividad     = obtener_actividad_reciente(DB_PATH, limite=30)
+    from app.database import inicializar_db
+    db_path = _empresa_actual().db_path
+    inicializar_db(db_path)
+
+    kpis          = obtener_kpis(db_path)
+    evolucion     = obtener_evolucion_mensual(db_path, meses=12)
+    distribucion  = obtener_distribucion_clasificacion(db_path)
+    top_proveed   = obtener_top_terceros(db_path, limite=10, tipo="compra")
+    top_clientes  = obtener_top_terceros(db_path, limite=10, tipo="venta")
+    actividad     = obtener_actividad_reciente(db_path, limite=30)
 
     # Serializar para Chart.js
     charts = {
@@ -557,7 +589,6 @@ def analytics():
 
     return render_template(
         "analytics.html",
-        empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
         kpis=kpis,
         actividad=actividad,
         charts=charts,
@@ -579,7 +610,7 @@ def api_cuentas():
         return jsonify([])
 
     try:
-        cuentas_path = store.get_local_data_path("Listado_de_Cuentas_Contables.xlsx")
+        cuentas_path = _empresa_actual().ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
         df = _cargar_maestro_cacheado(cargar_maestro_cuentas, cuentas_path)
 
         q_lower = q.lower()
@@ -627,7 +658,7 @@ def api_terceros():
         return jsonify([])
 
     try:
-        terceros_path = store.get_local_data_path("Listado_de_Terceros.xlsx")
+        terceros_path = _empresa_actual().ruta_maestro("Listado_de_Terceros.xlsx")
         df = _cargar_maestro_cacheado(cargar_maestro_terceros, terceros_path)
     except Exception:
         return jsonify([])
@@ -688,8 +719,9 @@ def test_procesar():
         flash("No se encontró un archivo RADIAN en input/.", "error")
         return redirect(url_for("web.index"))
 
-    db = DB_PATH
-    data_dir = os.path.join(root, "data")
+    emp = _empresa_actual()
+    db = emp.db_path
+    data_dir = os.path.join(root, *emp.data_category.split("/"))
 
     def _p(name):
         path = os.path.join(data_dir, name)
@@ -702,7 +734,7 @@ def test_procesar():
     try:
         resultado = _ejecutar_pipeline(
             radian_path, terceros_path, cuentas_path,
-            comprobantes_path, db, incluir_duplicados=True,
+            comprobantes_path, db, incluir_duplicados=True, empresa=emp,
         )
         session_store.guardar(KEY_RESULTADO, resultado)
         flash(
@@ -779,11 +811,12 @@ def _deserializar_preasientos(preasientos_data: list[dict]):
 @bp.route("/banco")
 def banco():
     """Formulario para subir el CSV del banco."""
-    from app.config import BANCO_CUENTA_DEFAULT, SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO
+    from app.config import SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO
+    emp = _empresa_actual()
     return render_template(
         "banco_upload.html",
-        empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
-        cuenta_default=BANCO_CUENTA_DEFAULT,
+        cuenta_default=emp.cuenta_banco_efectiva(),
+        nit_banco_default=emp.nit_banco,
         comp_ingreso=SIIGO_COMP_BANCO_INGRESO,
         comp_egreso=SIIGO_COMP_BANCO_EGRESO,
         comp_traslado=SIIGO_COMP_BANCO_TRASLADO,
@@ -798,7 +831,10 @@ def banco():
 def banco_previsualizar():
     """Recibe el CSV, lo parsea, agrupa 4x1000 y guarda en sesión."""
     from app.banco.importador_banco import leer_csv_banco, a_dict
-    from app.config import BANCO_CUENTA_DEFAULT, SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO, BANCO_CUENTA_4X1000
+    from app.config import SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO, BANCO_CUENTA_4X1000
+
+    emp = _empresa_actual()
+    BANCO_CUENTA_DEFAULT = emp.cuenta_banco_efectiva()
 
     if "csv_banco" not in request.files or request.files["csv_banco"].filename == "":
         flash("Debes seleccionar el archivo CSV del banco.", "error")
@@ -810,13 +846,13 @@ def banco_previsualizar():
     if not cuenta_banco:
         cuenta_banco = BANCO_CUENTA_DEFAULT
 
-    nit_banco = request.form.get("nit_banco", "").strip()
+    nit_banco = request.form.get("nit_banco", "").strip() or emp.nit_banco
 
     csv_path = _save_upload(csv_file.read(), csv_file.filename)
     csv_local_path = store.load_file(csv_path)
 
     try:
-        movimientos = leer_csv_banco(csv_local_path)
+        movimientos = leer_csv_banco(csv_local_path, formato=emp.formato_banco_efectivo())
     except Exception as exc:
         logger.exception("Error al leer CSV del banco")
         flash(f"Error al leer el CSV: {exc}", "error")
@@ -867,7 +903,6 @@ def banco_previsualizar():
 
     return render_template(
         "banco_resultado.html",
-        empresa=NOMBRE_EMPRESA, nit=NIT_EMPRESA,
         movimientos=principales,
         cuenta_banco=cuenta_banco,
         nit_banco=nit_banco,
@@ -890,7 +925,8 @@ def banco_exportar():
     import zipfile
     from app.banco.importador_banco import desde_dict
     from app.banco.exportador_banco import exportar_banco_siigo
-    from app.config import BANCO_CUENTA_DEFAULT
+
+    BANCO_CUENTA_DEFAULT = _empresa_actual().cuenta_banco_efectiva()
 
     datos_banco = session_store.cargar(KEY_BANCO)
     if not datos_banco or not datos_banco.get("movimientos"):
@@ -944,3 +980,128 @@ def banco_exportar():
     return send_file(buf, as_attachment=True, download_name="siigo_banco.zip",
                      mimetype="application/zip")
 
+
+# ---------------------------------------------------------------------------
+# Empresas — selección y administración (multi-empresa)
+# ---------------------------------------------------------------------------
+
+@bp.route("/empresas")
+def empresas():
+    """Página de administración de empresas."""
+    return render_template(
+        "empresas.html",
+        formato_default=FORMATO_BANCO_DEFAULT,
+    )
+
+
+@bp.route("/empresas/seleccionar", methods=["POST"])
+def empresas_seleccionar():
+    """Cambia la empresa activa de la sesión."""
+    empresa_id = request.form.get("empresa_id", "").strip()
+    emp = obtener_empresa(empresa_id)
+    session[KEY_EMPRESA] = emp.id
+
+    # Los resultados en sesión pertenecen a la empresa anterior: descartarlos
+    session_store.eliminar(KEY_RESULTADO)
+    session_store.eliminar(KEY_BANCO)
+
+    flash(f"Empresa activa: {emp.nombre} (NIT {emp.nit}).", "success")
+    return redirect(request.referrer or url_for("web.index"))
+
+
+@bp.route("/empresas/crear", methods=["POST"])
+def empresas_crear():
+    """Crea una empresa nueva con su configuración propia."""
+    import json as _json
+
+    nombre = request.form.get("nombre", "").strip()
+    nit    = request.form.get("nit", "").strip()
+    if not nombre or not nit:
+        flash("Nombre y NIT son obligatorios.", "error")
+        return redirect(url_for("web.empresas"))
+
+    # Formato del extracto bancario (solo guardar lo que difiere del default)
+    formato_banco = {}
+    for campo, default in FORMATO_BANCO_DEFAULT.items():
+        valor = request.form.get(f"banco_{campo}", "").strip()
+        if valor == "":
+            continue
+        if isinstance(default, int):
+            try:
+                valor = int(valor)
+            except ValueError:
+                flash(f"Valor inválido para {campo}: {valor}", "error")
+                return redirect(url_for("web.empresas"))
+        if valor != default:
+            formato_banco[campo] = valor
+
+    # Overrides de cuentas contables (JSON opcional)
+    def _json_dict(campo):
+        raw = request.form.get(campo, "").strip()
+        if not raw:
+            return {}
+        try:
+            d = _json.loads(raw)
+            if not isinstance(d, dict):
+                raise ValueError
+            return d
+        except (ValueError, TypeError):
+            raise ValueError(f"El campo {campo} debe ser un objeto JSON válido.")
+
+    try:
+        cuentas_contraparte = _json_dict("cuentas_contraparte")
+        cuentas_impuestos   = _json_dict("cuentas_impuestos")
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("web.empresas"))
+
+    emp = crear_empresa(
+        nit=nit,
+        nombre=nombre,
+        cuenta_banco_default=request.form.get("cuenta_banco_default", "").strip(),
+        nit_banco=request.form.get("nit_banco", "").strip(),
+        formato_banco=formato_banco,
+        cuentas_contraparte=cuentas_contraparte,
+        cuentas_impuestos=cuentas_impuestos,
+    )
+
+    flash(f"✓ Empresa '{emp.nombre}' creada. Sube sus archivos maestros en data/{emp.id}/ "
+          f"o desde el formulario de procesamiento.", "success")
+    return redirect(url_for("web.empresas"))
+
+
+@bp.route("/empresas/<empresa_id>/eliminar", methods=["POST"])
+def empresas_eliminar(empresa_id):
+    """Elimina una empresa del registro (la principal no se puede eliminar)."""
+    try:
+        eliminar_empresa(empresa_id)
+        if session.get(KEY_EMPRESA) == empresa_id:
+            session.pop(KEY_EMPRESA, None)
+            session_store.eliminar(KEY_RESULTADO)
+            session_store.eliminar(KEY_BANCO)
+        flash("Empresa eliminada.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("web.empresas"))
+
+
+@bp.route("/empresas/maestros", methods=["POST"])
+def empresas_maestros():
+    """Sube/reemplaza los archivos maestros de la empresa indicada."""
+    emp = obtener_empresa(request.form.get("empresa_id", "").strip())
+    subidos = []
+    for key, default_name in [
+        ("terceros",     "Listado_de_Terceros.xlsx"),
+        ("cuentas",      "Listado_de_Cuentas_Contables.xlsx"),
+        ("comprobantes", "Tipos_de_comprobante_contable.xlsx"),
+    ]:
+        f = request.files.get(key)
+        if f and f.filename and _allowed(f.filename):
+            store.save_file(f.read(), emp.data_category, default_name)
+            subidos.append(default_name)
+
+    if subidos:
+        flash(f"✓ Maestros actualizados para {emp.nombre}: {', '.join(subidos)}", "success")
+    else:
+        flash("No se subió ningún archivo maestro.", "info")
+    return redirect(url_for("web.empresas"))

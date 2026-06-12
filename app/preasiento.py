@@ -59,6 +59,7 @@ def _generar_lineas_factura_compra(
     total: float,
     base_gravable: float,
     impuestos: list[dict],
+    cuenta_contraparte: str = "22050501",
 ) -> list[LineaContable]:
     """
     Estructura del asiento para Factura de Compra:
@@ -70,7 +71,7 @@ def _generar_lineas_factura_compra(
     lineas = []
     n = 1
 
-    lineas.append(_linea(cufe, n, "22050501", "Proveedores nacionales",
+    lineas.append(_linea(cufe, n, cuenta_contraparte, "Proveedores nacionales",
                          0.0, total, "CxP Proveedor", tercero_nit, tercero_nombre))
     n += 1
 
@@ -103,6 +104,7 @@ def _generar_lineas_factura_venta(
     total: float,
     base_gravable: float,
     impuestos: list[dict],
+    cuenta_contraparte: str = "13050501",
 ) -> list[LineaContable]:
     """
     Estructura del asiento para Factura de Venta:
@@ -114,7 +116,7 @@ def _generar_lineas_factura_venta(
     lineas = []
     n = 1
 
-    lineas.append(_linea(cufe, n, "13050501", "CxC Clientes",
+    lineas.append(_linea(cufe, n, cuenta_contraparte, "CxC Clientes",
                          total, 0.0, "CxC Cliente", tercero_nit, tercero_nombre))
     n += 1
 
@@ -147,6 +149,7 @@ def _generar_lineas_documento_soporte(
     total: float,
     base_gravable: float,
     impuestos: list[dict],
+    cuenta_contraparte: str = "22100501",
 ) -> list[LineaContable]:
     """
     Estructura del asiento para Documento Soporte:
@@ -157,7 +160,7 @@ def _generar_lineas_documento_soporte(
     lineas = []
     n = 1
 
-    lineas.append(_linea(cufe, n, "22100501", "Proveedores exterior/no obligados",
+    lineas.append(_linea(cufe, n, cuenta_contraparte, "Proveedores exterior/no obligados",
                          0.0, total, "CxP No obligado", tercero_nit, tercero_nombre))
     n += 1
 
@@ -189,6 +192,7 @@ def _generar_lineas_nomina(
     tercero_nombre: str,
     total: float,
     impuestos: list[dict],
+    cuenta_contraparte: str = "25050501",
 ) -> list[LineaContable]:
     """
     Estructura del asiento para Pago de Nómina Individual (RADIAN):
@@ -199,7 +203,7 @@ def _generar_lineas_nomina(
     lineas = []
     n = 1
 
-    lineas.append(_linea(cufe, n, "25050501", "Salarios por pagar",
+    lineas.append(_linea(cufe, n, cuenta_contraparte, "Salarios por pagar",
                          total, 0.0, "Pago nómina", tercero_nit, tercero_nombre))
     n += 1
 
@@ -228,6 +232,7 @@ def generar_preasiento(
     base_gravable: float,
     clasificacion: str,
     df_comprobantes: Optional[pd.DataFrame] = None,
+    cuentas_contraparte: Optional[dict] = None,
 ) -> PreasientoContable:
     """
     Genera el preasiento contable completo para un documento.
@@ -250,13 +255,20 @@ def generar_preasiento(
 
     comp = asignar_comprobante(clasificacion, df_comprobantes)
 
+    # Cuenta de contrapartida: override de la empresa o default global
+    cuentas = {**CUENTAS_CONTRAPARTE, **(cuentas_contraparte or {})}
+    cuenta_cp = cuentas.get(clasificacion, "")
+
     # Seleccionar generador de líneas según clasificación
     generador = _GENERADORES.get(clasificacion)
 
     if clasificacion == "NOMINA":
-        lineas = _generar_lineas_nomina(cufe, tercero_nit, tercero_nombre, total, impuestos)
+        lineas = _generar_lineas_nomina(cufe, tercero_nit, tercero_nombre, total,
+                                        impuestos, cuenta_cp or "25050501")
     elif generador is not None:
-        lineas = generador(cufe, tercero_nit, tercero_nombre, total, base_gravable, impuestos)
+        lineas = generador(cufe, tercero_nit, tercero_nombre, total, base_gravable,
+                           impuestos, cuenta_cp) if cuenta_cp else generador(
+                               cufe, tercero_nit, tercero_nombre, total, base_gravable, impuestos)
     else:
         # Para SIN_CLASIFICAR u otros: generamos solo líneas pendientes
         lineas = [
@@ -312,6 +324,7 @@ def generar_lote(
     df: pd.DataFrame,
     df_comprobantes: Optional[pd.DataFrame] = None,
     db_path: Optional[str] = None,
+    cuentas_contraparte: Optional[dict] = None,
 ) -> list[PreasientoContable]:
     """
     Genera los preasientos para todo el DataFrame procesado.
@@ -346,6 +359,7 @@ def generar_lote(
             base_gravable=base_gravable,
             clasificacion=clasificacion,
             df_comprobantes=df_comprobantes,
+            cuentas_contraparte=cuentas_contraparte,
         )
         preasientos.append(preasiento)
 
