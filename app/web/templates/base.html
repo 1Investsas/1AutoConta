@@ -17,6 +17,17 @@
     <div class="sub">{{ empresa }}</div>
   </div>
 
+  <form method="post" action="{{ url_for('web.empresas_seleccionar') }}" class="empresa-switch" style="padding: 8px 14px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="empresa_id" onchange="this.form.submit()" style="width:100%; padding:5px; border-radius:6px;">
+      {% for e in empresas_disponibles %}
+      <option value="{{ e.id }}" {% if e.id == empresa_actual.id %}selected{% endif %}>
+        {{ e.nombre }} ({{ e.nit }})
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+
   <nav class="sidebar-nav">
     <div class="nav-section">Principal</div>
     <a href="{{ url_for('web.index') }}"
@@ -52,6 +63,12 @@
     <a href="{{ url_for('web.banco') }}"
        class="nav-link {% if request.endpoint in ('web.banco','web.banco_previsualizar') %}active{% endif %}">
       <span class="nav-icon">🏦</span> Extracto Banco
+    </a>
+
+    <div class="nav-section">Configuración</div>
+    <a href="{{ url_for('web.empresas') }}"
+       class="nav-link {% if request.endpoint == 'web.empresas' %}active{% endif %}">
+      <span class="nav-icon">🏢</span> Empresas
     </a>
   </nav>
 

@@ -44,6 +44,7 @@ def _sentido_operacion(clasificacion: str) -> str:
 def separar_impuestos(
     row: pd.Series,
     clasificacion: Optional[str] = None,
+    cuentas_impuestos: Optional[dict] = None,
 ) -> list[dict]:
     """
     Extrae las líneas de impuesto de una fila del DataFrame RADIAN.
@@ -65,13 +66,16 @@ def separar_impuestos(
     if clasificacion is None:
         clasificacion = str(row.get("clasificacion", ""))
 
+    if cuentas_impuestos is None:
+        cuentas_impuestos = CUENTAS_IMPUESTOS
+
     sentido = _sentido_operacion(clasificacion)
     impuestos = []
 
     for nombre in COLUMNAS_IMPUESTOS:
         valor = float(row.get(nombre, 0.0) or 0.0)
         if valor > 0:
-            cuentas_col = CUENTAS_IMPUESTOS.get(nombre, {})
+            cuentas_col = cuentas_impuestos.get(nombre, {})
             cuenta_sugerida = cuentas_col.get(sentido, "")
 
             impuestos.append({
@@ -108,7 +112,10 @@ def calcular_base_gravable(total: float, impuestos: list[dict]) -> float:
     return round(base, 2)
 
 
-def procesar_impuestos_lote(df: pd.DataFrame) -> pd.DataFrame:
+def procesar_impuestos_lote(
+    df: pd.DataFrame,
+    cuentas_impuestos: Optional[dict] = None,
+) -> pd.DataFrame:
     """
     Agrega columnas de impuestos y base gravable al DataFrame.
 
@@ -129,7 +136,7 @@ def procesar_impuestos_lote(df: pd.DataFrame) -> pd.DataFrame:
 
     for _, row in df.iterrows():
         clasificacion = str(row.get("clasificacion", ""))
-        impuestos = separar_impuestos(row, clasificacion)
+        impuestos = separar_impuestos(row, clasificacion, cuentas_impuestos)
         total = float(row.get("Total", 0.0) or 0.0)
         base = calcular_base_gravable(total, impuestos)
 

@@ -174,24 +174,26 @@ def file_exists(reference: str) -> bool:
         return Path(reference).exists()
 
 
-def get_local_data_path(filename: str) -> str:
+def get_local_data_path(filename: str, category: str = "data") -> str:
     """
     Retorna la ruta a un archivo de datos maestros.
 
-    En modo local: ruta directa en data/.
-    En modo cloud: descarga desde blob 'data/<filename>' a temp.
+    En modo local: ruta directa en <category>/ (por defecto data/).
+    En modo cloud: descarga desde blob '<category>/<filename>' a temp.
+
+    El parámetro category permite carpetas por empresa, p. ej. 'data/acme'.
     """
     if is_cloud():
-        ref = f"blob://data/{filename}"
+        ref = f"blob://{category}/{filename}"
         if file_exists(ref):
             return load_file(ref)
         else:
             # Fallback: intentar ruta local
-            local = str(_PROJECT_ROOT / "data" / filename)
+            local = str(_PROJECT_ROOT / category / filename)
             if Path(local).exists():
                 return local
             raise FileNotFoundError(
                 f"Archivo maestro '{filename}' no encontrado en Blob Storage ni localmente."
             )
     else:
-        return str(_PROJECT_ROOT / "data" / filename)
+        return str(_PROJECT_ROOT / category / filename)

@@ -76,45 +76,68 @@ class MovimientoBanco:
     idx_padre: Optional[int] = None  # si es 4x1000, idx del movimiento padre
 
 
-def leer_csv_banco(path: str | Path) -> list[MovimientoBanco]:
+def leer_csv_banco(path: str | Path, formato: Optional[dict] = None) -> list[MovimientoBanco]:
     """
     Lee el CSV del banco y retorna lista de MovimientoBanco.
 
     Pasos:
-    1. Lee el CSV sin encabezados.
+    1. Lee el CSV (sin encabezados por defecto).
     2. Filtra filas vacías.
     3. Parsea y ordena por fecha ascendente.
     4. Reasigna índices consecutivos.
     5. Enlaza los movimientos 4x1000 con su egreso padre.
 
     Args:
-        path: Ruta al archivo CSV del banco.
+        path:    Ruta al archivo CSV del banco.
+        formato: Formato del extracto (ver app.empresas.FORMATO_BANCO_DEFAULT).
+                 Permite ajustar delimitador, filas de encabezado, posiciones
+                 de columnas, formato de fecha y separadores numéricos por
+                 empresa/banco. Si es None se usa el formato por defecto.
 
     Returns:
         Lista de MovimientoBanco ordenada por fecha ascendente.
     """
+    from app.empresas import FORMATO_BANCO_DEFAULT
+    fmt = {**FORMATO_BANCO_DEFAULT, **(formato or {})}
+
     df = pd.read_csv(
         str(path),
         header=None,
+        sep=fmt["delimitador"],
+        skiprows=int(fmt["filas_encabezado"]),
         dtype=str,
         keep_default_na=False,
         skip_blank_lines=True,
     )
 
-    # Descartar filas cuya primera columna sea vacía
-    df = df[df.iloc[:, 0].str.strip() != ""].reset_index(drop=True)
+    col_cuenta  = int(fmt["col_cuenta"])
+    col_cod_bco = int(fmt["col_codigo_banco"])
+    col_fecha   = int(fmt["col_fecha"])
+    col_valor   = int(fmt["col_valor"])
+    col_detalle = int(fmt["col_codigo_detalle"])
+    col_desc    = int(fmt["col_descripcion"])
+    sep_miles   = fmt["separador_miles"]
+    sep_decimal = fmt["separador_decimal"]
+
+    # Descartar filas cuya columna de cuenta sea vacía
+    df = df[df.iloc[:, col_cuenta].str.strip() != ""].reset_index(drop=True)
 
     movimientos: list[MovimientoBanco] = []
     for raw_idx, row in df.iterrows():
         try:
-            cuenta_banco_num = str(row.iloc[0]).strip()
-            codigo_banco     = str(row.iloc[1]).strip()
-            fecha_str        = str(row.iloc[3]).strip()
-            valor_str        = str(row.iloc[5]).strip().replace(",", "")
-            codigo_detalle   = str(row.iloc[6]).strip()
-            descripcion      = str(row.iloc[7]).strip() if len(row) > 7 else ""
+            cuenta_banco_num = str(row.iloc[col_cuenta]).strip()
+            codigo_banco     = str(row.iloc[col_cod_bco]).strip()
+            fecha_str        = str(row.iloc[col_fecha]).strip()
+            valor_str        = str(row.iloc[col_valor]).strip()
+            codigo_detalle   = str(row.iloc[col_detalle]).strip()
+            descripcion      = str(row.iloc[col_desc]).strip() if len(row) > col_desc else ""
 
-            fecha = datetime.strptime(fecha_str, "%Y%m%d").date()
+            if sep_miles:
+                valor_str = valor_str.replace(sep_miles, "")
+            if sep_decimal != ".":
+                valor_str = valor_str.replace(sep_decimal, ".")
+
+            fecha = datetime.strptime(fecha_str, fmt["formato_fecha"]).date()
             valor = Decimal(valor_str)
 
             es_4x1000 = (codigo_detalle == BANCO_CODIGO_4X1000)

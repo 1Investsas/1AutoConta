@@ -25,7 +25,11 @@ NOTA_DEBITO_COMPRA = "NOTA_DEBITO_COMPRA"
 SIN_CLASIFICAR = "SIN_CLASIFICAR"
 
 
-def clasificar_documento(tipo_documento: str, nit_emisor: str) -> str:
+def clasificar_documento(
+    tipo_documento: str,
+    nit_emisor: str,
+    nit_empresa: str | None = None,
+) -> str:
     """
     Clasifica un documento electrónico de forma determinista.
 
@@ -48,7 +52,8 @@ def clasificar_documento(tipo_documento: str, nit_emisor: str) -> str:
         return SIN_CLASIFICAR
 
     td = tipo_documento.strip().lower()
-    es_empresa = nit_emisor.strip() == NIT_EMPRESA.strip()
+    nit_propio = (nit_empresa if nit_empresa is not None else NIT_EMPRESA).strip()
+    es_empresa = nit_emisor.strip() == nit_propio
 
     if "nomina individual" in td:
         return NOMINA
@@ -69,7 +74,7 @@ def clasificar_documento(tipo_documento: str, nit_emisor: str) -> str:
     return SIN_CLASIFICAR
 
 
-def clasificar_lote(df: pd.DataFrame) -> pd.DataFrame:
+def clasificar_lote(df: pd.DataFrame, nit_empresa: str | None = None) -> pd.DataFrame:
     """
     Aplica la clasificación a cada fila de un DataFrame RADIAN.
 
@@ -86,6 +91,7 @@ def clasificar_lote(df: pd.DataFrame) -> pd.DataFrame:
         lambda row: clasificar_documento(
             str(row.get("Tipo de documento", "")),
             str(row.get("NIT Emisor", "")),
+            nit_empresa,
         ),
         axis=1,
     )

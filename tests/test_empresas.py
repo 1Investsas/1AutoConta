@@ -1,0 +1,191 @@
+"""Tests del módulo multi-empresa."""
+
+import json
+
+import pytest
+
+from app import config
+from app import empresas as emp_mod
+from app.empresas import (
+    Empresa, EMPRESA_PRINCIPAL_ID, FORMATO_BANCO_DEFAULT,
+    crear_empresa, eliminar_empresa, listar_empresas, obtener_empresa,
+)
+
+
+@pytest.fixture(autouse=True)
+def registro_temporal(tmp_path, monkeypatch):
+    """Redirige el registro de empresas a un directorio temporal."""
+    registro = tmp_path / "empresas.json"
+
+    def fake_get_local_data_path(filename, category="data"):
+        return str(tmp_path / filename)
+
+    def fake_save_file(data, category, filename):
+        path = tmp_path / filename
+        path.write_bytes(data)
+        return str(path)
+
+    monkeypatch.setattr(emp_mod.store, "get_local_data_path", fake_get_local_data_path)
+    monkeypatch.setattr(emp_mod.store, "save_file", fake_save_file)
+    return registro
+
+
+class TestEmpresaPrincipal:
+    def test_siempre_existe(self):
+        empresas = listar_empresas()
+        assert empresas[0].id == EMPRESA_PRINCIPAL_ID
+        assert empresas[0].nit == config.NIT_EMPRESA
+
+    def test_db_y_data_compatibles(self):
+        emp = obtener_empresa(None)
+        assert emp.db_path == config.DB_PATH
+        assert emp.data_category == "data"
+
+    def test_id_desconocido_retorna_principal(self):
+        assert obtener_empresa("no_existe").id == EMPRESA_PRINCIPAL_ID
+
+
+class TestCrearEmpresa:
+    def test_crear_y_obtener(self):
+        emp = crear_empresa("900123456", "ACME SAS")
+        assert emp.id == "acme_sas"
+        assert obtener_empresa("acme_sas").nit == "900123456"
+        assert emp.db_path == "db/contable_acme_sas.db"
+        assert emp.data_category == "data/acme_sas"
+
+    def test_ids_no_colisionan(self):
+        a = crear_empresa("1", "ACME SAS")
+        b = crear_empresa("2", "ACME S.A.S")
+        assert a.id != b.id
+
+    def test_eliminar(self):
+        emp = crear_empresa("900123456", "Temporal")
+        eliminar_empresa(emp.id)
+        assert obtener_empresa(emp.id).id == EMPRESA_PRINCIPAL_ID
+
+    def test_principal_no_eliminable(self):
+        with pytest.raises(ValueError):
+            eliminar_empresa(EMPRESA_PRINCIPAL_ID)
+
+
+class TestOverrides:
+    def test_cuentas_contraparte_efectivas(self):
+        emp = Empresa(id="x", nit="1", nombre="X",
+                      cuentas_contraparte={"FACTURA_VENTA": "13050599"})
+        efectivas = emp.cuentas_contraparte_efectivas()
+        assert efectivas["FACTURA_VENTA"] == "13050599"
+        # Las demás heredan del default
+        assert efectivas["FACTURA_COMPRA"] == config.CUENTAS_CONTRAPARTE["FACTURA_COMPRA"]
+
+    def test_cuentas_impuestos_efectivas(self):
+        emp = Empresa(id="x", nit="1", nombre="X",
+                      cuentas_impuestos={"IVA": {"compra": "24089999"}})
+        efectivas = emp.cuentas_impuestos_efectivas()
+        assert efectivas["IVA"]["compra"] == "24089999"
+        assert efectivas["IVA"]["venta"] == config.CUENTAS_IMPUESTOS["IVA"]["venta"]
+        assert efectivas["Rete Renta"] == config.CUENTAS_IMPUESTOS["Rete Renta"]
+
+    def test_formato_banco_efectivo(self):
+        emp = Empresa(id="x", nit="1", nombre="X",
+                      formato_banco={"delimitador": ";", "col_fecha": 1})
+        fmt = emp.formato_banco_efectivo()
+        assert fmt["delimitador"] == ";"
+        assert fmt["col_fecha"] == 1
+        assert fmt["col_valor"] == FORMATO_BANCO_DEFAULT["col_valor"]
+
+    def test_cuenta_banco_default(self):
+        emp = Empresa(id="x", nit="1", nombre="X")
+        assert emp.cuenta_banco_efectiva() == config.BANCO_CUENTA_DEFAULT
+        emp.cuenta_banco_default = "11200501"
+        assert emp.cuenta_banco_efectiva() == "11200501"
+
+
+class TestFormatoBancoImportador:
+    def test_formato_personalizado(self, tmp_path):
+        """CSV con encabezado, ';', fecha dd/mm/yyyy y decimal con coma."""
+        from app.banco.importador_banco import leer_csv_banco
+
+        csv = tmp_path / "extracto.csv"
+        csv.write_text(
+            "cuenta;cod;fecha;valor;detalle;descripcion\n"
+            "551-000068-95;551;31/01/2026;-1.000.000,50;2999;PAGO PROVEEDOR\n"
+            "551-000068-95;551;31/01/2026;500.000,00;2999;CONSIGNACION\n"
+        )
+        fmt = {
+            "delimitador": ";",
+            "filas_encabezado": 1,
+            "col_cuenta": 0,
+            "col_codigo_banco": 1,
+            "col_fecha": 2,
+            "col_valor": 3,
+            "col_codigo_detalle": 4,
+            "col_descripcion": 5,
+            "formato_fecha": "%d/%m/%Y",
+            "separador_decimal": ",",
+            "separador_miles": ".",
+        }
+        movs = leer_csv_banco(csv, formato=fmt)
+        assert len(movs) == 2
+        valores = sorted(float(m.valor) for m in movs)
+        assert valores == [-1000000.50, 500000.00]
+        assert movs[0].fecha.isoformat() == "2026-01-31"
+
+    def test_formato_default_sigue_funcionando(self, tmp_path):
+        from app.banco.importador_banco import leer_csv_banco
+
+        csv = tmp_path / "extracto.csv"
+        csv.write_text(
+            "551-000068-95,551,,20260131,,-250000.00,2999,PAGO X,0\n"
+        )
+        movs = leer_csv_banco(csv)
+        assert len(movs) == 1
+        assert float(movs[0].valor) == -250000.00
+
+
+class TestClasificadorMultiEmpresa:
+    def test_nit_empresa_parametrizable(self):
+        from app.clasificador import clasificar_documento
+
+        otro_nit = "999999999"
+        assert clasificar_documento("Factura electrónica", otro_nit, otro_nit) == "FACTURA_VENTA"
+        assert clasificar_documento("Factura electrónica", config.NIT_EMPRESA, otro_nit) == "FACTURA_COMPRA"
+
+
+class TestPreasientoMultiEmpresa:
+    def test_cuenta_contraparte_override(self):
+        from app.preasiento import generar_preasiento
+
+        doc = {"CUFE/CUDE": "abc", "Total": 1000.0, "Folio": "1", "Prefijo": ""}
+        p = generar_preasiento(
+            documento=doc,
+            tercero={"nit": "123", "nombre": "Prov"},
+            impuestos=[],
+            base_gravable=1000.0,
+            clasificacion="FACTURA_COMPRA",
+            cuentas_contraparte={"FACTURA_COMPRA": "22059999"},
+        )
+        assert p.lineas[0].cuenta == "22059999"
+
+    def test_sin_override_usa_default(self):
+        from app.preasiento import generar_preasiento
+
+        doc = {"CUFE/CUDE": "abc", "Total": 1000.0, "Folio": "1", "Prefijo": ""}
+        p = generar_preasiento(
+            documento=doc,
+            tercero={"nit": "123", "nombre": "Prov"},
+            impuestos=[],
+            base_gravable=1000.0,
+            clasificacion="FACTURA_COMPRA",
+        )
+        assert p.lineas[0].cuenta == config.CUENTAS_CONTRAPARTE["FACTURA_COMPRA"]
+
+
+class TestImpuestosMultiEmpresa:
+    def test_cuentas_impuestos_override(self):
+        import pandas as pd
+        from app.impuestos import separar_impuestos
+
+        row = pd.Series({"IVA": 190.0, "Total": 1190.0})
+        cuentas = {"IVA": {"compra": "24080001", "venta": "24080002"}}
+        imps = separar_impuestos(row, "FACTURA_COMPRA", cuentas)
+        assert imps[0]["cuenta_sugerida"] == "24080001"

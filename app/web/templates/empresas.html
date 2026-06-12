@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Empresas — contable-auto{% endblock %}
+{% block page_title %}Empresas{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <h2>Empresas registradas</h2>
+  <p class="muted">
+    La empresa activa determina la base de datos, los archivos maestros
+    (plan de cuentas, terceros, comprobantes), las cuentas contables por
+    defecto y el formato del extracto bancario que usa la aplicación.
+  </p>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Empresa</th><th>NIT</th><th>Cuenta banco</th>
+        <th>Carpeta maestros</th><th>Base de datos</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in empresas_disponibles %}
+      <tr {% if e.id == empresa_actual.id %}style="font-weight:bold"{% endif %}>
+        <td>{{ e.nombre }}{% if e.id == empresa_actual.id %} ✓{% endif %}</td>
+        <td>{{ e.nit }}</td>
+        <td>{{ e.cuenta_banco_efectiva() }}</td>
+        <td><code>{{ e.data_category }}/</code></td>
+        <td><code>{{ e.db_path }}</code></td>
+        <td>
+          {% if not e.es_principal %}
+          <form method="post" action="{{ url_for('web.empresas_eliminar', empresa_id=e.id) }}"
+                onsubmit="return confirm('¿Eliminar la empresa {{ e.nombre }}? Sus archivos y BD no se borran, solo el registro.');"
+                style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm">🗑️ Eliminar</button>
+          </form>
+          {% else %}
+          <span class="muted">env (.env)</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Subir archivos maestros de una empresa</h2>
+  <form method="post" action="{{ url_for('web.empresas_maestros') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Empresa</label>
+      <select name="empresa_id">
+        {% for e in empresas_disponibles %}
+        <option value="{{ e.id }}" {% if e.id == empresa_actual.id %}selected{% endif %}>{{ e.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Listado de Terceros (.xlsx)</label>
+      <input type="file" name="terceros" accept=".xlsx,.xls">
+    </div>
+    <div class="form-row">
+      <label>Listado de Cuentas Contables (.xlsx)</label>
+      <input type="file" name="cuentas" accept=".xlsx,.xls">
+    </div>
+    <div class="form-row">
+      <label>Tipos de comprobante contable (.xlsx)</label>
+      <input type="file" name="comprobantes" accept=".xlsx,.xls">
+    </div>
+    <button type="submit" class="btn btn-primary">Subir maestros</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Crear empresa</h2>
+  <form method="post" action="{{ url_for('web.empresas_crear') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h3>Identificación</h3>
+    <div class="form-row">
+      <label>Nombre *</label>
+      <input type="text" name="nombre" required placeholder="ACME SAS">
+    </div>
+    <div class="form-row">
+      <label>NIT *</label>
+      <input type="text" name="nit" required placeholder="900123456">
+    </div>
+
+    <h3>Banco</h3>
+    <div class="form-row">
+      <label>Cuenta contable del banco</label>
+      <input type="text" name="cuenta_banco_default" placeholder="11100501">
+    </div>
+    <div class="form-row">
+      <label>NIT del banco</label>
+      <input type="text" name="nit_banco" placeholder="860034313">
+    </div>
+
+    <h3>Formato del extracto bancario</h3>
+    <p class="muted">Déjalos vacíos para usar el formato por defecto.
+       Las columnas se cuentan desde 0.</p>
+    <div class="form-row">
+      <label>Delimitador (default "{{ formato_default['delimitador'] }}")</label>
+      <input type="text" name="banco_delimitador" maxlength="1" placeholder="{{ formato_default['delimitador'] }}">
+    </div>
+    <div class="form-row">
+      <label>Filas de encabezado a saltar (default {{ formato_default['filas_encabezado'] }})</label>
+      <input type="number" name="banco_filas_encabezado" min="0" placeholder="{{ formato_default['filas_encabezado'] }}">
+    </div>
+    <div class="form-row">
+      <label>Columna nº de cuenta (default {{ formato_default['col_cuenta'] }})</label>
+      <input type="number" name="banco_col_cuenta" min="0" placeholder="{{ formato_default['col_cuenta'] }}">
+    </div>
+    <div class="form-row">
+      <label>Columna código banco (default {{ formato_default['col_codigo_banco'] }})</label>
+      <input type="number" name="banco_col_codigo_banco" min="0" placeholder="{{ formato_default['col_codigo_banco'] }}">
+    </div>
+    <div class="form-row">
+      <label>Columna fecha (default {{ formato_default['col_fecha'] }})</label>
+      <input type="number" name="banco_col_fecha" min="0" placeholder="{{ formato_default['col_fecha'] }}">
+    </div>
+    <div class="form-row">
+      <label>Columna valor (default {{ formato_default['col_valor'] }})</label>
+      <input type="number" name="banco_col_valor" min="0" placeholder="{{ formato_default['col_valor'] }}">
+    </div>
+    <div class="form-row">
+      <label>Columna código detalle (default {{ formato_default['col_codigo_detalle'] }})</label>
+      <input type="number" name="banco_col_codigo_detalle" min="0" placeholder="{{ formato_default['col_codigo_detalle'] }}">
+    </div>
+    <div class="form-row">
+      <label>Columna descripción (default {{ formato_default['col_descripcion'] }})</label>
+      <input type="number" name="banco_col_descripcion" min="0" placeholder="{{ formato_default['col_descripcion'] }}">
+    </div>
+    <div class="form-row">
+      <label>Formato de fecha (default {{ formato_default['formato_fecha'] }})</label>
+      <input type="text" name="banco_formato_fecha" placeholder="{{ formato_default['formato_fecha'] }}">
+    </div>
+    <div class="form-row">
+      <label>Separador decimal (default "{{ formato_default['separador_decimal'] }}")</label>
+      <input type="text" name="banco_separador_decimal" maxlength="1" placeholder="{{ formato_default['separador_decimal'] }}">
+    </div>
+    <div class="form-row">
+      <label>Separador de miles (default "{{ formato_default['separador_miles'] }}")</label>
+      <input type="text" name="banco_separador_miles" maxlength="1" placeholder="{{ formato_default['separador_miles'] }}">
+    </div>
+
+    <h3>Cuentas contables (avanzado, opcional)</h3>
+    <p class="muted">
+      Overrides en JSON sobre los valores por defecto. Solo incluye lo que cambia.
+    </p>
+    <div class="form-row">
+      <label>Cuentas de contrapartida por clasificación</label>
+      <textarea name="cuentas_contraparte" rows="3"
+                placeholder='{"FACTURA_VENTA": "13050502", "FACTURA_COMPRA": "22050502"}'></textarea>
+    </div>
+    <div class="form-row">
+      <label>Cuentas de impuestos</label>
+      <textarea name="cuentas_impuestos" rows="3"
+                placeholder='{"IVA": {"compra": "24081002", "venta": "24080502"}}'></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Crear empresa</button>
+  </form>
+</div>
+
+{% endblock %}
