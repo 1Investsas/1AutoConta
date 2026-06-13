@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Importaciones — contable-auto{% endblock %}
+{% block page_title %}Importaciones{% endblock %}
+
+{% block content %}
+
+<div class="section-header">
+  <h2>Historial de importaciones</h2>
+  <a href="{{ url_for('web.index') }}" class="btn btn-primary">⚡ Nueva importación</a>
+</div>
+
+<p class="text-dim mb-4" style="font-size:0.85rem">
+  Cada vez que procesas un archivo RADIAN queda registrado aquí junto con el
+  archivo original. Si una importación falló o necesitas el Excel de nuevo,
+  usa <strong>Retomar</strong> para reprocesarla y regenerar el archivo.
+</p>
+
+{% if importaciones %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Fecha</th>
+        <th>Archivo</th>
+        <th>Estado</th>
+        <th class="text-right">Docs</th>
+        <th class="text-right">Excepciones</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for imp in importaciones %}
+      <tr>
+        <td><strong>{{ imp.id }}</strong></td>
+        <td class="text-dim">{{ imp.fecha_fmt }}</td>
+        <td><code style="font-size:0.78rem">{{ imp.archivo_nombre or '—' }}</code></td>
+        <td>
+          {% if imp.estado == 'completada' %}
+            <span class="pill pill-ok">Completada</span>
+          {% elif imp.estado == 'error' %}
+            <span class="pill pill-pendiente" title="{{ imp.error or '' }}">Error</span>
+          {% else %}
+            <span class="pill">Procesando</span>
+          {% endif %}
+        </td>
+        <td class="text-right">{{ imp.n_docs }}</td>
+        <td class="text-right">{{ imp.n_excepciones }}</td>
+        <td>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            {% if imp.archivo_disponible %}
+            <form method="POST"
+                  action="{{ url_for('web.importacion_reprocesar', imp_id=imp.id) }}"
+                  data-loading="true" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-primary">
+                {% if imp.estado == 'error' %}🔄 Retomar{% else %}🔄 Regenerar{% endif %}
+              </button>
+            </form>
+            {% else %}
+            <span class="text-dim" style="font-size:0.75rem">Archivo no disponible</span>
+            {% endif %}
+            {% if imp.excel_disponible %}
+            <a href="{{ url_for('web.importacion_descargar', imp_id=imp.id) }}"
+               class="btn btn-sm">⬇️ Excel</a>
+            {% endif %}
+          </div>
+          {% if imp.estado == 'error' and imp.error %}
+          <div class="text-dim" style="font-size:0.72rem; margin-top:4px; color:var(--danger)">
+            {{ imp.error }}
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div style="text-align:center; padding:60px; color:var(--text-dim)">
+  <div style="font-size:3rem; margin-bottom:12px">📥</div>
+  <p>Aún no hay importaciones registradas.</p>
+  <a href="{{ url_for('web.index') }}" class="btn btn-primary" style="margin-top:20px">
+    ⚡ Procesar RADIAN
+  </a>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -52,6 +52,10 @@
       <span class="nav-icon">⬇️</span> Descargar Excel
     </a>
     {% endif %}
+    <a href="{{ url_for('web.importaciones') }}"
+       class="nav-link {% if request.endpoint == 'web.importaciones' %}active{% endif %}">
+      <span class="nav-icon">📥</span> Importaciones
+    </a>
 
     <div class="nav-section">Reportería</div>
     <a href="{{ url_for('web.analytics') }}"
