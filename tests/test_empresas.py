@@ -8,7 +8,8 @@ from app import config
 from app import empresas as emp_mod
 from app.empresas import (
     Empresa, EMPRESA_PRINCIPAL_ID, FORMATO_BANCO_DEFAULT,
-    crear_empresa, eliminar_empresa, listar_empresas, obtener_empresa,
+    actualizar_empresa, crear_empresa, eliminar_empresa,
+    listar_empresas, obtener_empresa,
 )
 
 
@@ -66,6 +67,70 @@ class TestCrearEmpresa:
     def test_principal_no_eliminable(self):
         with pytest.raises(ValueError):
             eliminar_empresa(EMPRESA_PRINCIPAL_ID)
+
+
+class TestSigla:
+    def test_sigla_efectiva_fallback_al_nombre(self):
+        e = Empresa(id="x", nit="1", nombre="Mi Empresa SAS")
+        assert e.sigla_efectiva == "Mi Empresa SAS"
+        e.sigla = "MES"
+        assert e.sigla_efectiva == "MES"
+
+    def test_crear_con_sigla_deriva_id_de_sigla(self):
+        emp = crear_empresa("900", "Comercializadora Internacional XYZ", sigla="CIXYZ")
+        assert emp.id == "cixyz"
+        assert emp.sigla == "CIXYZ"
+        assert obtener_empresa("cixyz").nombre.startswith("Comercializadora")
+
+    def test_sigla_se_persiste(self):
+        crear_empresa("900", "ACME SAS", sigla="ACM")
+        assert obtener_empresa("acm").sigla == "ACM"
+
+    def test_principal_usa_sigla_de_config(self):
+        # Sin override, la sigla de la principal cae al valor de config
+        assert obtener_empresa(None).sigla == config.SIGLA_EMPRESA
+
+
+class TestActualizarEmpresa:
+    def test_actualizar_preserva_id(self):
+        emp = crear_empresa("900", "ACME", sigla="ACM")
+        upd = actualizar_empresa(
+            emp.id, nit="901", nombre="ACME 2", sigla="ACM2",
+            cuenta_banco_default="11200501", nit_banco="860",
+            formato_banco={"delimitador": ";"},
+            cuentas_contraparte={}, cuentas_impuestos={},
+        )
+        # El id no cambia aunque cambien nombre/sigla → conserva BD y maestros
+        assert upd.id == emp.id
+        re = obtener_empresa(emp.id)
+        assert re.nit == "901"
+        assert re.nombre == "ACME 2"
+        assert re.sigla == "ACM2"
+        assert re.nit_banco == "860"
+        assert re.formato_banco_efectivo()["delimitador"] == ";"
+
+    def test_actualizar_principal_persiste_override(self):
+        upd = actualizar_empresa(
+            EMPRESA_PRINCIPAL_ID, nit=config.NIT_EMPRESA, nombre="NUEVO NOMBRE",
+            sigla="NN", cuenta_banco_default="", nit_banco="",
+            formato_banco={}, cuentas_contraparte={}, cuentas_impuestos={},
+        )
+        assert upd.id == EMPRESA_PRINCIPAL_ID
+        p = obtener_empresa(EMPRESA_PRINCIPAL_ID)
+        assert p.nombre == "NUEVO NOMBRE"
+        assert p.sigla == "NN"
+        # La principal conserva su BD y carpeta de maestros
+        assert p.db_path == config.DB_PATH
+        assert p.data_category == "data"
+
+    def test_principal_aparece_una_sola_vez_tras_editar(self):
+        actualizar_empresa(
+            EMPRESA_PRINCIPAL_ID, nit=config.NIT_EMPRESA, nombre="P", sigla="P",
+            cuenta_banco_default="", nit_banco="",
+            formato_banco={}, cuentas_contraparte={}, cuentas_impuestos={},
+        )
+        ids = [e.id for e in listar_empresas()]
+        assert ids.count(EMPRESA_PRINCIPAL_ID) == 1
 
 
 class TestOverrides:

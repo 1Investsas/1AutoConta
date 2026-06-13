@@ -4,38 +4,43 @@
 
 {% block content %}
 
+{# Modo edición: empresa_editar viene de la ruta /empresas/<id>/editar #}
+{% set editando = empresa_editar is defined and empresa_editar %}
+{% set f = (empresa_editar.formato_banco_efectivo() if editando else formato_default) %}
+
 <div class="card">
   <h2>Empresas registradas</h2>
   <p class="muted">
     La empresa activa determina la base de datos, los archivos maestros
     (plan de cuentas, terceros, comprobantes), las cuentas contables por
     defecto y el formato del extracto bancario que usa la aplicación.
+    La selección rápida en la barra lateral se hace por la <strong>sigla</strong>.
   </p>
   <table class="table">
     <thead>
       <tr>
-        <th>Empresa</th><th>NIT</th><th>Cuenta banco</th>
+        <th>Sigla</th><th>Nombre completo</th><th>NIT</th><th>Cuenta banco</th>
         <th>Carpeta maestros</th><th>Base de datos</th><th></th>
       </tr>
     </thead>
     <tbody>
       {% for e in empresas_disponibles %}
       <tr {% if e.id == empresa_actual.id %}style="font-weight:bold"{% endif %}>
-        <td>{{ e.nombre }}{% if e.id == empresa_actual.id %} ✓{% endif %}</td>
+        <td>{{ e.sigla_efectiva }}{% if e.id == empresa_actual.id %} ✓{% endif %}</td>
+        <td>{{ e.nombre }}</td>
         <td>{{ e.nit }}</td>
         <td>{{ e.cuenta_banco_efectiva() }}</td>
         <td><code>{{ e.data_category }}/</code></td>
         <td><code>{{ e.db_path }}</code></td>
-        <td>
+        <td style="white-space:nowrap">
+          <a href="{{ url_for('web.empresas_editar', empresa_id=e.id) }}" class="btn btn-sm">✏️ Editar</a>
           {% if not e.es_principal %}
           <form method="post" action="{{ url_for('web.empresas_eliminar', empresa_id=e.id) }}"
                 onsubmit="return confirm('¿Eliminar la empresa {{ e.nombre }}? Sus archivos y BD no se borran, solo el registro.');"
                 style="display:inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm">🗑️ Eliminar</button>
           </form>
-          {% else %}
-          <span class="muted">env (.env)</span>
           {% endif %}
         </td>
       </tr>
@@ -52,7 +57,10 @@
       <label>Empresa</label>
       <select name="empresa_id">
         {% for e in empresas_disponibles %}
-        <option value="{{ e.id }}" {% if e.id == empresa_actual.id %}selected{% endif %}>{{ e.nombre }}</option>
+        <option value="{{ e.id }}"
+                {% if e.id == (empresa_editar.id if editando else empresa_actual.id) %}selected{% endif %}>
+          {{ e.sigla_efectiva }} — {{ e.nombre }}
+        </option>
         {% endfor %}
       </select>
     </div>
@@ -72,76 +80,109 @@
   </form>
 </div>
 
-<div class="card">
-  <h2>Crear empresa</h2>
-  <form method="post" action="{{ url_for('web.empresas_crear') }}">
+<div class="card" id="form-empresa">
+  <h2>
+    {% if editando %}Editar empresa: {{ empresa_editar.sigla_efectiva }}{% else %}Crear empresa{% endif %}
+  </h2>
+  {% if editando and empresa_editar.es_principal %}
+  <p class="muted">
+    Estás editando la empresa principal. Los cambios se guardan y tienen
+    prioridad sobre las variables de entorno (.env). Su base de datos y su
+    carpeta de maestros no cambian.
+  </p>
+  {% endif %}
+  <form method="post"
+        action="{% if editando %}{{ url_for('web.empresas_actualizar', empresa_id=empresa_editar.id) }}{% else %}{{ url_for('web.empresas_crear') }}{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
     <h3>Identificación</h3>
     <div class="form-row">
-      <label>Nombre *</label>
-      <input type="text" name="nombre" required placeholder="ACME SAS">
+      <label>Nombre completo *</label>
+      <input type="text" name="nombre" required placeholder="ACME SAS"
+             value="{{ empresa_editar.nombre if editando else '' }}">
+    </div>
+    <div class="form-row">
+      <label>Sigla * <small class="muted">(para seleccionar la empresa)</small></label>
+      <input type="text" name="sigla" required placeholder="ACME"
+             value="{{ empresa_editar.sigla if editando else '' }}">
     </div>
     <div class="form-row">
       <label>NIT *</label>
-      <input type="text" name="nit" required placeholder="900123456">
+      <input type="text" name="nit" required placeholder="900123456"
+             value="{{ empresa_editar.nit if editando else '' }}">
     </div>
 
     <h3>Banco</h3>
     <div class="form-row">
       <label>Cuenta contable del banco</label>
-      <input type="text" name="cuenta_banco_default" placeholder="11100501">
+      <input type="text" name="cuenta_banco_default" placeholder="11100501"
+             value="{{ empresa_editar.cuenta_banco_default if editando else '' }}">
     </div>
     <div class="form-row">
       <label>NIT del banco</label>
-      <input type="text" name="nit_banco" placeholder="860034313">
+      <input type="text" name="nit_banco" placeholder="860034313"
+             value="{{ empresa_editar.nit_banco if editando else '' }}">
     </div>
 
     <h3>Formato del extracto bancario</h3>
-    <p class="muted">Déjalos vacíos para usar el formato por defecto.
-       Las columnas se cuentan desde 0.</p>
+    <p class="muted">
+      {% if editando %}Valores actuales de la empresa.{% else %}Déjalos vacíos para usar el formato por defecto.{% endif %}
+      Las columnas se cuentan desde 0.
+    </p>
     <div class="form-row">
       <label>Delimitador (default "{{ formato_default['delimitador'] }}")</label>
-      <input type="text" name="banco_delimitador" maxlength="1" placeholder="{{ formato_default['delimitador'] }}">
+      <input type="text" name="banco_delimitador" maxlength="1" placeholder="{{ formato_default['delimitador'] }}"
+             value="{{ f['delimitador'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Filas de encabezado a saltar (default {{ formato_default['filas_encabezado'] }})</label>
-      <input type="number" name="banco_filas_encabezado" min="0" placeholder="{{ formato_default['filas_encabezado'] }}">
+      <input type="number" name="banco_filas_encabezado" min="0" placeholder="{{ formato_default['filas_encabezado'] }}"
+             value="{{ f['filas_encabezado'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Columna nº de cuenta (default {{ formato_default['col_cuenta'] }})</label>
-      <input type="number" name="banco_col_cuenta" min="0" placeholder="{{ formato_default['col_cuenta'] }}">
+      <input type="number" name="banco_col_cuenta" min="0" placeholder="{{ formato_default['col_cuenta'] }}"
+             value="{{ f['col_cuenta'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Columna código banco (default {{ formato_default['col_codigo_banco'] }})</label>
-      <input type="number" name="banco_col_codigo_banco" min="0" placeholder="{{ formato_default['col_codigo_banco'] }}">
+      <input type="number" name="banco_col_codigo_banco" min="0" placeholder="{{ formato_default['col_codigo_banco'] }}"
+             value="{{ f['col_codigo_banco'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Columna fecha (default {{ formato_default['col_fecha'] }})</label>
-      <input type="number" name="banco_col_fecha" min="0" placeholder="{{ formato_default['col_fecha'] }}">
+      <input type="number" name="banco_col_fecha" min="0" placeholder="{{ formato_default['col_fecha'] }}"
+             value="{{ f['col_fecha'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Columna valor (default {{ formato_default['col_valor'] }})</label>
-      <input type="number" name="banco_col_valor" min="0" placeholder="{{ formato_default['col_valor'] }}">
+      <input type="number" name="banco_col_valor" min="0" placeholder="{{ formato_default['col_valor'] }}"
+             value="{{ f['col_valor'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Columna código detalle (default {{ formato_default['col_codigo_detalle'] }})</label>
-      <input type="number" name="banco_col_codigo_detalle" min="0" placeholder="{{ formato_default['col_codigo_detalle'] }}">
+      <input type="number" name="banco_col_codigo_detalle" min="0" placeholder="{{ formato_default['col_codigo_detalle'] }}"
+             value="{{ f['col_codigo_detalle'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Columna descripción (default {{ formato_default['col_descripcion'] }})</label>
-      <input type="number" name="banco_col_descripcion" min="0" placeholder="{{ formato_default['col_descripcion'] }}">
+      <input type="number" name="banco_col_descripcion" min="0" placeholder="{{ formato_default['col_descripcion'] }}"
+             value="{{ f['col_descripcion'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Formato de fecha (default {{ formato_default['formato_fecha'] }})</label>
-      <input type="text" name="banco_formato_fecha" placeholder="{{ formato_default['formato_fecha'] }}">
+      <input type="text" name="banco_formato_fecha" placeholder="{{ formato_default['formato_fecha'] }}"
+             value="{{ f['formato_fecha'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Separador decimal (default "{{ formato_default['separador_decimal'] }}")</label>
-      <input type="text" name="banco_separador_decimal" maxlength="1" placeholder="{{ formato_default['separador_decimal'] }}">
+      <input type="text" name="banco_separador_decimal" maxlength="1" placeholder="{{ formato_default['separador_decimal'] }}"
+             value="{{ f['separador_decimal'] if editando else '' }}">
     </div>
     <div class="form-row">
       <label>Separador de miles (default "{{ formato_default['separador_miles'] }}")</label>
-      <input type="text" name="banco_separador_miles" maxlength="1" placeholder="{{ formato_default['separador_miles'] }}">
+      <input type="text" name="banco_separador_miles" maxlength="1" placeholder="{{ formato_default['separador_miles'] }}"
+             value="{{ f['separador_miles'] if editando else '' }}">
     </div>
 
     <h3>Cuentas contables (avanzado, opcional)</h3>
@@ -151,15 +192,20 @@
     <div class="form-row">
       <label>Cuentas de contrapartida por clasificación</label>
       <textarea name="cuentas_contraparte" rows="3"
-                placeholder='{"FACTURA_VENTA": "13050502", "FACTURA_COMPRA": "22050502"}'></textarea>
+                placeholder='{"FACTURA_VENTA": "13050502", "FACTURA_COMPRA": "22050502"}'>{% if editando and empresa_editar.cuentas_contraparte %}{{ empresa_editar.cuentas_contraparte | tojson }}{% endif %}</textarea>
     </div>
     <div class="form-row">
       <label>Cuentas de impuestos</label>
       <textarea name="cuentas_impuestos" rows="3"
-                placeholder='{"IVA": {"compra": "24081002", "venta": "24080502"}}'></textarea>
+                placeholder='{"IVA": {"compra": "24081002", "venta": "24080502"}}'>{% if editando and empresa_editar.cuentas_impuestos %}{{ empresa_editar.cuentas_impuestos | tojson }}{% endif %}</textarea>
     </div>
 
-    <button type="submit" class="btn btn-primary">Crear empresa</button>
+    <button type="submit" class="btn btn-primary">
+      {% if editando %}Guardar cambios{% else %}Crear empresa{% endif %}
+    </button>
+    {% if editando %}
+    <a href="{{ url_for('web.empresas') }}" class="btn">Cancelar</a>
+    {% endif %}
   </form>
 </div>
 

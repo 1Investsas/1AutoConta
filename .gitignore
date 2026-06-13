@@ -8,6 +8,8 @@ db/.flask_secret_key
 output/*.xlsx
 input/*.xlsx
 data/*.xlsx
+data/empresas.json
+data/*/
 .venv/
 venv/
 *.egg-info/

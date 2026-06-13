@@ -16,6 +16,9 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 NIT_EMPRESA: str = os.getenv("NIT_EMPRESA", "901331657")
 NOMBRE_EMPRESA: str = os.getenv("NOMBRE_EMPRESA", "1INVEST SAS")
+# Sigla / nombre corto de la empresa (para la selección rápida en la UI).
+# Si no se define, se usa el nombre completo como sigla.
+SIGLA_EMPRESA: str = os.getenv("SIGLA_EMPRESA", "") or NOMBRE_EMPRESA
 
 # ---------------------------------------------------------------------------
 # Rutas por defecto

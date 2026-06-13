@@ -61,6 +61,8 @@ class Empresa:
     id: str
     nit: str
     nombre: str
+    # Sigla / nombre corto usado para seleccionar la empresa rápidamente.
+    sigla: str = ""
     # Overrides sobre los valores por defecto de config.py.
     # Solo se guardan las claves que difieren; el resto hereda del default.
     cuentas_contraparte: dict = field(default_factory=dict)
@@ -77,6 +79,11 @@ class Empresa:
     @property
     def es_principal(self) -> bool:
         return self.id == EMPRESA_PRINCIPAL_ID
+
+    @property
+    def sigla_efectiva(self) -> str:
+        """Sigla a mostrar; si no hay sigla cae al nombre completo."""
+        return (self.sigla or "").strip() or self.nombre
 
     @property
     def db_path(self) -> str:
@@ -112,12 +119,24 @@ class Empresa:
 
 
 def _empresa_principal() -> Empresa:
-    """Empresa por defecto, construida desde las variables de entorno."""
+    """
+    Empresa por defecto.
+
+    Su identidad y configuración salen de las variables de entorno, pero si
+    el usuario las editó desde la UI, esos cambios se persisten en el registro
+    bajo la clave "principal" y tienen prioridad sobre el entorno.
+    """
+    override = _leer_registro().get(EMPRESA_PRINCIPAL_ID, {})
     return Empresa(
         id=EMPRESA_PRINCIPAL_ID,
-        nit=config.NIT_EMPRESA,
-        nombre=config.NOMBRE_EMPRESA,
-        cuenta_banco_default=config.BANCO_CUENTA_DEFAULT,
+        nit=override.get("nit") or config.NIT_EMPRESA,
+        nombre=override.get("nombre") or config.NOMBRE_EMPRESA,
+        sigla=override.get("sigla") or config.SIGLA_EMPRESA,
+        cuentas_contraparte=override.get("cuentas_contraparte", {}) or {},
+        cuentas_impuestos=override.get("cuentas_impuestos", {}) or {},
+        cuenta_banco_default=override.get("cuenta_banco_default", "") or config.BANCO_CUENTA_DEFAULT,
+        nit_banco=override.get("nit_banco", "") or "",
+        formato_banco=override.get("formato_banco", {}) or {},
     )
 
 
@@ -144,6 +163,7 @@ def _desde_dict(d: dict) -> Empresa:
         id=d["id"],
         nit=d.get("nit", ""),
         nombre=d.get("nombre", ""),
+        sigla=d.get("sigla", "") or "",
         cuentas_contraparte=d.get("cuentas_contraparte", {}) or {},
         cuentas_impuestos=d.get("cuentas_impuestos", {}) or {},
         cuenta_banco_default=d.get("cuenta_banco_default", ""),
@@ -182,12 +202,13 @@ def _slug(nombre: str) -> str:
 
 
 def guardar_empresa(empresa: Empresa) -> Empresa:
-    """Crea o actualiza una empresa en el registro (excepto la principal)."""
-    if empresa.es_principal:
-        raise ValueError(
-            "La empresa principal se configura por variables de entorno, "
-            "no se puede editar desde el registro."
-        )
+    """
+    Crea o actualiza una empresa en el registro.
+
+    La empresa principal también puede persistirse: sus cambios se guardan
+    bajo la clave "principal" y tienen prioridad sobre las variables de
+    entorno, pero su id, base de datos y carpeta de maestros no cambian.
+    """
     with _lock:
         registro = _leer_registro()
         registro[empresa.id] = asdict(empresa)
@@ -196,16 +217,53 @@ def guardar_empresa(empresa: Empresa) -> Empresa:
     return empresa
 
 
-def crear_empresa(nit: str, nombre: str, **kwargs) -> Empresa:
-    """Crea una empresa nueva con id derivado del nombre."""
-    base = _slug(nombre)
+def crear_empresa(nit: str, nombre: str, sigla: str = "", **kwargs) -> Empresa:
+    """Crea una empresa nueva con id derivado de la sigla (o del nombre)."""
+    base = _slug(sigla or nombre)
     with _lock:
         registro = _leer_registro()
         emp_id, n = base, 2
         while emp_id in registro or emp_id == EMPRESA_PRINCIPAL_ID:
             emp_id = f"{base}_{n}"
             n += 1
-    empresa = Empresa(id=emp_id, nit=nit.strip(), nombre=nombre.strip(), **kwargs)
+    empresa = Empresa(
+        id=emp_id, nit=nit.strip(), nombre=nombre.strip(),
+        sigla=sigla.strip(), **kwargs,
+    )
+    return guardar_empresa(empresa)
+
+
+def actualizar_empresa(
+    empresa_id: str,
+    *,
+    nit: str,
+    nombre: str,
+    sigla: str = "",
+    cuenta_banco_default: str = "",
+    nit_banco: str = "",
+    formato_banco: dict | None = None,
+    cuentas_contraparte: dict | None = None,
+    cuentas_impuestos: dict | None = None,
+) -> Empresa:
+    """
+    Actualiza los datos y la configuración de una empresa existente.
+
+    El id de la empresa nunca cambia (aunque cambien nombre o sigla), de modo
+    que su base de datos y su carpeta de archivos maestros se conservan.
+    Funciona también para la empresa principal.
+    """
+    actual = obtener_empresa(empresa_id)
+    empresa = Empresa(
+        id=actual.id,
+        nit=nit.strip(),
+        nombre=nombre.strip(),
+        sigla=sigla.strip(),
+        cuentas_contraparte=cuentas_contraparte or {},
+        cuentas_impuestos=cuentas_impuestos or {},
+        cuenta_banco_default=cuenta_banco_default.strip(),
+        nit_banco=nit_banco.strip(),
+        formato_banco=formato_banco or {},
+    )
     return guardar_empresa(empresa)
 
 
