@@ -81,6 +81,22 @@ def _save_upload(file_bytes: bytes, filename: str) -> str:
     return store.save_file(file_bytes, "uploads", f"{uuid.uuid4().hex[:8]}_{fname}")
 
 
+def _rutas_maestros_default(emp) -> tuple:
+    """Resuelve las rutas de los 3 maestros de la empresa (sin uploads nuevos)."""
+    rutas = []
+    for default_name in [
+        "Listado_de_Terceros.xlsx",
+        "Listado_de_Cuentas_Contables.xlsx",
+        "Tipos_de_comprobante_contable.xlsx",
+    ]:
+        try:
+            path = emp.ruta_maestro(default_name)
+        except FileNotFoundError:
+            path = str(Path(_project_root()) / emp.data_category / default_name)
+        rutas.append(path)
+    return tuple(rutas)
+
+
 # Cache en memoria de los maestros Excel para los endpoints de autocompletar,
 # invalidado por fecha de modificación del archivo.
 _MAESTROS_CACHE: dict[str, tuple[float, object]] = {}
@@ -193,10 +209,28 @@ def procesar():
     db = emp.db_path
     incluir_dup = request.form.get("incluir_duplicados") == "on"
 
+    # Registrar la importación antes de procesar: si el pipeline falla, el
+    # archivo RADIAN queda guardado y la importación puede retomarse después.
+    from app.database import inicializar_db, registrar_importacion, actualizar_importacion
+    inicializar_db(db)
+    imp_id = registrar_importacion(
+        archivo_nombre=secure_filename(radian_file.filename),
+        archivo_ref=radian_ref,
+        db_path=db,
+    )
+
     try:
         resultado = _ejecutar_pipeline(
             radian_path, terceros_path, cuentas_path,
             comprobantes_path, db, incluir_dup, empresa=emp,
+        )
+        resultado["importacion_id"] = imp_id
+        actualizar_importacion(
+            imp_id, estado="completada",
+            n_docs=resultado["n_docs"],
+            n_excepciones=resultado["n_excepciones"],
+            excel_ref=resultado["excel_path"],
+            db_path=db,
         )
         session_store.guardar(KEY_RESULTADO, resultado)
         flash(f"✓ Procesados {resultado['n_docs']} documentos. "
@@ -205,8 +239,10 @@ def procesar():
 
     except Exception as exc:
         logger.exception("Error en pipeline web")
-        flash(f"Error al procesar: {exc}", "error")
-        return redirect(url_for("web.index"))
+        actualizar_importacion(imp_id, estado="error", error=str(exc), db_path=db)
+        flash(f"Error al procesar: {exc}. El archivo quedó guardado: puedes "
+              f"retomar esta importación desde la página de Importaciones.", "error")
+        return redirect(url_for("web.importaciones"))
 
 
 def _ejecutar_pipeline(
@@ -313,6 +349,10 @@ def _ejecutar_pipeline(
         output_path=os.path.join(_project_root(), "output"),
         archivo_origen=radian_path,
     )
+    # En modo cloud el disco local es efímero: subir el Excel al storage
+    # para que la importación pueda descargarse/retomarse más adelante.
+    if store.is_cloud():
+        ruta_excel = store.save_local_file(ruta_excel, "output")
 
     # Serializar preasientos para la sesión (sólo datos necesarios para la vista)
     preasientos_data = []
@@ -470,6 +510,117 @@ def descargar():
         io.BytesIO(content),
         as_attachment=True,
         download_name=Path(excel_ref.replace('blob://', '')).name,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Importaciones — historial persistente, retomar y regenerar archivos
+# ---------------------------------------------------------------------------
+
+@bp.route("/importaciones")
+def importaciones():
+    """Lista las importaciones realizadas con su estado y acciones disponibles."""
+    from app.database import inicializar_db, listar_importaciones
+
+    db_path = _empresa_actual().db_path
+    inicializar_db(db_path)
+    registros = listar_importaciones(db_path)
+
+    for r in registros:
+        r["fecha_fmt"] = (r.get("fecha") or "")[:19].replace("T", " ")
+        r["archivo_disponible"] = bool(
+            r.get("archivo_ref") and store.file_exists(r["archivo_ref"])
+        )
+        r["excel_disponible"] = bool(
+            r.get("excel_ref") and store.file_exists(r["excel_ref"])
+        )
+
+    return render_template("importaciones.html", importaciones=registros)
+
+
+@bp.route("/importaciones/<int:imp_id>/reprocesar", methods=["POST"])
+def importacion_reprocesar(imp_id):
+    """Retoma una importación: re-ejecuta el pipeline con el RADIAN original.
+
+    Sirve tanto para reintentar una importación fallida como para volver a
+    generar el Excel de una importación completada. Los documentos ya
+    registrados se incluyen de nuevo (no se duplican en la BD: el INSERT
+    ignora CUFEs existentes).
+    """
+    from app.database import inicializar_db, obtener_importacion, actualizar_importacion
+
+    emp = _empresa_actual()
+    db = emp.db_path
+    inicializar_db(db)
+
+    imp = obtener_importacion(imp_id, db_path=db)
+    if not imp:
+        flash("La importación no existe.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    archivo_ref = imp.get("archivo_ref") or ""
+    if not archivo_ref or not store.file_exists(archivo_ref):
+        flash("El archivo RADIAN original ya no está disponible; "
+              "vuelve a subirlo desde el dashboard.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    radian_path = store.load_file(archivo_ref)
+    terceros_path, cuentas_path, comprobantes_path = _rutas_maestros_default(emp)
+
+    try:
+        # incluir_duplicados=True: los documentos de esta importación ya
+        # están registrados en la BD y de lo contrario quedarían excluidos.
+        resultado = _ejecutar_pipeline(
+            radian_path, terceros_path, cuentas_path,
+            comprobantes_path, db, incluir_duplicados=True, empresa=emp,
+        )
+        resultado["importacion_id"] = imp_id
+        actualizar_importacion(
+            imp_id, estado="completada",
+            n_docs=resultado["n_docs"],
+            n_excepciones=resultado["n_excepciones"],
+            excel_ref=resultado["excel_path"],
+            db_path=db,
+        )
+        session_store.guardar(KEY_RESULTADO, resultado)
+        flash(f"✓ Importación #{imp_id} retomada: {resultado['n_docs']} documentos, "
+              f"{resultado['n_excepciones']} con excepciones. Archivo regenerado.",
+              "success")
+        return redirect(url_for("web.resultado"))
+
+    except Exception as exc:
+        logger.exception("Error al retomar la importación %s", imp_id)
+        actualizar_importacion(imp_id, estado="error", error=str(exc), db_path=db)
+        flash(f"Error al retomar la importación: {exc}", "error")
+        return redirect(url_for("web.importaciones"))
+
+
+@bp.route("/importaciones/<int:imp_id>/descargar")
+def importacion_descargar(imp_id):
+    """Descarga el Excel generado de una importación previa."""
+    from app.database import inicializar_db, obtener_importacion
+
+    db_path = _empresa_actual().db_path
+    inicializar_db(db_path)
+    imp = obtener_importacion(imp_id, db_path=db_path)
+
+    if not imp or not imp.get("excel_ref"):
+        flash("Esta importación no tiene un Excel generado. "
+              "Usa «Retomar» para generarlo.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    excel_ref = imp["excel_ref"]
+    if not store.file_exists(excel_ref):
+        flash("El Excel ya no existe en el servidor. "
+              "Usa «Retomar» para volver a generarlo.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    content = store.get_download_bytes(excel_ref)
+    return send_file(
+        io.BytesIO(content),
+        as_attachment=True,
+        download_name=Path(excel_ref.replace("blob://", "")).name,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 

@@ -126,7 +126,7 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
     """
     Crea todas las tablas necesarias si no existen.
 
-    Tablas: documentos_importados, bitacora, historial_cuentas.
+    Tablas: documentos_importados, bitacora, historial_cuentas, importaciones.
     """
     conn = get_connection(db_path)
     try:
@@ -183,6 +183,19 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             UNIQUE(clasificacion, nit_tercero, tipo_linea)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS importaciones (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha           TEXT    NOT NULL,
+            archivo_nombre  TEXT,
+            archivo_ref     TEXT,
+            n_docs          INTEGER DEFAULT 0,
+            n_excepciones   INTEGER DEFAULT 0,
+            excel_ref       TEXT,
+            estado          TEXT    NOT NULL DEFAULT 'procesando',
+            error           TEXT
+        )
+    """)
 
 
 def _create_tables_mssql(conn: DbConnection) -> None:
@@ -229,6 +242,20 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             usos            INT DEFAULT 1,
             ultima_vez      NVARCHAR(50),
             CONSTRAINT uq_historial UNIQUE(clasificacion, nit_tercero, tipo_linea)
+        )
+    """)
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'importaciones')
+        CREATE TABLE importaciones (
+            id              INT IDENTITY(1,1) PRIMARY KEY,
+            fecha           NVARCHAR(50)   NOT NULL,
+            archivo_nombre  NVARCHAR(300),
+            archivo_ref     NVARCHAR(500),
+            n_docs          INT DEFAULT 0,
+            n_excepciones   INT DEFAULT 0,
+            excel_ref       NVARCHAR(500),
+            estado          NVARCHAR(30)   NOT NULL DEFAULT 'procesando',
+            error           NVARCHAR(MAX)
         )
     """)
 
@@ -546,6 +573,99 @@ def obtener_actividad_reciente(db_path: str = DB_PATH, limite: int = 30) -> list
             ORDER BY fecha_proceso DESC
         """).fetchall()
         # Apply limit in Python
+        return [dict(r) for r in rows[:limite]]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Importaciones — registro persistente de cada proceso RADIAN
+# ---------------------------------------------------------------------------
+
+def registrar_importacion(
+    archivo_nombre: str,
+    archivo_ref: str,
+    db_path: str = DB_PATH,
+) -> int:
+    """
+    Crea el registro de una importación en estado 'procesando' y retorna su id.
+
+    El registro persiste el archivo RADIAN original (archivo_ref) para poder
+    retomar la importación si algo falla o regenerar el Excel más adelante.
+    """
+    conn = get_connection(db_path)
+    try:
+        params = (datetime.now().isoformat(), archivo_nombre, archivo_ref, "procesando")
+        if conn.is_sqlite:
+            cur = conn.execute(
+                """
+                INSERT INTO importaciones (fecha, archivo_nombre, archivo_ref, estado)
+                VALUES (?,?,?,?)
+                """,
+                params,
+            )
+            imp_id = cur.lastrowid
+        else:
+            conn.execute(
+                """
+                INSERT INTO importaciones (fecha, archivo_nombre, archivo_ref, estado)
+                VALUES (?,?,?,?)
+                """,
+                params,
+            )
+            imp_id = int(conn.execute("SELECT @@IDENTITY").fetchone()[0])
+        conn.commit()
+        return imp_id
+    finally:
+        conn.close()
+
+
+def actualizar_importacion(
+    imp_id: int,
+    estado: str,
+    n_docs: int = 0,
+    n_excepciones: int = 0,
+    excel_ref: Optional[str] = None,
+    error: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> None:
+    """Actualiza el estado y los resultados de una importación existente."""
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            UPDATE importaciones
+            SET estado = ?, n_docs = ?, n_excepciones = ?,
+                excel_ref = COALESCE(?, excel_ref), error = ?
+            WHERE id = ?
+            """,
+            (estado, n_docs, n_excepciones, excel_ref, error, imp_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def obtener_importacion(imp_id: int, db_path: str = DB_PATH) -> Optional[dict]:
+    """Retorna una importación por id, o None si no existe."""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM importaciones WHERE id = ?", (imp_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def listar_importaciones(db_path: str = DB_PATH, limite: int = 50) -> list[dict]:
+    """Retorna las importaciones más recientes (descendente por fecha)."""
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM importaciones ORDER BY id DESC"
+        ).fetchall()
+        # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
         return [dict(r) for r in rows[:limite]]
     finally:
         conn.close()
