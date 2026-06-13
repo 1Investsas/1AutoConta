@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from app.config import DB_PATH, USE_SQLITE, DATABASE_URL
+from app.config import DB_PATH, USE_SQLITE, DATABASE_URL, DB_JOURNAL_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +102,14 @@ def get_connection(db_path: str = DB_PATH):
         import sqlite3
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(path))
+        conn = sqlite3.connect(str(path), timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"PRAGMA journal_mode={DB_JOURNAL_MODE}")
         conn.execute("PRAGMA foreign_keys=ON")
+        # Espera (en ms) si otra conexión tiene la BD bloqueada, en vez de
+        # fallar de inmediato con "database is locked". Relevante con varios
+        # workers de gunicorn sobre el mismo archivo SQLite.
+        conn.execute("PRAGMA busy_timeout=5000")
         return DbConnection(conn, is_sqlite=True)
     else:
         import pyodbc

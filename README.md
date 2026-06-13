@@ -138,6 +138,40 @@ pytest tests/ -v
 
 ---
 
+## Persistencia de datos
+
+El sistema guarda información en dos lugares:
+
+| Dato | Local (`USE_SQLITE=true`) | Azure |
+|------|---------------------------|-------|
+| Documentos importados, historial de cuentas, importaciones | SQLite en `DB_DIR` | SQLite en `DB_DIR` **o** Azure SQL si `USE_SQLITE=false` |
+| Empresas, archivos maestros, uploads, Excel generados | Carpetas del proyecto | Azure Blob Storage si `AZURE_STORAGE_CONNECTION_STRING` está configurado |
+
+### En Azure App Service (importante)
+
+El sistema de archivos del contenedor es **efímero**: solo `/home` persiste, y los
+despliegues reemplazan `/home/site/wwwroot`. Por eso la base de datos SQLite se
+guarda automáticamente en **`/home/data/db`** (fuera de `wwwroot`), que **sobrevive
+a reinicios y redespliegues**. La detección es automática (variables de entorno de
+App Service); puedes forzar otra ruta con `DB_DIR`.
+
+> Requisito: `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` (valor por defecto en Linux).
+
+Los archivos maestros, el registro de empresas y los Excel generados persisten en
+**Azure Blob Storage** cuando `AZURE_STORAGE_CONNECTION_STRING` está configurada.
+
+### Opcional: Azure SQL en vez de SQLite
+
+Para mayor concurrencia/robustez puedes migrar a Azure SQL (`USE_SQLITE=false` +
+`DATABASE_URL`). Ver `azure-setup.sh`.
+
+> ⚠️ Pendiente conocido: en modo Azure SQL todas las empresas comparten las mismas
+> tablas (la separación por empresa hoy depende de archivos SQLite distintos). Si se
+> habilita Azure SQL con varias empresas, hay que añadir antes una columna
+> discriminadora por empresa.
+
+---
+
 ## Licencia
 
 MIT — ver [LICENSE](LICENSE).
