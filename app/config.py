@@ -26,7 +26,45 @@ SIGLA_EMPRESA: str = os.getenv("SIGLA_EMPRESA", "") or NOMBRE_EMPRESA
 DATA_DIR: str = os.getenv("DATA_DIR", "data/")
 INPUT_DIR: str = os.getenv("INPUT_DIR", "input/")
 OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "output/")
-DB_PATH: str = os.getenv("DB_PATH", "db/contable.db")
+
+
+def _en_azure_app_service() -> bool:
+    """True cuando la app corre en Azure App Service.
+
+    App Service define estas variables de entorno automáticamente. Solo se usa
+    para elegir una ubicación de datos persistente por defecto.
+    """
+    return bool(os.getenv("WEBSITE_INSTANCE_ID") or os.getenv("WEBSITE_SITE_NAME"))
+
+
+def _db_dir_por_defecto() -> str:
+    """Directorio por defecto para la base de datos SQLite.
+
+    En Azure App Service el directorio /home es almacenamiento PERSISTENTE:
+    sobrevive a reinicios del contenedor y a los redespliegues (que solo
+    reemplazan /home/site/wwwroot). Guardar la BD en /home/data —fuera de
+    wwwroot— evita que se borre en cada despliegue y que la app "empiece desde
+    cero". En local se usa la carpeta db/ del proyecto (comportamiento original).
+    """
+    if _en_azure_app_service():
+        return "/home/data/db"
+    return "db"
+
+
+# Carpeta donde viven las bases de datos SQLite (la principal y la de cada
+# empresa). Configurable con DB_DIR para apuntarla a un volumen persistente.
+DB_DIR: str = os.getenv("DB_DIR", _db_dir_por_defecto())
+DB_PATH: str = os.getenv("DB_PATH", os.path.join(DB_DIR, "contable.db"))
+
+# Modo de journal de SQLite. WAL no es compatible con sistemas de archivos de
+# red (el montaje /home de Azure App Service es SMB), por lo que en la nube se
+# usa el journal por defecto (DELETE). En local se mantiene WAL por rendimiento.
+_JOURNAL_VALIDOS = {"WAL", "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "OFF"}
+DB_JOURNAL_MODE: str = os.getenv(
+    "DB_JOURNAL_MODE", "DELETE" if _en_azure_app_service() else "WAL"
+).upper()
+if DB_JOURNAL_MODE not in _JOURNAL_VALIDOS:
+    DB_JOURNAL_MODE = "DELETE"
 
 # ---------------------------------------------------------------------------
 # Azure — Database & Storage (cloud deployment)

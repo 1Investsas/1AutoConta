@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from dataclasses import dataclass, field, asdict
@@ -89,7 +90,8 @@ class Empresa:
     def db_path(self) -> str:
         if self.es_principal:
             return config.DB_PATH
-        return f"db/contable_{self.id}.db"
+        # Misma carpeta (persistente) que la BD principal, un archivo por empresa.
+        return os.path.join(config.DB_DIR, f"contable_{self.id}.db")
 
     @property
     def data_category(self) -> str:

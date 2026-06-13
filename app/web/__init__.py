@@ -43,7 +43,12 @@ def _resolver_secret_key() -> str:
         "en .env para producción."
     )
 
-    key_file = _PROJECT_ROOT / "db" / ".flask_secret_key"
+    # Guardar la clave junto a la BD (en Azure, almacenamiento persistente):
+    # así sobrevive a reinicios y despliegues y las sesiones —incluida la
+    # empresa seleccionada— no se invalidan en cada arranque.
+    from app.config import DB_DIR
+    db_dir = Path(DB_DIR) if os.path.isabs(DB_DIR) else _PROJECT_ROOT / DB_DIR
+    key_file = db_dir / ".flask_secret_key"
     try:
         if key_file.exists():
             persisted = key_file.read_text().strip()
