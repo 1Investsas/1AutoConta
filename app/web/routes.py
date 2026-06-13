@@ -19,8 +19,8 @@ from werkzeug.utils import secure_filename
 from app.config import DATA_DIR, DB_PATH
 from app import storage as store
 from app.empresas import (
-    listar_empresas, obtener_empresa, crear_empresa, eliminar_empresa,
-    FORMATO_BANCO_DEFAULT,
+    listar_empresas, obtener_empresa, crear_empresa, actualizar_empresa,
+    eliminar_empresa, FORMATO_BANCO_DEFAULT,
 )
 from app.web import session_store
 
@@ -50,6 +50,7 @@ def _inyectar_empresas():
         "empresa_actual": emp,
         "empresas_disponibles": listar_empresas(),
         "empresa": emp.nombre,
+        "empresa_sigla": emp.sigla_efectiva,
         "nit": emp.nit,
     }
 
@@ -1160,16 +1161,20 @@ def empresas_seleccionar():
     return redirect(request.referrer or url_for("web.index"))
 
 
-@bp.route("/empresas/crear", methods=["POST"])
-def empresas_crear():
-    """Crea una empresa nueva con su configuración propia."""
+def _parse_empresa_form() -> dict:
+    """
+    Lee y valida los campos del formulario de empresa (crear o editar).
+
+    Retorna un dict con los campos listos para crear/actualizar una empresa.
+    Lanza ValueError con un mensaje legible si algún dato es inválido.
+    """
     import json as _json
 
     nombre = request.form.get("nombre", "").strip()
     nit    = request.form.get("nit", "").strip()
-    if not nombre or not nit:
-        flash("Nombre y NIT son obligatorios.", "error")
-        return redirect(url_for("web.empresas"))
+    sigla  = request.form.get("sigla", "").strip()
+    if not nombre or not nit or not sigla:
+        raise ValueError("Nombre, sigla y NIT son obligatorios.")
 
     # Formato del extracto bancario (solo guardar lo que difiere del default)
     formato_banco = {}
@@ -1181,8 +1186,7 @@ def empresas_crear():
             try:
                 valor = int(valor)
             except ValueError:
-                flash(f"Valor inválido para {campo}: {valor}", "error")
-                return redirect(url_for("web.empresas"))
+                raise ValueError(f"Valor inválido para {campo}: {valor}")
         if valor != default:
             formato_banco[campo] = valor
 
@@ -1199,25 +1203,57 @@ def empresas_crear():
         except (ValueError, TypeError):
             raise ValueError(f"El campo {campo} debe ser un objeto JSON válido.")
 
+    return {
+        "nit": nit,
+        "nombre": nombre,
+        "sigla": sigla,
+        "cuenta_banco_default": request.form.get("cuenta_banco_default", "").strip(),
+        "nit_banco": request.form.get("nit_banco", "").strip(),
+        "formato_banco": formato_banco,
+        "cuentas_contraparte": _json_dict("cuentas_contraparte"),
+        "cuentas_impuestos": _json_dict("cuentas_impuestos"),
+    }
+
+
+@bp.route("/empresas/crear", methods=["POST"])
+def empresas_crear():
+    """Crea una empresa nueva con su configuración propia."""
     try:
-        cuentas_contraparte = _json_dict("cuentas_contraparte")
-        cuentas_impuestos   = _json_dict("cuentas_impuestos")
+        campos = _parse_empresa_form()
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("web.empresas"))
 
-    emp = crear_empresa(
-        nit=nit,
-        nombre=nombre,
-        cuenta_banco_default=request.form.get("cuenta_banco_default", "").strip(),
-        nit_banco=request.form.get("nit_banco", "").strip(),
-        formato_banco=formato_banco,
-        cuentas_contraparte=cuentas_contraparte,
-        cuentas_impuestos=cuentas_impuestos,
+    emp = crear_empresa(**campos)
+
+    flash(f"✓ Empresa '{emp.nombre}' ({emp.sigla_efectiva}) creada. "
+          f"Sube sus archivos maestros en data/{emp.id}/ "
+          f"o desde el formulario de procesamiento.", "success")
+    return redirect(url_for("web.empresas"))
+
+
+@bp.route("/empresas/<empresa_id>/editar")
+def empresas_editar(empresa_id):
+    """Muestra el formulario de edición pre-rellenado con la empresa indicada."""
+    emp = obtener_empresa(empresa_id)
+    return render_template(
+        "empresas.html",
+        formato_default=FORMATO_BANCO_DEFAULT,
+        empresa_editar=emp,
     )
 
-    flash(f"✓ Empresa '{emp.nombre}' creada. Sube sus archivos maestros en data/{emp.id}/ "
-          f"o desde el formulario de procesamiento.", "success")
+
+@bp.route("/empresas/<empresa_id>/actualizar", methods=["POST"])
+def empresas_actualizar(empresa_id):
+    """Guarda los cambios de datos y configuración de una empresa existente."""
+    try:
+        campos = _parse_empresa_form()
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("web.empresas_editar", empresa_id=empresa_id))
+
+    emp = actualizar_empresa(empresa_id, **campos)
+    flash(f"✓ Empresa '{emp.nombre}' ({emp.sigla_efectiva}) actualizada.", "success")
     return redirect(url_for("web.empresas"))
 
 

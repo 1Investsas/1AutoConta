@@ -19,10 +19,12 @@
 
   <form method="post" action="{{ url_for('web.empresas_seleccionar') }}" class="empresa-switch" style="padding: 8px 14px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <select name="empresa_id" onchange="this.form.submit()" style="width:100%; padding:5px; border-radius:6px;">
+    <select name="empresa_id" onchange="this.form.submit()" style="width:100%; padding:5px; border-radius:6px;"
+            title="Selecciona la empresa de trabajo por su sigla">
       {% for e in empresas_disponibles %}
-      <option value="{{ e.id }}" {% if e.id == empresa_actual.id %}selected{% endif %}>
-        {{ e.nombre }} ({{ e.nit }})
+      <option value="{{ e.id }}" title="{{ e.nombre }} — NIT {{ e.nit }}"
+              {% if e.id == empresa_actual.id %}selected{% endif %}>
+        {{ e.sigla_efectiva }}
       </option>
       {% endfor %}
     </select>
