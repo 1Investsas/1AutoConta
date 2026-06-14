@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}1CONTIGO{% endblock %}</title>
   <meta name="description" content="1CONTIGO — Automatización contable, tributaria y financiera para {{ empresa }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {% block extra_head %}{% endblock %}
 </head>
