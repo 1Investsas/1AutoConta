@@ -3,92 +3,140 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}contable-auto{% endblock %}</title>
-  <meta name="description" content="Sistema de automatización contable para {{ empresa }}">
+  <title>{% block title %}1CONTIGO{% endblock %}</title>
+  <meta name="description" content="1CONTIGO — Automatización contable, tributaria y financiera para {{ empresa }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {% block extra_head %}{% endblock %}
 </head>
 <body>
 
-<!-- ===== SIDEBAR ===== -->
+<!-- ===================== SIDEBAR ===================== -->
 <aside class="sidebar" id="sidebar">
-  <div class="sidebar-logo">
-    <div class="brand">contable-auto</div>
-    <div class="sub">{{ empresa }}</div>
-  </div>
 
-  <form method="post" action="{{ url_for('web.empresas_seleccionar') }}" class="empresa-switch" style="padding: 8px 14px;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <select name="empresa_id" onchange="this.form.submit()" style="width:100%; padding:5px; border-radius:6px;"
-            title="Selecciona la empresa de trabajo por su sigla">
-      {% for e in empresas_disponibles %}
-      <option value="{{ e.id }}" title="{{ e.nombre }} — NIT {{ e.nit }}"
-              {% if e.id == empresa_actual.id %}selected{% endif %}>
-        {{ e.sigla_efectiva }}
-      </option>
-      {% endfor %}
-    </select>
-  </form>
+  <a href="{{ url_for('web.index') }}" class="sidebar-logo" aria-label="1CONTIGO — Inicio">
+    <img src="{{ url_for('static', filename='img/logo-1contigo.png') }}" alt="1CONTIGO"
+         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+    <span class="brand-fallback" style="display:none"><span class="b-1">1</span><span class="b-rest">CONTIGO</span></span>
+  </a>
 
   <nav class="sidebar-nav">
-    <div class="nav-section">Principal</div>
+
+    <!-- ===== DASHBOARD ===== -->
     <a href="{{ url_for('web.index') }}"
-       class="nav-link {% if request.endpoint == 'web.index' %}active{% endif %}">
-      <span class="nav-icon">🏠</span> Dashboard
+       class="nav-top {% if request.endpoint == 'web.index' %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5"/><path d="M5 10v10h14V10"/></svg></span>
+      Dashboard
     </a>
-    {% if session.get('resultado_ref') %}
-    <a href="{{ url_for('web.resultado') }}"
-       class="nav-link {% if request.endpoint == 'web.resultado' %}active{% endif %}">
-      <span class="nav-icon">📊</span> Último resultado
-    </a>
-    {% endif %}
+    <div class="nav-children">
+      <a href="{{ url_for('web.analytics') }}" class="nav-sub {% if request.endpoint == 'web.analytics' %}active{% endif %}">Analíticas</a>
+      <a href="{{ url_for('web.importaciones') }}" class="nav-sub {% if request.endpoint == 'web.importaciones' %}active{% endif %}">Reportes / Informes</a>
+      <a href="#" class="nav-sub">Indicadores</a>
+    </div>
 
-    <div class="nav-section">Motor</div>
-    <a href="{{ url_for('web.historial') }}"
-       class="nav-link {% if request.endpoint == 'web.historial' %}active{% endif %}">
-      <span class="nav-icon">🧠</span> Historial
-    </a>
-    {% if session.get('resultado_ref') %}
-    <a href="{{ url_for('web.descargar') }}"
-       class="nav-link">
-      <span class="nav-icon">⬇️</span> Descargar Excel
-    </a>
-    {% endif %}
-    <a href="{{ url_for('web.importaciones') }}"
-       class="nav-link {% if request.endpoint == 'web.importaciones' %}active{% endif %}">
-      <span class="nav-icon">📥</span> Importaciones
-    </a>
+    <!-- ===== AUTOMATIZACIONES ===== -->
+    <button type="button" class="nav-group" data-group="auto" aria-expanded="true">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+      Automatizaciones
+      <span class="nav-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+    </button>
+    <div class="nav-children" data-group-body="auto">
+      <div class="nav-subgroup">Flujos indirectos de efectivo</div>
+      <a href="#" class="nav-sub">Nómina</a>
+      <a href="#" class="nav-sub" data-automatizar>RADIAN</a>
 
-    <div class="nav-section">Reportería</div>
-    <a href="{{ url_for('web.analytics') }}"
-       class="nav-link {% if request.endpoint == 'web.analytics' %}active{% endif %}">
-      <span class="nav-icon">📈</span> Analytics
-    </a>
+      <div class="nav-subgroup">Flujos directos de efectivo</div>
+      <a href="{{ url_for('web.banco') }}" class="nav-sub {% if request.endpoint in ('web.banco','web.banco_previsualizar') %}active{% endif %}">Bancos</a>
+      <a href="#" class="nav-sub">Caja general</a>
+      <a href="#" class="nav-sub">Cruces de saldos</a>
 
-    <div class="nav-section">Bancos</div>
-    <a href="{{ url_for('web.banco') }}"
-       class="nav-link {% if request.endpoint in ('web.banco','web.banco_previsualizar') %}active{% endif %}">
-      <span class="nav-icon">🏦</span> Extracto Banco
-    </a>
+      <div class="nav-subgroup">Tributario y fiscal</div>
+      <a href="#" class="nav-sub">Impuestos</a>
+      <a href="#" class="nav-sub">Cierres</a>
+      <a href="#" class="nav-sub">Ajustes</a>
+      <a href="#" class="nav-sub">Reclasificaciones</a>
 
-    <div class="nav-section">Configuración</div>
-    <a href="{{ url_for('web.empresas') }}"
-       class="nav-link {% if request.endpoint == 'web.empresas' %}active{% endif %}">
-      <span class="nav-icon">🏢</span> Empresas
-    </a>
+      <div class="nav-subgroup">Finanzas</div>
+      <a href="#" class="nav-sub">Flujo de caja proyectado vs ejecutado</a>
+    </div>
+
+    <!-- ===== CONFIGURACIONES ===== -->
+    <button type="button" class="nav-group" data-group="config" aria-expanded="true">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="18" r="2.2" fill="currentColor" stroke="none"/></svg></span>
+      Configuraciones
+      <span class="nav-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+    </button>
+    <div class="nav-children" data-group-body="config">
+      <div class="nav-subgroup">Empresas</div>
+      <a href="{{ url_for('web.empresas') }}" class="nav-sub {% if request.endpoint in ('web.empresas','web.empresas_editar') %}active{% endif %}">Creación / Edición</a>
+      <a href="{{ url_for('web.empresas') }}" class="nav-sub">Maestros</a>
+      <a href="{{ url_for('web.empresas') }}" class="nav-sub">Estructura archivo bancos</a>
+      <a href="{{ url_for('web.historial') }}" class="nav-sub {% if request.endpoint == 'web.historial' %}active{% endif %}">Machine learning</a>
+
+      <div class="nav-subgroup">Usuarios</div>
+      <a href="#" class="nav-sub">Digitación</a>
+      <a href="#" class="nav-sub">Tributario y fiscal</a>
+      <a href="#" class="nav-sub">Visualización</a>
+    </div>
   </nav>
 
   <div class="sidebar-footer">
-    NIT {{ nit }}<br>
-    v1.0 — Fase 4
+    <div class="profile">
+      <div class="avatar">AD</div>
+      <div class="profile-info">
+        <strong>Administrador</strong>
+        <span>admin@1contigo.com</span>
+      </div>
+      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+    </div>
   </div>
 </aside>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
-<!-- ===== MAIN ===== -->
+<!-- ===================== MAIN ===================== -->
 <div class="main">
+
   <header class="topbar">
-    <h1>{% block page_title %}contable-auto{% endblock %}</h1>
-    <span class="badge">{{ empresa }}</span>
+    <button type="button" class="hamburger" id="hamburger" aria-label="Abrir menú">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+
+    <div class="topbar-titles">
+      <h1>{% block page_title %}Panel{% endblock %}</h1>
+      {% block page_subtitle %}{% endblock %}
+    </div>
+
+    <div class="topbar-actions">
+      <!-- Selector de empresa -->
+      <form method="post" action="{{ url_for('web.empresas_seleccionar') }}" class="empresa-switch">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <span class="e-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg></span>
+        <div>
+          <span class="e-label">Empresa seleccionada</span>
+          <select name="empresa_id" onchange="this.form.submit()" title="Selecciona la empresa de trabajo">
+            {% for e in empresas_disponibles %}
+            <option value="{{ e.id }}" title="{{ e.nombre }} — NIT {{ e.nit }}"
+                    {% if e.id == empresa_actual.id %}selected{% endif %}>{{ e.sigla_efectiva }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+
+      <button type="button" class="icon-btn" aria-label="Notificaciones">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="dot">3</span>
+      </button>
+      <button type="button" class="icon-btn" aria-label="Ayuda">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3.5"/><line x1="12" y1="17" x2="12" y2="17"/></svg>
+      </button>
+      <button type="button" class="icon-btn avatar-btn" aria-label="Perfil">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </button>
+
+      <button type="button" class="btn btn-gold" id="openAutomatizar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+        Automatizar proceso
+      </button>
+    </div>
   </header>
 
   <!-- Flash messages -->
@@ -107,6 +155,72 @@
   </main>
 </div>
 
+<!-- ===================== MODAL: Automatizar proceso ===================== -->
+<div class="modal-overlay" id="automatizarModal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Automatizar proceso">
+    <div class="modal-head">
+      <h2>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+        Automatizar proceso
+      </h2>
+      <button type="button" class="modal-close" id="closeAutomatizar" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted small" style="margin-bottom:16px">
+        Sube tu reporte <strong>RADIAN.xlsx</strong> de la DIAN para generar los preasientos contables automáticamente.
+      </p>
+
+      <form method="POST" action="{{ url_for('web.procesar') }}"
+            enctype="multipart/form-data" data-loading="true">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="drop-zone" id="dropZoneRadian">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text">
+            Arrastra tu <strong>RADIAN.xlsx</strong> aquí<br>
+            o <strong><label for="radianFile">haz click para elegir</label></strong>
+          </div>
+          <input type="file" id="radianFile" name="radian" accept=".xlsx,.xls" required>
+          <div class="file-chosen" id="radianChosen"></div>
+        </div>
+
+        <details style="margin-top:16px">
+          <summary style="cursor:pointer; color:var(--text-dim); font-size:0.85rem; user-select:none;">
+            ▸ Archivos maestros opcionales (terceros, cuentas, comprobantes)
+          </summary>
+          <div class="form-grid" style="margin-top:14px">
+            <div class="form-group">
+              <label for="terceros">Listado de Terceros</label>
+              <input type="file" id="terceros" name="terceros" accept=".xlsx,.xls">
+            </div>
+            <div class="form-group">
+              <label for="cuentas">Plan de Cuentas</label>
+              <input type="file" id="cuentas" name="cuentas" accept=".xlsx,.xls">
+            </div>
+            <div class="form-group">
+              <label for="comprobantes">Tipos de Comprobante</label>
+              <input type="file" id="comprobantes" name="comprobantes" accept=".xlsx,.xls">
+            </div>
+          </div>
+        </details>
+
+        <label class="form-check">
+          <input type="checkbox" name="incluir_duplicados">
+          Incluir documentos ya procesados (duplicados)
+        </label>
+
+        <div style="margin-top:24px; display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn-secondary" id="cancelAutomatizar">Cancelar</button>
+          <button type="submit" class="btn btn-gold">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+            Procesar RADIAN
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Loading overlay -->
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loader"></div>
@@ -117,7 +231,7 @@
 // Auto-dismiss flash messages
 setTimeout(() => {
   const fc = document.getElementById('flashContainer');
-  if (fc) fc.style.opacity = '0', fc.style.transition = 'opacity 0.5s', setTimeout(() => fc.remove(), 500);
+  if (fc) { fc.style.transition = 'opacity 0.5s'; fc.style.opacity = '0'; setTimeout(() => fc.remove(), 500); }
 }, 4500);
 
 // Tab switching
@@ -131,17 +245,17 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// Drop-zone
+// Drop-zone genérico
 document.querySelectorAll('.drop-zone').forEach(zone => {
   const input = zone.querySelector('input[type=file]');
   const label = zone.querySelector('.file-chosen');
-  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('click', () => input && input.click());
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('drag-over');
-    if (e.dataTransfer.files[0]) {
+    if (input && e.dataTransfer.files[0]) {
       input.files = e.dataTransfer.files;
       if (label) label.textContent = '📄 ' + input.files[0].name;
     }
@@ -151,12 +265,44 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
   });
 });
 
-// Show loading on form submit
+// Loading overlay al enviar formularios marcados
 document.querySelectorAll('form[data-loading]').forEach(form => {
   form.addEventListener('submit', () => {
     document.getElementById('loadingOverlay').classList.add('visible');
   });
 });
+
+// --- Sidebar móvil ---
+const sidebar = document.getElementById('sidebar');
+const backdrop = document.getElementById('sidebarBackdrop');
+function toggleSidebar(open) {
+  sidebar.classList.toggle('open', open);
+  backdrop.classList.toggle('show', open);
+}
+document.getElementById('hamburger')?.addEventListener('click', () => toggleSidebar(!sidebar.classList.contains('open')));
+backdrop?.addEventListener('click', () => toggleSidebar(false));
+
+// --- Grupos colapsables del sidebar ---
+document.querySelectorAll('.nav-group').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.group;
+    const body = document.querySelector(`[data-group-body="${key}"]`);
+    const expanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', String(!expanded));
+    if (body) body.hidden = expanded;
+  });
+});
+
+// --- Modal Automatizar proceso ---
+const modal = document.getElementById('automatizarModal');
+function openModal() { modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false'); }
+function closeModal() { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); }
+document.getElementById('openAutomatizar')?.addEventListener('click', openModal);
+document.querySelectorAll('[data-automatizar]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); openModal(); }));
+document.getElementById('closeAutomatizar')?.addEventListener('click', closeModal);
+document.getElementById('cancelAutomatizar')?.addEventListener('click', closeModal);
+modal?.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 </script>
 
 {% block extra_scripts %}{% endblock %}

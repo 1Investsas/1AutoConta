@@ -1,130 +1,304 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard — contable-auto{% endblock %}
-{% block page_title %}Dashboard{% endblock %}
+{% block title %}Dashboard — 1CONTIGO{% endblock %}
+{% block page_title %}Bienvenido a tu centro de control financiero{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Automatiza procesos, cumple obligaciones y toma decisiones estratégicas con información confiable y en tiempo real.</p>{% endblock %}
 
 {% block content %}
 
-<!-- Stats Cards -->
-<div class="stats-grid">
-  <div class="card">
-    <div class="card-title">Documentos procesados</div>
-    <div class="card-value">{{ stats.total_docs }}</div>
-    <div class="card-sub">en total histórico</div>
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="hero-content">
+    <h2 class="hero-title">
+      Procesos automatizados,
+      <span class="gold">decisiones más claras.</span>
+    </h2>
+    <p class="hero-sub">
+      Monitorea procesos contables, obligaciones tributarias e indicadores
+      financieros en un solo lugar.
+    </p>
+    <a href="{{ url_for('web.analytics') }}" class="btn btn-primary">
+      Ver indicadores
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+    </a>
   </div>
-  <div class="card">
-    <div class="card-title">Reglas aprendidas</div>
-    <div class="card-value">{{ stats.total_historial }}</div>
-    <div class="card-sub">en el motor de sugerencias</div>
+  <div class="hero-art" aria-hidden="true">
+    <svg viewBox="0 0 320 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="barG" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0" stop-color="#3B82F6" stop-opacity="0.25"/>
+          <stop offset="1" stop-color="#3B82F6" stop-opacity="0.65"/>
+        </linearGradient>
+        <linearGradient id="goldG" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stop-color="#C8901A"/>
+          <stop offset="1" stop-color="#F4C430"/>
+        </linearGradient>
+      </defs>
+      <rect x="40"  y="120" width="34" height="60"  rx="5" fill="url(#barG)"/>
+      <rect x="92"  y="96"  width="34" height="84"  rx="5" fill="url(#barG)"/>
+      <rect x="144" y="74"  width="34" height="106" rx="5" fill="url(#barG)"/>
+      <rect x="196" y="50"  width="34" height="130" rx="5" fill="url(#barG)"/>
+      <rect x="248" y="28"  width="34" height="152" rx="5" fill="url(#barG)"/>
+      <path d="M44 150 C 110 150, 150 96, 286 34" stroke="url(#goldG)" stroke-width="7" stroke-linecap="round" fill="none"/>
+      <path d="M262 22 L292 30 L274 54 Z" fill="url(#goldG)"/>
+      <circle cx="44" cy="150" r="6" fill="#F4C430"/>
+    </svg>
   </div>
-  <div class="card">
-    <div class="card-title">Último proceso</div>
-    <div class="card-value" style="font-size:1.1rem; padding-top:4px">
-      {{ stats.ultima_fecha or '—' }}
+</section>
+
+<!-- ============ TARJETAS KPI ============ -->
+{# Datos reales: Documentos procesados y Reglas aprendidas. El resto son de muestra (placeholder) — se conectarán en fases posteriores. #}
+<section class="metric-grid">
+  <div class="metric-card">
+    <div class="metric-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M8 13h8M8 17h6"/></svg>
     </div>
-    <div class="card-sub">fecha de último procesamiento</div>
-  </div>
-  {% if stats.ultimas %}
-  <div class="card">
-    <div class="card-title">Tipo más frecuente</div>
-    <div class="card-value" style="font-size:1rem; padding-top:4px">
-      {{ stats.ultimas[0].clasificacion | replace('_', ' ') }}
-    </div>
-    <div class="card-sub">{{ stats.ultimas[0].cnt }} documentos</div>
-  </div>
-  {% endif %}
-</div>
-
-<!-- Upload Form -->
-<div class="form-section">
-  <h2>⚡ Procesar archivo RADIAN</h2>
-
-  <form method="POST" action="{{ url_for('web.procesar') }}"
-        enctype="multipart/form-data" data-loading="true">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-    <!-- Drag & Drop RADIAN -->
-    <div class="drop-zone" id="dropZoneRadian">
-      <div class="drop-icon">📂</div>
-      <div class="drop-text">
-        Arrastra tu <strong>RADIAN.xlsx</strong> aquí<br>
-        o <strong><label for="radianFile">haz click para elegir</label></strong>
+    <div class="metric-body">
+      <div class="metric-label">Documentos procesados</div>
+      <div class="metric-value">{{ "{:,.0f}".format(stats.total_docs).replace(",", ".") }}
+        <span class="metric-delta up">▲ 18.6%</span>
       </div>
-      <input type="file" id="radianFile" name="radian" accept=".xlsx,.xls" required>
-      <div class="file-chosen" id="radianChosen"></div>
+      <div class="metric-foot">vs. mes anterior</div>
     </div>
+  </div>
 
-    <!-- Maestros opcionales -->
-    <details style="margin-top:16px">
-      <summary style="cursor:pointer; color:var(--text-dim); font-size:0.85rem; user-select:none;">
-        ▸ Archivos maestros opcionales (terceros, cuentas, comprobantes)
-      </summary>
-      <div class="form-grid" style="margin-top:14px">
-        <div class="form-group">
-          <label for="terceros">Listado de Terceros</label>
-          <input type="file" id="terceros" name="terceros" accept=".xlsx,.xls">
-        </div>
-        <div class="form-group">
-          <label for="cuentas">Plan de Cuentas</label>
-          <input type="file" id="cuentas" name="cuentas" accept=".xlsx,.xls">
-        </div>
-        <div class="form-group">
-          <label for="comprobantes">Tipos de Comprobante</label>
-          <input type="file" id="comprobantes" name="comprobantes" accept=".xlsx,.xls">
+  <div class="metric-card">
+    <div class="metric-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a3 3 0 0 0 6 0M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a3 3 0 0 1-6 0M12 5V3"/></svg>
+    </div>
+    <div class="metric-body">
+      <div class="metric-label">Reglas aprendidas</div>
+      <div class="metric-value">{{ "{:,.0f}".format(stats.total_historial).replace(",", ".") }}
+        <span class="metric-delta up">▲ 12.4%</span>
+      </div>
+      <div class="metric-foot">en el motor de sugerencias</div>
+    </div>
+  </div>
+
+  <div class="metric-card">
+    <div class="metric-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+    </div>
+    <div class="metric-body">
+      <div class="metric-label">Obligaciones próximas</div>
+      <div class="metric-value">7 <span class="metric-delta up">▲ 2</span></div>
+      <div class="metric-foot">próximos 30 días</div>
+    </div>
+  </div>
+
+  <div class="metric-card">
+    <div class="metric-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.5 9a2.5 2.5 0 0 0-2.5-1.5c-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2A2.5 2.5 0 0 1 9.5 15M12 6v1.5M12 16.5V18"/></svg>
+    </div>
+    <div class="metric-body">
+      <div class="metric-label">Flujo de caja ejecutado vs proyectado</div>
+      <div class="metric-value">98,4% <span class="metric-delta up">▲ 5.2%</span></div>
+      <div class="metric-foot">vs. mes anterior</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ACCESOS RÁPIDOS ============ -->
+<section class="qa-grid">
+  <a class="qa-card" href="{{ url_for('web.analytics') }}">
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 5-7"/></svg></span>
+    <div class="qa-body">
+      <div class="qa-title">Analíticas</div>
+      <div class="qa-desc">Explora tus datos y tendencias</div>
+    </div>
+    <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+  </a>
+
+  <a class="qa-card" href="{{ url_for('web.importaciones') }}">
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M8 13h8M8 17h6"/></svg></span>
+    <div class="qa-body">
+      <div class="qa-title">Reportes / Informes</div>
+      <div class="qa-desc">Genera informes contables y financieros</div>
+    </div>
+    <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+  </a>
+
+  <a class="qa-card" href="#">
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 12 16 8"/><path d="M21 12a9 9 0 0 0-9-9"/></svg></span>
+    <div class="qa-body">
+      <div class="qa-title">Indicadores</div>
+      <div class="qa-desc">Monitorea KPIs clave de tu negocio</div>
+    </div>
+    <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+  </a>
+
+  <a class="qa-card" href="#" data-automatizar>
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+    <div class="qa-body">
+      <div class="qa-title">Automatizaciones</div>
+      <div class="qa-desc">Crea y gestiona flujos inteligentes</div>
+    </div>
+    <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+  </a>
+
+  <a class="qa-card" href="{{ url_for('web.empresas') }}">
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.65 1.1 1.31 1.27"/></svg></span>
+    <div class="qa-body">
+      <div class="qa-title">Configuraciones</div>
+      <div class="qa-desc">Personaliza reglas, usuarios y empresas</div>
+    </div>
+    <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+  </a>
+</section>
+
+<!-- ============ AUTOMATIZACIONES DESTACADAS ============ -->
+<div class="section-header">
+  <h2>✨ Automatizaciones destacadas</h2>
+  <a href="#" class="link-more" data-automatizar>Ver todas las automatizaciones
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+  </a>
+</div>
+<section class="auto-grid">
+  <div class="auto-card">
+    <div class="auto-top">
+      <span class="auto-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17" cy="8" r="2.5"/><path d="M16 15c3 0 5 2 5 5"/></svg></span>
+      <div><div class="auto-name">Nómina</div><div class="auto-cat">Flujo indirecto de efectivo</div></div>
+    </div>
+    <span class="badge badge-success">Activo</span>
+  </div>
+
+  <div class="auto-card">
+    <div class="auto-top">
+      <span class="auto-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg></span>
+      <div><div class="auto-name">RADIAN</div><div class="auto-cat">Flujo indirecto de efectivo</div></div>
+    </div>
+    <span class="badge badge-success">Activo</span>
+  </div>
+
+  <div class="auto-card">
+    <div class="auto-top">
+      <span class="auto-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/></svg></span>
+      <div><div class="auto-name">Bancos</div><div class="auto-cat">Flujo directo de efectivo</div></div>
+    </div>
+    <span class="badge badge-success">Activo</span>
+  </div>
+
+  <div class="auto-card">
+    <div class="auto-top">
+      <span class="auto-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l3 3v17l-3-2-3 2-3-2-3 2V5Z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>
+      <div><div class="auto-name">Impuestos</div><div class="auto-cat">Tributario y fiscal</div></div>
+    </div>
+    <span class="badge badge-warning">Pendiente</span>
+  </div>
+
+  <div class="auto-card">
+    <div class="auto-top">
+      <span class="auto-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7h-5M21 7v5"/></svg></span>
+      <div><div class="auto-name">Flujo de caja proyectado vs ejecutado</div><div class="auto-cat">Finanzas</div></div>
+    </div>
+    <span class="badge badge-info">Actualizado</span>
+  </div>
+</section>
+
+<!-- ============ ACTIVIDAD RECIENTE + ALERTAS ============ -->
+{# Filas de muestra (placeholder). La actividad real se conectará en fases posteriores. #}
+<div class="dash-cols">
+
+  <!-- Actividad reciente -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>📋 Actividad reciente</h2>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Proceso</th><th>Descripción</th><th>Fecha</th>
+            <th>Estado</th><th>Responsable</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Facturas</strong></td>
+            <td>Procesamiento facturas electrónicas</td>
+            <td class="text-dim">20/may/2025 09:15</td>
+            <td><span class="badge badge-success">Validado</span></td>
+            <td>María Gómez</td>
+            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><strong>Soportes pendientes</strong></td>
+            <td>Validación de soportes contables</td>
+            <td class="text-dim">20/may/2025 08:40</td>
+            <td><span class="badge badge-warning">Pendiente</span></td>
+            <td>Juan Pérez</td>
+            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><strong>Cierres</strong></td>
+            <td>Cierre contable abril 2025</td>
+            <td class="text-dim">19/may/2025 18:30</td>
+            <td><span class="badge badge-warning">Requiere revisión</span></td>
+            <td>Laura Martínez</td>
+            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><strong>Reportes gerenciales</strong></td>
+            <td>Informe de resultados abril 2025</td>
+            <td class="text-dim">19/may/2025 16:05</td>
+            <td><span class="badge badge-info">Disponible</span></td>
+            <td>Carlos Ramírez</td>
+            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><strong>Impuestos</strong></td>
+            <td>Declaración IVA abril 2025</td>
+            <td class="text-dim">19/may/2025 11:20</td>
+            <td><span class="badge badge-warning">Pendiente</span></td>
+            <td>Sofía López</td>
+            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:center; margin-top:14px">
+      <a href="{{ url_for('web.importaciones') }}" class="link-more" style="justify-content:center">Ver toda la actividad
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </a>
+    </div>
+  </div>
+
+  <!-- Alertas y pendientes -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>🔔 Alertas y pendientes</h2>
+    </div>
+    <div class="alert-stack">
+      <div class="alert-card danger">
+        <span class="alert-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+        <div class="alert-body">
+          <div class="alert-head">
+            <span class="alert-title">Obligaciones próximas a vencer</span>
+            <span class="alert-count">7 pendientes</span>
+          </div>
+          <p class="alert-text">Tienes 7 obligaciones que vencen en los próximos 30 días.</p>
+          <a href="#" class="alert-link">Ver obligaciones →</a>
         </div>
       </div>
-    </details>
 
-    <label class="form-check">
-      <input type="checkbox" name="incluir_duplicados">
-      Incluir documentos ya procesados (duplicados)
-    </label>
-
-    <div style="margin-top:24px">
-      <button type="submit" class="btn btn-primary">
-        <span>⚡</span> Procesar RADIAN
-      </button>
+      <div class="alert-card warn">
+        <span class="alert-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M9 13h6M9 17h4"/></svg></span>
+        <div class="alert-body">
+          <div class="alert-head">
+            <span class="alert-title">Documentos pendientes de validación</span>
+            <span class="alert-count">24 pendientes</span>
+          </div>
+          <p class="alert-text">Hay 24 documentos que requieren tu revisión.</p>
+          <a href="#" class="alert-link">Revisar documentos →</a>
+        </div>
+      </div>
     </div>
-  </form>
-</div>
-
-<!-- Actividad reciente -->
-{% if stats.ultimas %}
-<div style="margin-top:24px">
-  <div class="section-header">
-    <h2>Actividad por clasificación</h2>
-  </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Clasificación</th>
-          <th class="text-right">Documentos</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in stats.ultimas %}
-        <tr>
-          <td>{{ row.clasificacion | replace('_', ' ') }}</td>
-          <td class="text-right">{{ row.cnt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div style="text-align:center; margin-top:14px">
+      <a href="#" class="link-more" style="justify-content:center">Ver todas las alertas
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </a>
+    </div>
   </div>
 </div>
-{% endif %}
 
-{% endblock %}
-
-{% block extra_scripts %}
-<script>
-// Wire up drop zone to the correct file input
-const dropZone = document.getElementById('dropZoneRadian');
-const radianInput = document.getElementById('radianFile');
-const radianChosen = document.getElementById('radianChosen');
-radianInput.addEventListener('change', () => {
-  if (radianInput.files[0]) radianChosen.textContent = '📄 ' + radianInput.files[0].name;
-});
-</script>
 {% endblock %}
