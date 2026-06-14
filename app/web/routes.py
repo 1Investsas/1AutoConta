@@ -342,7 +342,11 @@ def _ejecutar_pipeline(
     # 11. Alimentar historial
     registrar_lote_confirmaciones(preasientos, db_path=db)
 
-    # 12. Exportar Excel — ruta absoluta para que funcione desde cualquier CWD
+    # 12. Exportar Excel — ruta absoluta para que funcione desde cualquier CWD.
+    # En modo cloud, exportar_excel ya sube el archivo al storage y retorna una
+    # referencia 'blob://output/...' (el disco local es efímero), de modo que la
+    # importación pueda descargarse/retomarse más adelante. No re-subir aquí: la
+    # referencia blob no es una ruta local y volver a subirla fallaría.
     ruta_excel = exportar_excel(
         preasientos=preasientos,
         excepciones=excepciones,
@@ -350,10 +354,6 @@ def _ejecutar_pipeline(
         output_path=os.path.join(_project_root(), "output"),
         archivo_origen=radian_path,
     )
-    # En modo cloud el disco local es efímero: subir el Excel al storage
-    # para que la importación pueda descargarse/retomarse más adelante.
-    if store.is_cloud():
-        ruta_excel = store.save_local_file(ruta_excel, "output")
 
     # Serializar preasientos para la sesión (sólo datos necesarios para la vista)
     preasientos_data = []
