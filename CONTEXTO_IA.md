@@ -1,0 +1,534 @@
+# CONTEXTO_IA.md — Mapa completo del repositorio `contable-auto`
+
+> **Propósito de este archivo.** Documento único y autocontenido para que una IA (o una
+> persona nueva) entienda **cómo funciona todo el sistema sin tener que leer el repositorio
+> completo**. Resume arquitectura, módulos, reglas de negocio, flujo de datos, esquema de BD,
+> despliegue y convenciones. Si modificas el comportamiento del sistema, **actualiza también
+> este archivo** para que siga siendo fiel.
+
+---
+
+## 1. Qué es y para qué sirve
+
+`contable-auto` es un **sistema de automatización contable** para la empresa colombiana
+**1 INVEST SAS** (NIT 901.331.657-7), extensible a múltiples empresas.
+
+Toma el reporte de **facturación electrónica RADIAN** descargado del portal de la **DIAN**
+(`https://catalogo-vpfe.dian.gov.co/`) y produce **preasientos contables** (asientos de
+débito/crédito) listos para importar al software contable del cliente (principalmente
+**SIIGO Nube**). También procesa **extractos bancarios CSV** y los convierte a comprobantes.
+
+El sistema funciona de dos formas:
+- **CLI** (`main.py`) — flujo batch por línea de comandos.
+- **Aplicación web Flask** (`app/web/`) — interfaz de usuario con dashboard, carga de
+  archivos, edición de cuentas, multi-empresa, analítica y exportación.
+
+### Fases del producto (roadmap)
+
+| Fase | Descripción | Estado |
+|------|-------------|--------|
+| **1** | Pipeline CLI: importar → clasificar → cruzar terceros → impuestos → preasiento → validar → exportar Excel | ✅ Implementada |
+| **2** | Motor de sugerencias de cuentas (aprende del historial) + interfaz web | ✅ Implementada |
+| **3** | Exportación/Importación a **SIIGO** (Excel oficial + API REST) | ✅ Implementada (Excel listo; API requiere plan premium) |
+| **4** | Dashboard de reportería y analítica contable | ✅ Implementada (`/analytics`) |
+
+> Nota: el `README.md` describe el roadmap con fases 2–4 como pendientes; el código real ya
+> las implementa. **Este archivo refleja el estado real del código.**
+
+---
+
+## 2. Stack tecnológico
+
+- **Lenguaje:** Python ≥ 3.11
+- **CLI:** `click` + `rich` (consola con tablas/paneles).
+- **Datos:** `pandas` (lectura/normalización de Excel), `openpyxl` (escritura `.xlsx`),
+  `xlrd` (lectura de `.xls` antiguos).
+- **Web:** `Flask` 3 + `flask-wtf` (CSRF). Plantillas Jinja2.
+- **Servidores WSGI de producción:** `waitress` (Windows/local) y `gunicorn` (Azure/Linux).
+- **Base de datos:** `sqlite3` (local, por defecto) o **Azure SQL** vía `pyodbc` (opcional).
+- **Almacenamiento:** sistema de archivos local o **Azure Blob Storage** (`azure-storage-blob`).
+- **Config:** `python-dotenv` (`.env`).
+- **Tests:** `pytest`.
+
+Dependencias completas en `requirements.txt`. El paquete se instala con `pip install -e .`
+(ver `setup.py`, que expone el comando de consola `contable-auto=main:cli`).
+
+---
+
+## 3. Estructura del repositorio
+
+```
+contable-auto/
+├── main.py                  # CLI principal (click): comandos `procesar` e `historial`
+├── application.py           # Entry point WSGI para Azure (app = create_app())
+├── web_server.py            # Servidor de DESARROLLO (Werkzeug, debug opcional)
+├── serve_prod.py            # Servidor de PRODUCCIÓN local (Waitress)
+├── startup.sh               # Arranque en Azure App Service (gunicorn + ODBC opcional)
+├── azure-setup.sh           # Script de aprovisionamiento de recursos Azure
+├── setup.py                 # Empaquetado/instalación
+├── requirements.txt         # Dependencias
+├── .env.example             # Plantilla de variables de entorno
+├── README.md                # Documentación de usuario
+├── docs/arquitectura.md     # Resumen breve de arquitectura
+├── CONTEXTO_IA.md           # ESTE archivo
+│
+├── app/                     # ── Núcleo del sistema ──
+│   ├── config.py            # ⭐ Constantes, mapeos, cuentas, reglas (fuente de verdad)
+│   ├── models.py            # Dataclasses de dominio
+│   ├── importador.py        # Lectura/normalización de RADIAN y maestros
+│   ├── clasificador.py      # Reglas deterministas de tipo de documento
+│   ├── terceros.py          # Identificación y cruce de terceros
+│   ├── impuestos.py         # Separación de impuestos + base gravable
+│   ├── comprobantes.py      # Asignación de código de comprobante
+│   ├── preasiento.py        # ⭐ Generación de líneas contables (asientos)
+│   ├── validaciones.py      # Cuadre, unicidad CUFE, coherencia
+│   ├── exportador.py        # Excel de salida con 4 pestañas
+│   ├── bitacora.py          # Registro de acciones (memoria + BD)
+│   ├── database.py          # ⭐ BD: SQLite/Azure SQL, esquema, CRUD, analítica
+│   ├── storage.py           # Abstracción de archivos (local vs Azure Blob)
+│   ├── sugerencias.py       # Motor de sugerencias (Fase 2, aprende del historial)
+│   ├── empresas.py          # Gestión multi-empresa
+│   ├── web/                 # ── Aplicación Flask (Fase 2/4) ──
+│   │   ├── __init__.py      # Application factory create_app()
+│   │   ├── routes.py        # ⭐ Todos los endpoints HTTP (~1300 líneas)
+│   │   ├── session_store.py # Estado server-side (cookies son muy pequeñas)
+│   │   ├── templates/       # Plantillas Jinja2 (base, index, resultado, banco, etc.)
+│   │   └── static/          # CSS, logo, favicon
+│   ├── banco/               # ── Procesamiento de extracto bancario CSV (→ SIIGO) ──
+│   │   ├── importador_banco.py  # Parser CSV + lógica 4x1000 + consolidación intereses
+│   │   ├── mapeador_banco.py    # Movimientos → filas SIIGO
+│   │   └── exportador_banco.py  # Escritura Excel SIIGO (chunks de 500)
+│   └── siigo/               # ── Integración SIIGO (Fase 3) ──
+│       ├── api_client.py        # Cliente REST (OAuth, /v1/journals)
+│       ├── mapeador.py          # Preasientos → 27 columnas formato SIIGO
+│       └── exportador_siigo.py  # Excel formato oficial SIIGO
+│
+├── data/                    # Archivos maestros (terceros, cuentas, comprobantes) + empresas.json
+├── input/                   # Archivos RADIAN descargados (.xlsx)
+├── output/                  # Excel generados
+├── db/                      # Bases de datos SQLite (+ .flask_secret_key)
+├── scripts/                 # Utilidades (instalar servicio Windows, optimizar logo)
+├── tests/                   # Tests pytest (conftest con fixtures realistas)
+└── .github/workflows/       # CI/CD: tests + deploy a Azure
+```
+
+⭐ = archivos clave si vas a entender o modificar reglas de negocio.
+
+---
+
+## 4. Conceptos de dominio (glosario)
+
+- **RADIAN**: registro de la DIAN de la facturación electrónica. El reporte `.xlsx`
+  descargado es la **entrada principal**. Columnas esperadas en `config.COLUMNAS_RADIAN`.
+- **CUFE/CUDE**: identificador único de cada documento electrónico. Se usa como clave para
+  **detectar duplicados** (un CUFE ya procesado no se reprocesa salvo `--incluir-duplicados`).
+- **Clasificación**: categoría contable derivada del tipo de documento + quién es el emisor.
+  Valores en `config.CLASIFICACIONES` (FACTURA_VENTA, FACTURA_COMPRA, DOCUMENTO_SOPORTE,
+  NOMINA, NOTA_CREDITO_*, NOTA_DEBITO_*, SIN_CLASIFICAR).
+- **Tercero**: la contraparte del documento (cliente o proveedor). Se identifica según la
+  clasificación (emisor o receptor) y se cruza con el **maestro de terceros**.
+- **Comprobante**: tipo de asiento en el software contable (cada clasificación mapea a un
+  código). Mapeo en `config.MAPEO_COMPROBANTES` (interno) y `config.SIIGO_CODIGOS_COMPROBANTE`.
+- **Preasiento**: el asiento contable generado (objeto `PreasientoContable` con sus
+  `LineaContable`). "Pre" porque puede tener cuentas `[PENDIENTE]` que el contador completa.
+- **Base gravable**: `Total − suma de impuestos`.
+- **Cuenta `[PENDIENTE]`**: línea cuya cuenta de gasto/costo/ingreso debe decidir el usuario.
+  Aparece **en rojo** en el Excel. El motor de sugerencias intenta rellenarlas.
+- **Archivos maestros** (en `data/`, encabezados reales en la **fila 7** = `header=6`):
+  - `Listado_de_Terceros.xlsx`
+  - `Listado_de_Cuentas_Contables.xlsx` (se filtran solo cuentas *Transaccional* + *Activo=Sí*)
+  - `Tipos_de_comprobante_contable.xlsx`
+
+---
+
+## 5. Flujo de datos / pipeline (Fase 1, el corazón del sistema)
+
+Tanto el CLI (`main.py procesar`) como la web (`POST /procesar` → `_ejecutar_pipeline`)
+ejecutan estos **8 pasos**:
+
+```
+RADIAN.xlsx
+   │  importador.importar_radian()      → DataFrame normalizado (+ columna _duplicado)
+   ▼
+1. Importar       (normaliza NITs, fechas, impuestos→float; detecta duplicados por CUFE)
+2. Clasificar     clasificador.clasificar_lote()        → col 'clasificacion'
+3. Cruzar terceros terceros.procesar_terceros_lote()     → tercero_nit/nombre/encontrado
+4. Comprobantes   comprobantes.asignar_comprobantes_lote() → codigo/titulo_comprobante
+5. Impuestos      impuestos.procesar_impuestos_lote()    → cols '_impuestos', '_base_gravable'
+6. Preasiento     preasiento.generar_lote()              → list[PreasientoContable]
+                  └─ (Fase 2) enriquecer_con_sugerencias() rellena [PENDIENTE] desde historial
+7. Validar        validaciones.validar_preasiento_completo() → lista de excepciones por doc
+                  └─ registrar_documento() en BD; registrar_lote_confirmaciones() alimenta historial
+8. Exportar       exportador.exportar_excel()            → .xlsx con 4 pestañas
+```
+
+El DataFrame de pandas es el "vehículo" entre pasos: cada paso **agrega columnas** sin perder
+las anteriores. Las columnas internas usan prefijo `_` (p. ej. `_impuestos`, `_base_gravable`,
+`_duplicado`).
+
+---
+
+## 6. Reglas de negocio (lo más importante de entender)
+
+### 6.1 Clasificación (`clasificador.py`)
+
+Determinista, por orden de precedencia, sobre `Tipo de documento` (en minúsculas) y comparando
+`NIT Emisor` contra el NIT de la empresa:
+
+1. contiene `"nomina individual"` → **NOMINA**
+2. contiene `"documento soporte"` → **DOCUMENTO_SOPORTE**
+3. contiene `"factura electrónica"` → **FACTURA_VENTA** si emisor = empresa, si no **FACTURA_COMPRA**
+4. contiene `"nota crédito"` → **NOTA_CREDITO_VENTA** / **NOTA_CREDITO_COMPRA** (según emisor)
+5. contiene `"nota débito"` → **NOTA_DEBITO_VENTA** / **NOTA_DEBITO_COMPRA** (según emisor)
+6. cualquier otro → **SIN_CLASIFICAR**
+
+### 6.2 Identificación del tercero (`terceros.py`)
+
+- Tercero = **RECEPTOR** para: FACTURA_VENTA, DOCUMENTO_SOPORTE, NOMINA, NOTA_CREDITO_VENTA, NOTA_DEBITO_VENTA.
+- Tercero = **EMISOR** para: FACTURA_COMPRA, NOTA_CREDITO_COMPRA, NOTA_DEBITO_COMPRA.
+- El cruce con el maestro es por **NIT exacto normalizado** (solo dígitos). Si no aparece,
+  `tercero_encontrado=False` (se reporta como excepción, pero el preasiento se genera igual).
+
+### 6.3 Impuestos (`impuestos.py`)
+
+- Columnas de impuesto en `config.COLUMNAS_IMPUESTOS`. Por cada una con valor > 0 se crea una línea.
+- **Retenciones** (`config.IMPUESTOS_RETENCION` = Rete IVA, Rete Renta, Rete ICA) cambian el
+  sentido del asiento.
+- Cuenta sugerida por impuesto y por sentido (compra/venta) en `config.CUENTAS_IMPUESTOS`.
+- `base_gravable = Total − Σ impuestos` (mínimo 0; si sale negativa, se loguea advertencia).
+
+### 6.4 Estructura de los asientos (`preasiento.py`)
+
+Convención: línea 1 = contrapartida principal; línea 2 = base gravable (suele quedar `[PENDIENTE]`);
+luego una línea por impuesto. El cuadre se verifica con tolerancia `< 0.01`.
+
+| Clasificación | Línea contrapartida (cuenta default) | Base gravable | Impuestos no-retención | Retenciones |
+|---|---|---|---|---|
+| **FACTURA_COMPRA** / NC_COMPRA / ND_COMPRA | `22050501` Proveedores → **CRÉDITO** Total | `[PENDIENTE]` Gasto/Costo → **DÉBITO** | **DÉBITO** | **CRÉDITO** |
+| **FACTURA_VENTA** / NC_VENTA / ND_VENTA | `13050501` CxC Clientes → **DÉBITO** Total | `[PENDIENTE]` Ingreso → **CRÉDITO** | **CRÉDITO** | **DÉBITO** (a favor) |
+| **DOCUMENTO_SOPORTE** | `22100501` Prov. exterior/no obligados → **CRÉDITO** Total | `[PENDIENTE]` Gasto → **DÉBITO** | DÉBITO | CRÉDITO |
+| **NOMINA** (refleja el PAGO) | `25050501` Salarios por pagar → **DÉBITO** Total | — | — | `[PENDIENTE]` Cuenta disponible (banco/caja) → **CRÉDITO** Total |
+| **SIN_CLASIFICAR** | 2 líneas `[PENDIENTE]` que cuadran (revisar manual) | | | |
+
+Las cuentas de contrapartida default están en `config.CUENTAS_CONTRAPARTE` y pueden
+**sobreescribirse por empresa** (`Empresa.cuentas_contraparte`).
+
+### 6.5 Validaciones (`validaciones.py`)
+
+`validar_preasiento_completo()` devuelve una lista de errores (vacía = OK):
+- No cuadra (débitos ≠ créditos).
+- Tercero no encontrado en el maestro.
+- Hay líneas con cuenta `[PENDIENTE]`.
+
+Otras validaciones disponibles: `validar_cufe_unico`, `validar_tercero_activo`,
+`validar_cuenta_transaccional`, `validar_coherencia_emisor`.
+
+### 6.6 Motor de sugerencias (`sugerencias.py`, Fase 2)
+
+Aprende qué cuenta se usa para cada combinación **(clasificación, NIT tercero, tipo_linea)**
+y la guarda en la tabla `historial_cuentas` (UPSERT, incrementa `usos`).
+- `enriquecer_con_sugerencias()`: rellena líneas `[PENDIENTE]` con la cuenta más usada
+  (marca `es_sugerida=True`). Se ejecuta dentro de `generar_lote()` si se pasa `db_path`.
+- `registrar_lote_confirmaciones()`: tras procesar, registra las cuentas **reales** (no
+  pendientes ni sugeridas) para alimentar el aprendizaje.
+- `tipo_linea` se deriva del concepto de la línea vía `_CONCEPTO_A_TIPO` (p. ej. "Base
+  gravable" → `base`, "IVA" → `iva`, "Rete Renta" → `rete_renta`).
+- Confirmación manual desde la web: `POST /confirmar`.
+
+---
+
+## 7. Referencia de módulos del núcleo (`app/`)
+
+### `config.py` — fuente de verdad de la configuración
+Todas las constantes y reglas viven aquí. Lee variables de `.env`. Lo más relevante:
+- Identidad empresa: `NIT_EMPRESA`, `NOMBRE_EMPRESA`, `SIGLA_EMPRESA`.
+- Rutas: `DATA_DIR`, `INPUT_DIR`, `OUTPUT_DIR`, `DB_DIR`, `DB_PATH`.
+- **Detección automática de Azure App Service** (`_en_azure_app_service`): si corre en Azure,
+  la BD por defecto va a `/home/data/db` (persistente) y el journal SQLite pasa a `DELETE`
+  (WAL no funciona sobre el `/home` SMB de Azure).
+- Backends: `USE_SQLITE` (default `true`), `DATABASE_URL` (Azure SQL),
+  `AZURE_STORAGE_CONNECTION_STRING` / `AZURE_STORAGE_CONTAINER`.
+- Mapeos de negocio: `CLASIFICACIONES`, `MAPEO_COMPROBANTES`, `COLUMNAS_IMPUESTOS`,
+  `CUENTAS_IMPUESTOS`, `CUENTAS_CONTRAPARTE`, `IMPUESTOS_RETENCION`, `COLUMNAS_RADIAN`.
+- Maestros: encabezados en la fila 7 (`FILA_ENCABEZADOS_MAESTROS = 6`).
+- SIIGO: `SIIGO_USERNAME/ACCESS_KEY/API_URL`, `SIIGO_MAX_FILAS_POR_ARCHIVO=500`,
+  `SIIGO_CODIGOS_COMPROBANTE`.
+- Banco: `BANCO_CUENTA_DEFAULT`, `BANCO_CUENTA_4X1000`, `BANCO_CODIGO_4X1000`,
+  `BANCO_CODIGOS_BANCARIOS`, `BANCO_DESC_BANCARIOS`, `BANCO_DESC_INTERESES_AHORROS`,
+  `SIIGO_COMP_BANCO_INGRESO/EGRESO/TRASLADO`.
+
+### `models.py` — dataclasses de dominio
+`DocumentoImportado`, `Tercero`, `CuentaContable`, `TipoComprobante`, **`LineaContable`**
+(con `es_pendiente`, `es_sugerida`), **`PreasientoContable`** (agrupa líneas, `cuadra`,
+`excepciones`), `RegistroBitacora`, `HistorialCuenta`.
+
+### `importador.py`
+- `importar_radian(filepath, db_path)`: lee `.xlsx`/`.xls`, valida columnas mínimas
+  (`Tipo de documento`, `CUFE/CUDE`, `NIT Emisor`, `NIT Receptor`, `Total`), normaliza NITs
+  (`_limpiar_nit` → solo dígitos), impuestos a float, fechas (`dayfirst=True`), y marca
+  duplicados (`_duplicado`) consultando la BD.
+- `cargar_maestro_terceros/cuentas/comprobantes`: leen con `header=6`. Cuentas se filtran a
+  Transaccional + Activo=Sí.
+
+### `clasificador.py`, `terceros.py`, `impuestos.py`, `comprobantes.py`
+Cada uno expone una función `*_documento`/`identificar`/`separar`/`asignar` y su versión
+`*_lote(df, ...)` que añade columnas al DataFrame. Ver §6.
+
+### `preasiento.py`
+`generar_preasiento(...)` y `generar_lote(df, df_comprobantes, db_path, cuentas_contraparte)`.
+Diccionario `_GENERADORES` mapea clasificación → función generadora de líneas. Ver §6.4.
+
+### `validaciones.py`, `exportador.py`, `bitacora.py`
+- `exportador.exportar_excel(...)` genera `output/preasientos_<timestamp>.xlsx` con 4 pestañas:
+  **Resumen**, **Preasientos** (filas `[PENDIENTE]` en rojo, sin-tercero en amarillo),
+  **Excepciones**, **Bitácora**. En modo cloud lo sube a Blob y devuelve la referencia.
+- `bitacora.registrar(...)` acumula en memoria (para el Excel) y persiste en la tabla `bitacora`.
+  `limpiar_sesion()` se llama al inicio de cada proceso.
+
+### `database.py` — capa de datos (doble backend)
+- Abstracción `DbConnection` que funciona igual con `sqlite3` y `pyodbc` (Azure SQL).
+- `get_connection(db_path)`, `inicializar_db(db_path)` (crea tablas si no existen).
+- CRUD: `cufe_existe`, `registrar_documento`, `registrar_bitacora_db`,
+  `obtener_historial_cuenta`, `actualizar_historial_cuenta` (UPSERT).
+- Importaciones: `registrar_importacion`, `actualizar_importacion`, `obtener_importacion`,
+  `listar_importaciones`.
+- **Analítica (Fase 4)**: `obtener_kpis`, `obtener_evolucion_mensual`,
+  `obtener_distribucion_clasificacion`, `obtener_top_terceros`, `obtener_actividad_reciente`.
+  Usan helpers compatibles entre dialectos (`_month_expr`, `_substr_expr`) y aplican `LIMIT`
+  en Python para evitar diferencias `TOP` vs `LIMIT`.
+
+#### Esquema de tablas
+| Tabla | Para qué |
+|---|---|
+| `documentos_importados` | Registro de cada doc procesado (CUFE único → detección de duplicados) + base de la analítica |
+| `bitacora` | Log persistente de acciones |
+| `historial_cuentas` | Aprendizaje del motor de sugerencias. Único por (clasificación, nit_tercero, tipo_linea) |
+| `importaciones` | Registro persistente de cada proceso RADIAN (estado, archivo, Excel, errores) para retomar/regenerar |
+
+### `storage.py` — abstracción de archivos
+API: `save_file`, `save_local_file`, `load_file`, `get_download_bytes`, `delete_file`,
+`file_exists`, `get_local_data_path`, `is_cloud`.
+- Local: rutas reales bajo la raíz del proyecto.
+- Cloud (si `AZURE_STORAGE_CONNECTION_STRING`): blobs `blob://<categoria>/<archivo>`.
+Categorías usadas: `uploads`, `output`, `data`, `web_sessions`.
+
+### `empresas.py` — multi-empresa
+- Dataclass `Empresa` con `id`, `nit`, `nombre`, `sigla` y overrides:
+  `cuentas_contraparte`, `cuentas_impuestos`, `cuenta_banco_default`, `nit_banco`, `formato_banco`.
+- Propiedades efectivas combinan defaults de `config.py` con overrides de la empresa
+  (`*_efectivas()` / `*_efectivo()`).
+- Cada empresa tiene **su propia BD** (`db/contable_<id>.db`) y **su propia carpeta de maestros**
+  (`data/<id>/`). La empresa **principal** usa `config.DB_PATH` y `data/`, y sale del `.env`
+  (pero sus ediciones desde la UI se persisten en el registro y tienen prioridad).
+- Registro persistente en `data/empresas.json` (o Blob). API: `listar_empresas`,
+  `obtener_empresa`, `crear_empresa`, `actualizar_empresa`, `guardar_empresa`, `eliminar_empresa`
+  (la principal no se puede eliminar).
+- **Limitación conocida:** en modo Azure SQL todas las empresas comparten tablas (la separación
+  por empresa hoy depende de archivos SQLite distintos). Para multi-empresa con Azure SQL haría
+  falta una columna discriminadora por empresa.
+
+---
+
+## 8. Subsistema Web (`app/web/`)
+
+### Application factory (`__init__.py`)
+`create_app()` crea la app Flask, configura `MAX_CONTENT_LENGTH=50MB`, carpeta `uploads/`,
+inicializa la BD una vez, registra el blueprint de rutas, **CSRF** (`flask-wtf`) y manejadores
+de error (404, 413, CSRF, 500). La `FLASK_SECRET_KEY` se lee del entorno o se autogenera y se
+persiste en `db/.flask_secret_key` (para que las sesiones sobrevivan reinicios en Azure).
+
+### Estado server-side (`session_store.py`)
+Las cookies de Flask (~4 KB) no alcanzan para los resultados. `guardar/cargar/eliminar`
+serializan a JSON en `storage` (categoría `web_sessions`) y guardan solo una **referencia**
+en `session`. Claves: `resultado_ref` (preasientos), `banco_ref` (movimientos), `empresa_id`.
+
+### Endpoints (`routes.py`)
+Contexto global inyectado en todas las plantillas: empresa actual, empresas disponibles, NIT, sigla.
+
+| Ruta | Método | Función |
+|---|---|---|
+| `/` | GET | Dashboard con KPIs |
+| `/procesar` | POST | Sube RADIAN (+maestros opcionales), ejecuta el pipeline, registra importación |
+| `/resultado` | GET | Muestra preasientos y excepciones del último proceso |
+| `/descargar` | GET | Descarga el Excel generado |
+| `/confirmar` | POST | Registra una cuenta confirmada en el historial (aprendizaje) |
+| `/historial` | GET | Tabla de cuentas aprendidas (motor de sugerencias) |
+| `/importaciones` | GET | Lista de importaciones persistidas |
+| `/importaciones/<id>/reprocesar` | POST | Retoma una importación fallida / regenera Excel |
+| `/importaciones/<id>/descargar` | GET | Descarga el Excel de una importación previa |
+| `/exportar-siigo` | POST | Genera Excel(s) formato SIIGO (ZIP si son varios) |
+| `/analytics` | GET | Reportería (Chart.js): evolución, distribución, top terceros |
+| `/api/cuentas`, `/api/terceros` | GET | Autocompletar (con caché de maestros por mtime) |
+| `/banco` | GET | Formulario de carga de extracto CSV |
+| `/banco/previsualizar` | POST | Parsea el CSV y muestra tabla editable |
+| `/banco/exportar` | POST | Genera Excel(s) SIIGO del banco |
+| `/empresas` (+ `/seleccionar`, `/crear`, `/<id>/editar`, `/<id>/actualizar`, `/<id>/eliminar`, `/maestros`) | GET/POST | Administración multi-empresa |
+| `/test-procesar` | GET | Solo en DEBUG: procesa el primer RADIAN de `input/` |
+
+### Plantillas (`templates/`)
+`base.html` (layout: sidebar, topbar con selector de empresa, modal "Automatizar proceso",
+flash, loading), `index.html`, `resultado.html`, `historial.html`, `analytics.html`,
+`importaciones.html`, `empresas.html`, `banco_upload.html`, `banco_resultado.html`, `error.html`.
+
+---
+
+## 9. Subsistema Banco (`app/banco/`)
+
+Convierte un **extracto bancario CSV** en comprobantes Excel formato SIIGO.
+
+- **Formato CSV** (configurable por empresa vía `formato_banco`; default = sin encabezados,
+  separado por comas): col 0 cuenta, col 1 código banco, col 3 fecha (`yyyymmdd`), col 5 valor
+  (**+ egreso, − ingreso**), col 6 código de detalle, col 7 descripción.
+- `importador_banco.leer_csv_banco(path, formato)` → `list[MovimientoBanco]`. Además:
+  - **Consolida intereses de ahorros** del mismo mes en un único movimiento (último día del mes).
+  - **Enlaza el 4x1000** (código `3339`) con su egreso "padre" del mismo día buscando el que
+    cuadre con el 0.4% (tolerancia ±$0.50).
+  - Marca como "bancarios" (tercero = el banco) los movimientos cuyo código está en
+    `BANCO_CODIGOS_BANCARIOS` o cuya descripción coincide con `BANCO_DESC_BANCARIOS`
+    (4x1000, intereses, cuota de manejo).
+  - `a_dict`/`desde_dict` serializan para la sesión Flask.
+- `mapeador_banco.mapear_banco_a_siigo(...)` → `list[FilaSiigo]`. Decide tipo de comprobante
+  por sentido (ingreso `111` / egreso `112` / traslado `110`), arma 2 líneas (banco vs
+  contrapartida) y, si hay 4x1000 enlazado, añade 2 líneas más en el **mismo consecutivo** del
+  padre (banco → CRÉDITO; cuenta `53152001` gasto 4x1000 → DÉBITO).
+- `exportador_banco.exportar_banco_siigo(...)` parte en chunks de 500 filas y escribe Excel(s).
+
+---
+
+## 10. Subsistema SIIGO (`app/siigo/`)
+
+Exporta los preasientos al sistema contable **SIIGO Nube**. Dos vías:
+
+### Exportación Excel (siempre disponible) — `exportador_siigo.exportar_siigo(...)`
+- Genera `output/siigo_comprobantes_<timestamp>[_parteN].xlsx`, hoja "Datos".
+- Formato oficial de **27 columnas** (encabezados rojos=obligatorios / azules=opcionales,
+  anchos del template SIIGO). Filas `[PENDIENTE]` en rojo, sin-NIT en amarillo.
+- Máximo **500 filas por archivo** (`SIIGO_MAX_FILAS_POR_ARCHIVO`); si hay más, varios archivos.
+- `mapeador.mapear_lote(preasientos, incluir_pendientes, df_cuentas)`:
+  - Asigna **consecutivo** con formato `yyyymmNN` (correlativo **por año-mes Y por tipo de
+    comprobante**), ordenando antes por fecha de emisión.
+  - Cuentas con "Maneja vencimientos" rellenan columnas de vencimiento (13–16).
+
+### API REST (requiere plan premium) — `api_client.SiigoClient`
+- `autenticar()` (POST `/auth`, token válido 24 h, auto-renovación), `crear_comprobante()`,
+  `crear_lote(preasientos, omitir_pendientes)` (POST `/v1/journals`), `listar_comprobantes()`.
+- Credenciales `SIIGO_USERNAME` / `SIIGO_ACCESS_KEY` en `.env`. Excepciones
+  `SiigoAuthError`, `SiigoAPIError`. No envía comprobantes con cuentas `[PENDIENTE]`.
+
+---
+
+## 11. Puntos de entrada
+
+| Archivo | Entorno | Detalles |
+|---|---|---|
+| `main.py` | CLI | `procesar` (pipeline completo) e `historial` (cuentas aprendidas). Opciones: `--radian/-r`, `--terceros/-t`, `--cuentas/-c`, `--comprobantes/-k`, `--output/-o`, `--db`, `--incluir-duplicados`, `--log-nivel`. |
+| `web_server.py` | Desarrollo | Werkzeug. `--host` (def. 127.0.0.1), `--port` 5000, `--debug`. No usar en prod. |
+| `serve_prod.py` | Producción local | Waitress (`--threads` 4). Exige `FLASK_SECRET_KEY` real (aborta si es de desarrollo). |
+| `application.py` + `startup.sh` | Azure App Service | gunicorn (`application:app`, 2 workers, timeout 600s). `startup.sh` instala ODBC 18 si `USE_SQLITE=false`. |
+
+### Comandos típicos
+```bash
+# CLI (usa maestros de data/ por defecto)
+python main.py procesar --radian input/RADIAN.xlsx
+python main.py historial --top 20
+
+# Web local
+python web_server.py --debug            # desarrollo
+python serve_prod.py --port 5000        # producción local (Waitress)
+
+# Tests
+pytest tests/ -v
+```
+
+---
+
+## 12. Configuración (variables de entorno)
+
+Plantilla en `.env.example`. Las más importantes:
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `NIT_EMPRESA`, `NOMBRE_EMPRESA`, `SIGLA_EMPRESA` | 901331657 / 1INVEST SAS / 1INVEST | Empresa principal |
+| `FLASK_SECRET_KEY` | (autogenerada) | Sesiones Flask. **Obligatoria en producción** |
+| `HOST`, `PORT` | 0.0.0.0 / 5000 | Servidor |
+| `DATA_DIR`, `INPUT_DIR`, `OUTPUT_DIR` | data/ input/ output/ | Rutas locales |
+| `DB_DIR`, `DB_PATH`, `DB_JOURNAL_MODE` | db / db/contable.db / WAL | BD SQLite (en Azure: `/home/data/db` y `DELETE` automáticos) |
+| `USE_SQLITE` | true | `false` → Azure SQL (requiere `DATABASE_URL`) |
+| `DATABASE_URL` | (vacío) | Cadena ODBC de Azure SQL |
+| `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER` | (vacío) / contable-auto | Azure Blob (vacío = disco local) |
+| `SIIGO_USERNAME`, `SIIGO_ACCESS_KEY`, `SIIGO_API_URL` | (vacío) / api.siigo.com | API SIIGO |
+| `LOG_LEVEL` | INFO | DEBUG/INFO/WARNING/ERROR |
+
+(Existen además overrides finos: `SIIGO_COMP_*`, `BANCO_*` — ver `config.py`.)
+
+---
+
+## 13. Persistencia: local vs Azure
+
+| Dato | Local (`USE_SQLITE=true`, sin Blob) | Azure |
+|---|---|---|
+| Documentos, historial, importaciones, bitácora | SQLite en `DB_DIR` | SQLite en `/home/data/db` **o** Azure SQL si `USE_SQLITE=false` |
+| Maestros, `empresas.json`, uploads, Excel, sesiones web | Carpetas del proyecto | Azure Blob Storage si está configurado |
+
+En Azure App Service el sistema de archivos del contenedor es **efímero** (solo `/home`
+persiste y los despliegues reemplazan `/home/site/wwwroot`). Por eso la BD va a `/home/data/db`.
+
+---
+
+## 14. Despliegue y CI/CD
+
+- **GitHub Actions** (`.github/workflows/main_contable-auto.yml`): en push a `main` instala
+  dependencias, **corre `pytest`**, y si pasa, despliega a **Azure Web App `contable-auto`**
+  (slot Production) vía OIDC. Oryx instala `requirements.txt` en el servidor.
+- `azure-setup.sh`: aprovisionamiento inicial de recursos en Azure.
+- `scripts/`: utilidades Windows (`install_service.ps1`, `start.ps1`, `uninstall_service.ps1`)
+  y `optimizar_logo.py` (genera logo del sidebar + favicon).
+
+---
+
+## 15. Tests (`tests/`)
+
+`pytest` con fixtures realistas en `conftest.py` (`df_radian_basico` con los 6 tipos de
+documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módulo:
+`test_clasificador`, `test_terceros`, `test_impuestos`, `test_preasiento`, `test_validaciones`,
+`test_sugerencias`, `test_empresas`, `test_storage`, `test_siigo_mapeador`.
+
+> Los tests corren en CI antes de cada despliegue: **mantenerlos verdes es requisito para deploy**.
+
+---
+
+## 16. Convenciones y "gotchas"
+
+- **Idioma:** todo el código, comentarios y docstrings están en **español**. Mantener ese estilo.
+- **NITs** siempre normalizados a solo dígitos (`_limpiar_nit`); el cruce de terceros es por
+  coincidencia exacta.
+- **Maestros**: encabezados en la **fila 7** (`header=6`); el plan de cuentas se filtra a
+  Transaccional + Activo=Sí.
+- **`[PENDIENTE]`** es el marcador literal de cuenta sin asignar (constante en `preasiento.py`).
+  Nunca se registra en el historial de sugerencias.
+- **Cuadre** con tolerancia `< 0.01`.
+- **Duplicados**: por CUFE contra `documentos_importados`; `--incluir-duplicados` los reprocesa.
+- **Columnas internas** del DataFrame con prefijo `_` (`_impuestos`, `_base_gravable`, `_duplicado`).
+- **Backends de BD**: cualquier SQL nuevo debe funcionar en SQLite **y** T-SQL (ver helpers en
+  `database.py`; preferir `LIMIT` en Python).
+- **Estado web** grande → siempre vía `session_store`, nunca en la cookie.
+- **Detección de Azure** es automática por variables de entorno de App Service.
+
+---
+
+## 17. ¿Dónde toco qué? (guía rápida de cambios)
+
+| Quiero… | Editar |
+|---|---|
+| Cambiar reglas de clasificación | `app/clasificador.py` |
+| Cambiar cuentas default (contrapartida/impuestos) | `app/config.py` (`CUENTAS_CONTRAPARTE`, `CUENTAS_IMPUESTOS`) o por empresa en la UI |
+| Cambiar la estructura de un asiento | `app/preasiento.py` (`_generar_lineas_*`) |
+| Añadir/ajustar un impuesto | `app/config.py` (`COLUMNAS_IMPUESTOS`, `CUENTAS_IMPUESTOS`, `IMPUESTOS_RETENCION`) |
+| Cambiar el Excel de salida | `app/exportador.py` |
+| Cambiar el formato SIIGO | `app/siigo/mapeador.py` y `app/siigo/exportador_siigo.py` |
+| Cambiar el parseo del extracto bancario | `app/banco/` + `Empresa.formato_banco` |
+| Añadir un endpoint web | `app/web/routes.py` (+ plantilla en `templates/`) |
+| Tocar el esquema de BD | `app/database.py` (`_create_tables_sqlite` y `_create_tables_mssql`) |
+| Añadir validaciones | `app/validaciones.py` |
+| Configurar despliegue | `.github/workflows/main_contable-auto.yml`, `startup.sh`, `azure-setup.sh` |
+```
