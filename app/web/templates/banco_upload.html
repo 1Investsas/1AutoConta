@@ -48,47 +48,71 @@
       <div class="file-chosen" id="bancoChosen"></div>
     </div>
 
-    <!-- Cuenta bancaria + NIT del banco -->
+    {#
+      La cuenta contable y el banco se configuran una sola vez en
+      Configuraciones › Empresas. Aquí solo se piden cuando hay varias
+      opciones entre las que elegir; si solo hay una, se envían ocultas.
+    #}
+    {% set multi_cuenta = cuentas_banco | length > 1 %}
+    {% set multi_banco  = bancos | length > 1 %}
+
+    {% if multi_cuenta or multi_banco %}
     <div class="form-grid" style="margin-top:20px">
+      {% if multi_cuenta %}
       <div class="form-group">
         <label for="cuentaBanco">
           Cuenta contable del banco
           <small style="color:var(--text-dim); font-weight:400">
-            — aplica a todos los movimientos
+            — elige la cuenta de este extracto
           </small>
         </label>
-        <div style="display:flex; gap:8px; align-items:center">
-          <input type="text" id="cuentaBanco" name="cuenta_banco"
-                 value="{{ cuenta_default }}"
-                 placeholder="ej. 11100501"
-                 style="font-family:monospace; font-size:1rem; width:180px"
-                 autocomplete="off">
-          <span style="color:var(--text-dim); font-size:0.82rem">
-            — Bancos y corporaciones financieras
-          </span>
-        </div>
+        <select id="cuentaBanco" name="cuenta_banco" style="font-family:monospace">
+          {% for c in cuentas_banco %}
+          <option value="{{ c.cuenta }}">
+            {{ c.cuenta }}{% if c.etiqueta %} — {{ c.etiqueta }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
       </div>
+      {% endif %}
 
+      {% if multi_banco %}
       <div class="form-group">
         <label for="nitBanco">
-          NIT del banco
+          Banco
           <small style="color:var(--text-dim); font-weight:400">
-            — se usa en 4x1000, intereses y gastos bancarios
+            — elige el banco de este extracto (4x1000, intereses, gastos)
           </small>
         </label>
-        <div style="display:flex; flex-direction:column; gap:4px">
-          <input type="text" id="nitBanco" name="nit_banco"
-                 value="{{ nit_banco_default or '' }}"
-                 placeholder="NIT o nombre del banco (ej. Bancolombia)"
-                 style="width:280px"
-                 autocomplete="off"
-                 class="banco-nit-upload-ac"
-                 data-badge="nitBancoNombre">
-          <span id="nitBancoNombre"
-                style="font-size:0.78rem; color:#9b59b6; min-height:1em"></span>
-        </div>
+        <select id="nitBanco" name="nit_banco">
+          {% for b in bancos %}
+          <option value="{{ b.nit }}">
+            {{ b.nombre or b.nit }}{% if b.nombre %} ({{ b.nit }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
       </div>
+      {% endif %}
     </div>
+    {% endif %}
+
+    {# Valores fijos cuando solo hay una opción configurada #}
+    {% if not multi_cuenta %}
+    <input type="hidden" name="cuenta_banco" value="{{ cuenta_default }}">
+    {% endif %}
+    {% if not multi_banco %}
+    <input type="hidden" name="nit_banco" value="{{ nit_banco_default or '' }}">
+    {% endif %}
+
+    {# Confirmación de lo configurado en la empresa (solo lo que no se elige aquí) #}
+    {% if not multi_cuenta or not multi_banco %}
+    <p class="muted" style="margin-top:16px; font-size:0.82rem">
+      {% if not multi_cuenta %}Cuenta contable del banco: <code>{{ cuenta_default }}</code>{% endif %}
+      {% if not multi_cuenta and not multi_banco and nit_banco_default %} · {% endif %}
+      {% if not multi_banco and nit_banco_default %}Banco: <code>{{ nit_banco_default }}</code>{% endif %}
+      · <a href="{{ url_for('web.empresas_editar', empresa_id=empresa_actual.id) }}">Configurar en la empresa</a>
+    </p>
+    {% endif %}
 
     <div style="margin-top:24px">
       <button type="submit" class="btn btn-primary" id="btnPrevisualizar">
@@ -118,7 +142,7 @@
           <td><span class="pill pill-ok">Ingreso</span></td>
           <td style="color:var(--success); font-family:monospace">+ positivo</td>
           <td>Recibo de caja ({{ comp_ingreso }})</td>
-          <td>DÉBITO 11100501</td>
+          <td>DÉBITO {{ cuenta_default }}</td>
           <td>CRÉDITO (seleccionar)</td>
           <td>N/A</td>
         </tr>
@@ -126,7 +150,7 @@
           <td><span class="pill pill-pendiente">Egreso</span></td>
           <td style="color:var(--danger); font-family:monospace">- negativo</td>
           <td>Recibo de pago ({{ comp_egreso }})</td>
-          <td>CRÉDITO 11100501</td>
+          <td>CRÉDITO {{ cuenta_default }}</td>
           <td>DÉBITO (seleccionar)</td>
           <td>Auto-agrupado: crédito banco + débito 53152001</td>
         </tr>
@@ -146,87 +170,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
-// Autocomplete reutilizable para cuentas Y terceros
-function makeSimpleAC(acEl, fetchUrl, getLabel, onPick, borderColor) {
-  acEl.style.cssText = 'position:fixed;border:1px solid ' + borderColor + ';'
-    + 'background:#1a2d44;border-radius:6px;list-style:none;margin:0;padding:4px 0;'
-    + 'z-index:9999;max-height:200px;overflow-y:auto;min-width:280px;display:none;'
-    + 'box-shadow:0 4px 14px rgba(0,0,0,.35);';
-  document.body.appendChild(acEl);
-
-  var actInput = null, timer = null;
-
-  function hide() { acEl.style.display = 'none'; }
-
-  return function attach(input) {
-    input.addEventListener('input', function () {
-      actInput = input;
-      clearTimeout(timer);
-      var q = input.value.trim();
-      if (q.length < 2) { hide(); return; }
-      timer = setTimeout(function () {
-        fetch(fetchUrl + encodeURIComponent(q))
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (actInput !== input) return;
-            acEl.innerHTML = '';
-            if (!data.length) { hide(); return; }
-            var r = input.getBoundingClientRect();
-            acEl.style.left  = r.left + 'px';
-            acEl.style.top   = (r.bottom + 2) + 'px';
-            acEl.style.width = Math.max(r.width, 290) + 'px';
-            data.forEach(function (item) {
-              var li = document.createElement('li');
-              li.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:0.8rem;color:var(--text)';
-              li.textContent = getLabel(item);
-              li.addEventListener('mouseover', function () { li.style.background = borderColor; li.style.color='#fff'; });
-              li.addEventListener('mouseout',  function () { li.style.background = ''; li.style.color = 'var(--text)'; });
-              li.addEventListener('mousedown', function (e) {
-                e.preventDefault();
-                onPick(item, input);
-                hide();
-              });
-              acEl.appendChild(li);
-            });
-            acEl.style.display = 'block';
-          })
-          .catch(hide);
-      }, 220);
-    });
-    input.addEventListener('focusout', function () { setTimeout(hide, 160); });
-  };
-}
-
-// Autocomplete de CUENTAS para la cuenta del banco
-var acCuentasEl = document.createElement('ul');
-var attachCuenta = makeSimpleAC(
-  acCuentasEl,
-  '/api/cuentas?q=',
-  function (i) { return i.nombre ? i.codigo + '  —  ' + i.nombre : i.codigo; },
-  function (i, inp) { inp.value = i.codigo; },
-  'var(--accent)'
-);
-attachCuenta(document.getElementById('cuentaBanco'));
-
-// Autocomplete de TERCEROS (NIT o nombre) para el NIT del banco
-var acTercerosEl = document.createElement('ul');
-var attachTercero = makeSimpleAC(
-  acTercerosEl,
-  '/api/terceros?q=',
-  function (i) { return i.nombre ? i.nit + '  —  ' + i.nombre : i.nit; },
-  function (i, inp) {
-    inp.value = i.nit;
-    var badgeId = inp.dataset.badge;
-    if (badgeId) document.getElementById(badgeId).textContent = i.nombre || '';
-  },
-  '#9b59b6'
-);
-document.querySelectorAll('.banco-nit-upload-ac').forEach(attachTercero);
-
-document.addEventListener('scroll', function () {
-  acCuentasEl.style.display = 'none';
-  acTercerosEl.style.display = 'none';
-}, true);
-</script>
+{# La cuenta y el banco se eligen entre opciones preconfiguradas (selects)
+   o se envían ocultos; no hay campos de texto libre que autocompletar. #}
 {% endblock %}

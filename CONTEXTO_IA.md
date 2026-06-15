@@ -314,7 +314,15 @@ Categorías usadas: `uploads`, `output`, `data`, `web_sessions`.
 
 ### `empresas.py` — multi-empresa
 - Dataclass `Empresa` con `id`, `nit`, `nombre`, `sigla` y overrides:
-  `cuentas_contraparte`, `cuentas_impuestos`, `cuenta_banco_default`, `nit_banco`, `formato_banco`.
+  `cuentas_contraparte`, `cuentas_impuestos`, `cuenta_banco_default`, `nit_banco`,
+  `cuentas_banco`, `bancos`, `formato_banco`.
+- **Bancos (varias cuentas / varios bancos):** la empresa configura **una sola vez** la o
+  las cuentas contables de banco (`cuentas_banco` = `list[{cuenta, etiqueta}]`) y el o los
+  bancos (`bancos` = `list[{nit, nombre}]`). `cuenta_banco_default`/`nit_banco` se conservan
+  como valor único de compatibilidad (= primer elemento de cada lista). Métodos efectivos:
+  `cuentas_banco_efectivas()` (siempre ≥ 1, cae al default global) y `bancos_efectivos()`
+  (puede estar vacía). El módulo de Bancos solo muestra el selector de cuenta y/o de banco
+  cuando hay **más de una** opción; con una sola, el valor se envía oculto.
 - Propiedades efectivas combinan defaults de `config.py` con overrides de la empresa
   (`*_efectivas()` / `*_efectivo()`).
 - Cada empresa tiene **su propia BD** (`db/contable_<id>.db`) y **su propia carpeta de maestros**

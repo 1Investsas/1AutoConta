@@ -735,6 +735,23 @@ button { font-family: inherit; }
 }
 .form-check input[type="checkbox"] { accent-color: var(--blue-600); width: 16px; height: 16px; }
 
+/* Listas de configuración repetibles (cuentas/bancos de la empresa) */
+.config-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.config-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.config-row input[type="text"] {
+  font-size: 0.85rem; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.config-row input.mono { font-family: monospace; width: 200px; flex: 0 0 auto; }
+.config-row input:not(.mono) { flex: 1; min-width: 180px; }
+.config-row input:focus {
+  outline: none; border-color: var(--blue-500);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+.btn-row-del { flex: 0 0 auto; color: var(--danger); }
+.btn-row-del:hover { border-color: var(--danger); background: var(--danger-bg); }
+
 /* ============================================================
    FLASH MESSAGES
    ============================================================ */

@@ -29,7 +29,7 @@
         <td>{{ e.sigla_efectiva }}{% if e.id == empresa_actual.id %} ✓{% endif %}</td>
         <td>{{ e.nombre }}</td>
         <td>{{ e.nit }}</td>
-        <td>{{ e.cuenta_banco_efectiva() }}</td>
+        <td>{{ e.cuentas_banco_efectivas() | map(attribute='cuenta') | join(', ') }}</td>
         <td><code>{{ e.data_category }}/</code></td>
         <td><code>{{ e.db_path }}</code></td>
         <td style="white-space:nowrap">
@@ -112,17 +112,45 @@
              value="{{ empresa_editar.nit if editando else '' }}">
     </div>
 
-    <h3>Banco</h3>
-    <div class="form-row">
-      <label>Cuenta contable del banco</label>
-      <input type="text" name="cuenta_banco_default" placeholder="11100501"
-             value="{{ empresa_editar.cuenta_banco_default if editando else '' }}">
+    <h3>Cuentas contables de banco</h3>
+    <p class="muted">
+      La o las cuentas contables de los bancos de la empresa. Aplican a todos
+      los movimientos del extracto. Si configuras más de una, el módulo de
+      Bancos te dejará elegir cuál usar en cada extracto.
+    </p>
+    {% set cuentas_cfg = empresa_editar.cuentas_banco_efectivas() if editando else [] %}
+    <div id="cuentasBancoList" class="config-list">
+      {% for c in cuentas_cfg %}
+      <div class="config-row">
+        <input type="text" name="cuenta_banco_cuenta" class="cfg-cuenta-ac mono"
+               placeholder="11100501" value="{{ c.cuenta }}" autocomplete="off">
+        <input type="text" name="cuenta_banco_etiqueta"
+               placeholder="Etiqueta (opcional, ej. Bancolombia Ahorros)" value="{{ c.etiqueta }}">
+        <button type="button" class="btn btn-sm btn-row-del" title="Quitar">✕</button>
+      </div>
+      {% endfor %}
     </div>
-    <div class="form-row">
-      <label>NIT del banco</label>
-      <input type="text" name="nit_banco" placeholder="860034313"
-             value="{{ empresa_editar.nit_banco if editando else '' }}">
+    <button type="button" class="btn btn-sm" id="addCuentaBanco">+ Agregar cuenta</button>
+
+    <h3>Bancos</h3>
+    <p class="muted">
+      NIT(s) de los bancos de la empresa (terceros). Se usan en el 4x1000, los
+      intereses y los gastos bancarios. Si configuras más de uno, podrás elegir
+      cuál usar en cada extracto.
+    </p>
+    {% set bancos_cfg = empresa_editar.bancos_efectivos() if editando else [] %}
+    <div id="bancosList" class="config-list">
+      {% for b in bancos_cfg %}
+      <div class="config-row">
+        <input type="text" name="banco_nit" class="cfg-tercero-ac mono"
+               placeholder="NIT o nombre del banco" value="{{ b.nit }}" autocomplete="off">
+        <input type="text" name="banco_nombre"
+               placeholder="Nombre (opcional)" value="{{ b.nombre }}">
+        <button type="button" class="btn btn-sm btn-row-del" title="Quitar">✕</button>
+      </div>
+      {% endfor %}
     </div>
+    <button type="button" class="btn btn-sm" id="addBanco">+ Agregar banco</button>
 
     <h3>Formato del extracto bancario</h3>
     <p class="muted">
@@ -209,4 +237,120 @@
   </form>
 </div>
 
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  // Autocomplete reutilizable (cuentas o terceros) contra /api/*
+  function makeAC(fetchUrl, getLabel, onPick, borderColor) {
+    var acEl = document.createElement('ul');
+    acEl.style.cssText = 'position:fixed;border:1px solid ' + borderColor + ';'
+      + 'background:#1a2d44;border-radius:6px;list-style:none;margin:0;padding:4px 0;'
+      + 'z-index:9999;max-height:200px;overflow-y:auto;min-width:260px;display:none;'
+      + 'box-shadow:0 4px 14px rgba(0,0,0,.35);';
+    document.body.appendChild(acEl);
+    var actInput = null, timer = null;
+    function hide() { acEl.style.display = 'none'; }
+    document.addEventListener('scroll', hide, true);
+
+    return function attach(input) {
+      input.addEventListener('input', function () {
+        actInput = input;
+        clearTimeout(timer);
+        var q = input.value.trim();
+        if (q.length < 2) { hide(); return; }
+        timer = setTimeout(function () {
+          fetch(fetchUrl + encodeURIComponent(q))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (actInput !== input) return;
+              acEl.innerHTML = '';
+              if (!data.length) { hide(); return; }
+              var r = input.getBoundingClientRect();
+              acEl.style.left  = r.left + 'px';
+              acEl.style.top   = (r.bottom + 2) + 'px';
+              acEl.style.width = Math.max(r.width, 260) + 'px';
+              data.forEach(function (item) {
+                var li = document.createElement('li');
+                li.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:0.8rem;color:var(--text)';
+                li.textContent = getLabel(item);
+                li.addEventListener('mouseover', function () { li.style.background = borderColor; li.style.color = '#fff'; });
+                li.addEventListener('mouseout',  function () { li.style.background = ''; li.style.color = 'var(--text)'; });
+                li.addEventListener('mousedown', function (e) { e.preventDefault(); onPick(item, input); hide(); });
+                acEl.appendChild(li);
+              });
+              acEl.style.display = 'block';
+            })
+            .catch(hide);
+        }, 220);
+      });
+      input.addEventListener('focusout', function () { setTimeout(hide, 160); });
+    };
+  }
+
+  var attachCuenta = makeAC(
+    '/api/cuentas?q=',
+    function (i) { return i.nombre ? i.codigo + '  —  ' + i.nombre : i.codigo; },
+    function (i, inp) { inp.value = i.codigo; },
+    'var(--accent)'
+  );
+  var attachTercero = makeAC(
+    '/api/terceros?q=',
+    function (i) { return i.nombre ? i.nit + '  —  ' + i.nombre : i.nit; },
+    function (i, inp) {
+      inp.value = i.nit;
+      var fila = inp.closest('.config-row');
+      var nombre = fila && fila.querySelector('[name="banco_nombre"]');
+      if (nombre && !nombre.value) nombre.value = i.nombre || '';
+    },
+    '#9b59b6'
+  );
+
+  function attachRow(row) {
+    var cuenta = row.querySelector('.cfg-cuenta-ac');
+    if (cuenta) attachCuenta(cuenta);
+    var tercero = row.querySelector('.cfg-tercero-ac');
+    if (tercero) attachTercero(tercero);
+  }
+
+  document.querySelectorAll('#cuentasBancoList .config-row, #bancosList .config-row')
+    .forEach(attachRow);
+
+  function makeRow(tipo) {
+    var row = document.createElement('div');
+    row.className = 'config-row';
+    if (tipo === 'cuenta') {
+      row.innerHTML =
+        '<input type="text" name="cuenta_banco_cuenta" class="cfg-cuenta-ac mono" placeholder="11100501" autocomplete="off">' +
+        '<input type="text" name="cuenta_banco_etiqueta" placeholder="Etiqueta (opcional, ej. Bancolombia Ahorros)">' +
+        '<button type="button" class="btn btn-sm btn-row-del" title="Quitar">&times;</button>';
+    } else {
+      row.innerHTML =
+        '<input type="text" name="banco_nit" class="cfg-tercero-ac mono" placeholder="NIT o nombre del banco" autocomplete="off">' +
+        '<input type="text" name="banco_nombre" placeholder="Nombre (opcional)">' +
+        '<button type="button" class="btn btn-sm btn-row-del" title="Quitar">&times;</button>';
+    }
+    attachRow(row);
+    return row;
+  }
+
+  var addCuenta = document.getElementById('addCuentaBanco');
+  if (addCuenta) addCuenta.addEventListener('click', function () {
+    document.getElementById('cuentasBancoList').appendChild(makeRow('cuenta'));
+  });
+  var addBanco = document.getElementById('addBanco');
+  if (addBanco) addBanco.addEventListener('click', function () {
+    document.getElementById('bancosList').appendChild(makeRow('banco'));
+  });
+
+  // Quitar fila (delegación de eventos)
+  document.addEventListener('click', function (e) {
+    if (e.target.classList && e.target.classList.contains('btn-row-del')) {
+      var row = e.target.closest('.config-row');
+      if (row) row.remove();
+    }
+  });
+}());
+</script>
 {% endblock %}
