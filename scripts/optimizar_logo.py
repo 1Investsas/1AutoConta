@@ -109,6 +109,61 @@ def redimensionar_alto(img: Image.Image, altura: int) -> Image.Image:
     return img.resize((nuevo_ancho, altura), Image.LANCZOS)
 
 
+def detectar_corte_isotipo(img: Image.Image, recorte_vertical: float) -> int:
+    """Calcula la fila Y donde termina el isotipo (la marca) y empieza el wordmark.
+
+    Busca la banda de filas "vacías" (casi sin píxeles opacos) más ancha en la
+    mitad inferior del logo —el espacio entre la marca y el texto "1CONTIGO"— y
+    corta justo ahí. El análisis se hace sobre una copia en baja resolución por
+    velocidad. Si no encuentra una separación clara, usa `recorte_vertical` como
+    fracción del alto (default 0.65 = se queda con el 65% superior).
+
+    Devuelve la coordenada Y en las dimensiones ORIGINALES de `img`.
+    """
+    img = img.convert("RGBA")
+    alpha = img.getchannel("A")
+    alto0 = alpha.height
+
+    # Trabajar en baja resolución (alto <= 400) para que el análisis sea rápido.
+    escala = min(1.0, 400 / alto0) if alto0 > 400 else 1.0
+    a = alpha if escala == 1.0 else alpha.resize(
+        (max(1, round(alpha.width * escala)), max(1, round(alpha.height * escala)))
+    )
+    ancho, alto = a.size
+    px = a.load()
+
+    umbral_fila = max(1, int(ancho * 0.008))  # < 0.8% de píxeles opacos ⇒ fila "vacía"
+    conteo = []
+    for y in range(alto):
+        c = 0
+        for x in range(ancho):
+            if px[x, y] > 16:
+                c += 1
+        conteo.append(c)
+
+    # Buscar la banda vacía más ancha entre el 45% y el 88% del alto.
+    inicio, fin = int(alto * 0.45), int(alto * 0.88)
+    mejor_inicio, mejor_len = None, 0
+    y = inicio
+    while y < fin:
+        if conteo[y] <= umbral_fila:
+            j = y
+            while j < fin and conteo[j] <= umbral_fila:
+                j += 1
+            if (j - y) > mejor_len:
+                mejor_inicio, mejor_len = y, j - y
+            y = j
+        else:
+            y += 1
+
+    if mejor_inicio is not None and mejor_len >= max(3, int(alto * 0.02)):
+        corte = mejor_inicio
+    else:
+        corte = int(alto * recorte_vertical)
+
+    return max(1, round(corte / escala))  # volver a coordenadas originales
+
+
 def generar_favicon(img: Image.Image, tam: int = 64) -> Image.Image:
     """Crea un ícono cuadrado con el logo centrado y fondo transparente."""
     lado = max(img.size)
@@ -128,9 +183,18 @@ def generar_favicon(img: Image.Image, tam: int = 64) -> Image.Image:
               help="Tolerancia 0-255 para considerar un píxel 'casi blanco'.")
 @click.option("--salida", type=click.Path(path_type=Path), default=None,
               help=f"Ruta del PNG optimizado (default: {SALIDA_DEFAULT}).")
+@click.option("--solo-isotipo", is_flag=True, default=False,
+              help="Recorta SOLO la marca (el '1' con la flecha) para el sidebar "
+                   "y guarda el lockup completo como logo-1contigo-full.png.")
+@click.option("--recorte-vertical", default=0.65, show_default=True, type=float,
+              help="Fracción superior a conservar como isotipo si no se detecta "
+                   "una separación clara con el wordmark (0-1).")
+@click.option("--altura-full", default=220, show_default=True,
+              help="Alto en px del lockup completo (login/carga) en modo isotipo.")
 @click.option("--favicon/--no-favicon", default=True, show_default=True,
               help="Generar también favicon.png.")
-def main(origen, altura, fondo, umbral, salida, favicon):
+def main(origen, altura, fondo, umbral, salida, solo_isotipo,
+         recorte_vertical, altura_full, favicon):
     """Genera el logo optimizado del sidebar (y favicon) a partir del logo original."""
     salida = salida or SALIDA_DEFAULT
 
@@ -169,17 +233,35 @@ def main(origen, altura, fondo, umbral, salida, favicon):
     else:
         click.echo("• Se conserva la transparencia existente.")
 
-    img = recortar_transparencia(img)
-    img = redimensionar_alto(img, altura)
-
+    img = recortar_transparencia(img)  # contenido completo, ya recortado
     salida.parent.mkdir(parents=True, exist_ok=True)
-    img.save(salida, "PNG", optimize=True)
+
+    if solo_isotipo:
+        # 1) Lockup completo (para login / pantalla de carga).
+        full = redimensionar_alto(img, altura_full)
+        ruta_full = salida.parent / "logo-1contigo-full.png"
+        full.save(ruta_full, "PNG", optimize=True)
+        kb_full = ruta_full.stat().st_size / 1024
+        click.echo(f"✓ Lockup completo: {ruta_full.name}  "
+                   f"({full.width}×{full.height}px, {kb_full:.1f} KB)")
+
+        # 2) Isotipo (la marca) para el sidebar.
+        corte = detectar_corte_isotipo(img, recorte_vertical)
+        iso = recortar_transparencia(img.crop((0, 0, img.width, corte)))
+        pct = round(100 * corte / img.height)
+        click.echo(f"• Isotipo: se conserva el {pct}% superior (filas 0–{corte} de {img.height}).")
+        sidebar_img = iso
+    else:
+        sidebar_img = img
+
+    sidebar_img = redimensionar_alto(sidebar_img, altura)
+    sidebar_img.save(salida, "PNG", optimize=True)
     kb = salida.stat().st_size / 1024
-    click.echo(f"✓ Sidebar: {salida.name}  ({img.width}×{img.height}px, {kb:.1f} KB)")
+    click.echo(f"✓ Sidebar: {salida.name}  ({sidebar_img.width}×{sidebar_img.height}px, {kb:.1f} KB)")
 
     if favicon:
-        ico = generar_favicon(img)
-        ruta_ico = (salida.parent / "favicon.png")
+        ico = generar_favicon(sidebar_img)  # en modo isotipo usa la marca (cuadrada)
+        ruta_ico = salida.parent / "favicon.png"
         ico.save(ruta_ico, "PNG", optimize=True)
         click.echo(f"✓ Favicon: {ruta_ico.name}  ({ico.width}×{ico.height}px)")
 

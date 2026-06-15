@@ -7,6 +7,7 @@ La WebApp usa estos archivos (servidos desde `static/img/`):
 | Archivo | Uso | Cómo se genera |
 |---|---|---|
 | `logo-1contigo.png` | Logo del **sidebar** (alto 46 px) | Manual u optimizado por script |
+| `logo-1contigo-full.png` | **Lockup completo** (login / pantalla de carga) | Script, modo `--solo-isotipo` |
 | `favicon.png` | Ícono de la pestaña del navegador | Optimizado por script |
 | `logo-1contigo-source.png` | Logo **original en alta** (no se usa en la web) | Lo subes tú |
 
@@ -46,6 +47,29 @@ python scripts/optimizar_logo.py ruta/al/logo.png   # origen explícito
 python scripts/optimizar_logo.py --altura 120        # otro alto de sidebar
 python scripts/optimizar_logo.py --fondo transparente  # si ya viene sin fondo
 python scripts/optimizar_logo.py --no-favicon          # no generar favicon
+```
+
+### Solo el isotipo en el sidebar (recomendado para este logo) ⭐
+
+El logo de 1CONTIGO trae el isotipo (el "1" con la flecha) arriba y el
+wordmark "1CONTIGO" + eslogan debajo. A 46 px de alto el texto quedaría
+diminuto, así que conviene usar **solo la marca** en el sidebar:
+
+```bash
+python scripts/optimizar_logo.py --solo-isotipo
+```
+
+Esto:
+- Detecta automáticamente el espacio entre la marca y el wordmark y recorta
+  **solo el isotipo** → `logo-1contigo.png` (sidebar).
+- Guarda el **lockup completo** → `logo-1contigo-full.png` (para login/carga).
+- Genera el `favicon.png` a partir de la marca (cuadrada, ideal para el ícono).
+
+Si la detección no acierta, ajusta cuánto conservar desde arriba:
+
+```bash
+python scripts/optimizar_logo.py --solo-isotipo --recorte-vertical 0.70
+python scripts/optimizar_logo.py --solo-isotipo --altura-full 260   # alto del lockup
 ```
 
 ## Referencia en plantillas
