@@ -68,9 +68,18 @@ class Empresa:
     # Solo se guardan las claves que difieren; el resto hereda del default.
     cuentas_contraparte: dict = field(default_factory=dict)
     cuentas_impuestos: dict = field(default_factory=dict)
-    # Banco
+    # Banco — cuenta/NIT único (compatibilidad; equivale al primer elemento
+    # de las listas de abajo). Se conservan para no romper configuraciones
+    # antiguas ni la API existente.
     cuenta_banco_default: str = ""
     nit_banco: str = ""
+    # Banco — la empresa puede tener varias cuentas contables de banco y/o
+    # varios bancos. Se configuran una sola vez aquí; el módulo de Bancos
+    # solo pide elegir cuando hay más de una opción.
+    #   cuentas_banco: list[{"cuenta": str, "etiqueta": str}]
+    #   bancos:        list[{"nit": str, "nombre": str}]
+    cuentas_banco: list = field(default_factory=list)
+    bancos: list = field(default_factory=list)
     formato_banco: dict = field(default_factory=dict)
 
     # ------------------------------------------------------------------
@@ -113,7 +122,53 @@ class Empresa:
         return {**FORMATO_BANCO_DEFAULT, **(self.formato_banco or {})}
 
     def cuenta_banco_efectiva(self) -> str:
+        """Primera cuenta contable de banco configurada (o el default global)."""
+        for c in (self.cuentas_banco or []):
+            codigo = str(c.get("cuenta", "")).strip()
+            if codigo:
+                return codigo
         return self.cuenta_banco_default or config.BANCO_CUENTA_DEFAULT
+
+    def cuentas_banco_efectivas(self) -> list[dict]:
+        """
+        Lista de cuentas contables de banco de la empresa (siempre ≥ 1).
+
+        Si no hay ninguna configurada explícitamente, cae a la cuenta única
+        (`cuenta_banco_default`) o al default global de `config.py`.
+        """
+        cuentas = [
+            {
+                "cuenta": str(c.get("cuenta", "")).strip(),
+                "etiqueta": str(c.get("etiqueta", "")).strip(),
+            }
+            for c in (self.cuentas_banco or [])
+            if str(c.get("cuenta", "")).strip()
+        ]
+        if cuentas:
+            return cuentas
+        return [{"cuenta": self.cuenta_banco_efectiva(), "etiqueta": ""}]
+
+    def bancos_efectivos(self) -> list[dict]:
+        """
+        Lista de bancos (terceros) de la empresa. Puede estar vacía.
+
+        Cada banco se usa en el 4x1000, los intereses y los gastos bancarios.
+        Si no hay ninguno configurado explícitamente, cae al NIT único
+        (`nit_banco`) si existe.
+        """
+        bancos = [
+            {
+                "nit": str(b.get("nit", "")).strip(),
+                "nombre": str(b.get("nombre", "")).strip(),
+            }
+            for b in (self.bancos or [])
+            if str(b.get("nit", "")).strip()
+        ]
+        if bancos:
+            return bancos
+        if (self.nit_banco or "").strip():
+            return [{"nit": self.nit_banco.strip(), "nombre": ""}]
+        return []
 
     def ruta_maestro(self, filename: str) -> str:
         """Ruta local a un archivo maestro de esta empresa."""
@@ -138,6 +193,8 @@ def _empresa_principal() -> Empresa:
         cuentas_impuestos=override.get("cuentas_impuestos", {}) or {},
         cuenta_banco_default=override.get("cuenta_banco_default", "") or config.BANCO_CUENTA_DEFAULT,
         nit_banco=override.get("nit_banco", "") or "",
+        cuentas_banco=override.get("cuentas_banco", []) or [],
+        bancos=override.get("bancos", []) or [],
         formato_banco=override.get("formato_banco", {}) or {},
     )
 
@@ -170,6 +227,8 @@ def _desde_dict(d: dict) -> Empresa:
         cuentas_impuestos=d.get("cuentas_impuestos", {}) or {},
         cuenta_banco_default=d.get("cuenta_banco_default", ""),
         nit_banco=d.get("nit_banco", ""),
+        cuentas_banco=d.get("cuentas_banco", []) or [],
+        bancos=d.get("bancos", []) or [],
         formato_banco=d.get("formato_banco", {}) or {},
     )
 
@@ -243,6 +302,8 @@ def actualizar_empresa(
     sigla: str = "",
     cuenta_banco_default: str = "",
     nit_banco: str = "",
+    cuentas_banco: list | None = None,
+    bancos: list | None = None,
     formato_banco: dict | None = None,
     cuentas_contraparte: dict | None = None,
     cuentas_impuestos: dict | None = None,
@@ -264,6 +325,8 @@ def actualizar_empresa(
         cuentas_impuestos=cuentas_impuestos or {},
         cuenta_banco_default=cuenta_banco_default.strip(),
         nit_banco=nit_banco.strip(),
+        cuentas_banco=cuentas_banco or [],
+        bancos=bancos or [],
         formato_banco=formato_banco or {},
     )
     return guardar_empresa(empresa)

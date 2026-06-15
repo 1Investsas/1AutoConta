@@ -965,10 +965,14 @@ def banco():
     """Formulario para subir el CSV del banco."""
     from app.config import SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO
     emp = _empresa_actual()
+    cuentas_banco = emp.cuentas_banco_efectivas()  # siempre ≥ 1
+    bancos = emp.bancos_efectivos()                # puede estar vacía
     return render_template(
         "banco_upload.html",
-        cuenta_default=emp.cuenta_banco_efectiva(),
-        nit_banco_default=emp.nit_banco,
+        cuentas_banco=cuentas_banco,
+        bancos=bancos,
+        cuenta_default=cuentas_banco[0]["cuenta"],
+        nit_banco_default=bancos[0]["nit"] if bancos else "",
         comp_ingreso=SIIGO_COMP_BANCO_INGRESO,
         comp_egreso=SIIGO_COMP_BANCO_EGRESO,
         comp_traslado=SIIGO_COMP_BANCO_TRASLADO,
@@ -1190,6 +1194,28 @@ def _parse_empresa_form() -> dict:
         if valor != default:
             formato_banco[campo] = valor
 
+    # Cuentas contables de banco (lista; pueden ser varias)
+    cuentas_banco = []
+    codigos = request.form.getlist("cuenta_banco_cuenta")
+    etiquetas = request.form.getlist("cuenta_banco_etiqueta")
+    for i, codigo in enumerate(codigos):
+        codigo = codigo.strip()
+        if not codigo:
+            continue
+        etiqueta = etiquetas[i].strip() if i < len(etiquetas) else ""
+        cuentas_banco.append({"cuenta": codigo, "etiqueta": etiqueta})
+
+    # Bancos (lista; pueden ser varios)
+    bancos = []
+    nits_banco = request.form.getlist("banco_nit")
+    nombres_banco = request.form.getlist("banco_nombre")
+    for i, nit_b in enumerate(nits_banco):
+        nit_b = nit_b.strip()
+        if not nit_b:
+            continue
+        nombre_b = nombres_banco[i].strip() if i < len(nombres_banco) else ""
+        bancos.append({"nit": nit_b, "nombre": nombre_b})
+
     # Overrides de cuentas contables (JSON opcional)
     def _json_dict(campo):
         raw = request.form.get(campo, "").strip()
@@ -1207,8 +1233,11 @@ def _parse_empresa_form() -> dict:
         "nit": nit,
         "nombre": nombre,
         "sigla": sigla,
-        "cuenta_banco_default": request.form.get("cuenta_banco_default", "").strip(),
-        "nit_banco": request.form.get("nit_banco", "").strip(),
+        # La cuenta/NIT único se derivan del primer elemento (compatibilidad).
+        "cuenta_banco_default": cuentas_banco[0]["cuenta"] if cuentas_banco else "",
+        "nit_banco": bancos[0]["nit"] if bancos else "",
+        "cuentas_banco": cuentas_banco,
+        "bancos": bancos,
         "formato_banco": formato_banco,
         "cuentas_contraparte": _json_dict("cuentas_contraparte"),
         "cuentas_impuestos": _json_dict("cuentas_impuestos"),

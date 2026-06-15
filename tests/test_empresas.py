@@ -165,6 +165,72 @@ class TestOverrides:
         assert emp.cuenta_banco_efectiva() == "11200501"
 
 
+class TestCuentasYBancosMultiples:
+    def test_cuentas_banco_efectivas_fallback(self):
+        """Sin lista configurada, cae a una sola cuenta (el default global)."""
+        emp = Empresa(id="x", nit="1", nombre="X")
+        cuentas = emp.cuentas_banco_efectivas()
+        assert len(cuentas) == 1
+        assert cuentas[0]["cuenta"] == config.BANCO_CUENTA_DEFAULT
+
+    def test_cuentas_banco_efectivas_lista(self):
+        emp = Empresa(
+            id="x", nit="1", nombre="X",
+            cuentas_banco=[
+                {"cuenta": "11100501", "etiqueta": "Ahorros"},
+                {"cuenta": "11100502", "etiqueta": "Corriente"},
+            ],
+        )
+        cuentas = emp.cuentas_banco_efectivas()
+        assert [c["cuenta"] for c in cuentas] == ["11100501", "11100502"]
+        # cuenta_banco_efectiva() = primera cuenta de la lista
+        assert emp.cuenta_banco_efectiva() == "11100501"
+
+    def test_cuentas_banco_ignora_vacias(self):
+        emp = Empresa(
+            id="x", nit="1", nombre="X",
+            cuentas_banco=[{"cuenta": "", "etiqueta": "vacía"},
+                           {"cuenta": "11100501", "etiqueta": ""}],
+        )
+        cuentas = emp.cuentas_banco_efectivas()
+        assert [c["cuenta"] for c in cuentas] == ["11100501"]
+
+    def test_bancos_efectivos_vacio(self):
+        emp = Empresa(id="x", nit="1", nombre="X")
+        assert emp.bancos_efectivos() == []
+
+    def test_bancos_efectivos_compat_nit_unico(self):
+        emp = Empresa(id="x", nit="1", nombre="X", nit_banco="860034313")
+        assert emp.bancos_efectivos() == [{"nit": "860034313", "nombre": ""}]
+
+    def test_bancos_efectivos_lista(self):
+        emp = Empresa(
+            id="x", nit="1", nombre="X",
+            bancos=[
+                {"nit": "860034313", "nombre": "Bancolombia"},
+                {"nit": "860035827", "nombre": "Davivienda"},
+            ],
+        )
+        bancos = emp.bancos_efectivos()
+        assert [b["nit"] for b in bancos] == ["860034313", "860035827"]
+        assert bancos[0]["nombre"] == "Bancolombia"
+
+    def test_actualizar_persiste_listas(self):
+        emp = crear_empresa("900", "ACME", sigla="ACM")
+        actualizar_empresa(
+            emp.id, nit="900", nombre="ACME", sigla="ACM",
+            cuentas_banco=[
+                {"cuenta": "11100501", "etiqueta": "Ahorros"},
+                {"cuenta": "11100502", "etiqueta": "Corriente"},
+            ],
+            bancos=[{"nit": "860034313", "nombre": "Bancolombia"}],
+        )
+        re = obtener_empresa(emp.id)
+        assert len(re.cuentas_banco_efectivas()) == 2
+        assert re.cuenta_banco_efectiva() == "11100501"
+        assert re.bancos_efectivos()[0]["nit"] == "860034313"
+
+
 class TestFormatoBancoImportador:
     def test_formato_personalizado(self, tmp_path):
         """CSV con encabezado, ';', fecha dd/mm/yyyy y decimal con coma."""
