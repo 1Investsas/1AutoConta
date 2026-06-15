@@ -976,7 +976,31 @@ def banco():
         comp_ingreso=SIIGO_COMP_BANCO_INGRESO,
         comp_egreso=SIIGO_COMP_BANCO_EGRESO,
         comp_traslado=SIIGO_COMP_BANCO_TRASLADO,
+        actividad=_actividad_banco(emp),
     )
+
+
+def _actividad_banco(emp) -> list[dict]:
+    """
+    Historial reciente del módulo de Bancos para la empresa actual.
+
+    De momento el módulo no persiste cada proceso, así que se devuelven
+    datos de muestra para la vista. Cuando se registre el historial real
+    (p. ej. en una tabla `procesos_banco`), basta con reemplazar el cuerpo
+    de esta función por la consulta correspondiente; la plantilla ya está
+    preparada para una lista vacía.
+
+    Cada elemento: {"archivo", "estado" ("completada"|"procesando"),
+    "fecha", "movimientos"}.
+    """
+    return [
+        {"archivo": "Extracto_Bancolombia_Mayo_2024.csv", "estado": "completada",
+         "fecha": "31 May 2024, 10:30 AM", "movimientos": 124},
+        {"archivo": "Extracto_Davivienda_Abril_2024.csv", "estado": "completada",
+         "fecha": "30 May 2024, 04:15 PM", "movimientos": 98},
+        {"archivo": "Extracto_Bogota_Mayo_2024.csv", "estado": "procesando",
+         "fecha": "29 May 2024, 11:20 AM", "movimientos": 76},
+    ]
 
 
 # ---------------------------------------------------------------------------

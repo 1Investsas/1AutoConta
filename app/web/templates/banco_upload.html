@@ -122,49 +122,159 @@
   </form>
 </div>
 
-<!-- Guía rápida -->
-<div style="margin-top:28px">
-  <div class="section-header"><h2>📋 Guía rápida</h2></div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Tipo</th>
-          <th>Valor en CSV</th>
-          <th>Comprobante</th>
-          <th>Banco</th>
-          <th>Contrapartida</th>
-          <th>4x1000 (cod. 3339)</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><span class="pill pill-ok">Ingreso</span></td>
-          <td style="color:var(--success); font-family:monospace">+ positivo</td>
-          <td>Recibo de caja ({{ comp_ingreso }})</td>
-          <td>DÉBITO {{ cuenta_default }}</td>
-          <td>CRÉDITO (seleccionar)</td>
-          <td>N/A</td>
-        </tr>
-        <tr>
-          <td><span class="pill pill-pendiente">Egreso</span></td>
-          <td style="color:var(--danger); font-family:monospace">- negativo</td>
-          <td>Recibo de pago ({{ comp_egreso }})</td>
-          <td>CRÉDITO {{ cuenta_default }}</td>
-          <td>DÉBITO (seleccionar)</td>
-          <td>Auto-agrupado: crédito banco + débito 53152001</td>
-        </tr>
-        <tr>
-          <td><span class="pill" style="background:rgba(100,100,255,.15);color:#9999ff">Traslado</span></td>
-          <td style="color:var(--accent); font-family:monospace">+ o -</td>
-          <td>Traslado ({{ comp_traslado }}) — manual</td>
-          <td>según signo</td>
-          <td>DÉBITO/CRÉDITO (seleccionar)</td>
-          <td>N/A</td>
-        </tr>
-      </tbody>
-    </table>
+<!-- Pie del módulo: Guía rápida (pasos) + Actividad reciente (histórico) -->
+<div class="modulo-bottom">
+
+  <!-- ── Guía rápida: pasos del proceso ── -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+        Guía rápida
+      </h2>
+    </div>
+    <p class="guia-sub">Pasos para procesar tu extracto bancario</p>
+
+    <div class="guia-steps">
+      <!-- Paso 1 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-blue">
+          <span class="guia-num">1</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-blue">Sube tu archivo CSV</div>
+        <div class="guia-step-desc">Arrastra o selecciona tu extracto bancario.</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <!-- Paso 2 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-green">
+          <span class="guia-num">2</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-green">Previsualiza</div>
+        <div class="guia-step-desc">Revisa y valida los movimientos detectados.</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <!-- Paso 3 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-orange">
+          <span class="guia-num">3</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.65 1.1 1.31 1.27"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-orange">Confirma y procesa</div>
+        <div class="guia-step-desc">El sistema aplicará las reglas y agrupaciones automáticas.</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <!-- Paso 4 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-purple">
+          <span class="guia-num">4</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-purple">Exporta a SIIGO</div>
+        <div class="guia-step-desc">Descarga el archivo listo para importar en SIIGO.</div>
+      </div>
+    </div>
+
+    <div class="guia-footer">
+      {# El detalle contable de cada tipo de movimiento se conserva aquí. #}
+      <details class="guia-tutorial">
+        <summary>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/></svg>
+          Ver tutorial completo
+        </summary>
+        <div class="table-wrapper" style="margin-top:14px">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Valor en CSV</th>
+                <th>Comprobante</th>
+                <th>Banco</th>
+                <th>Contrapartida</th>
+                <th>4x1000 (cod. 3339)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pill pill-ok">Ingreso</span></td>
+                <td style="color:var(--success); font-family:monospace">+ positivo</td>
+                <td>Recibo de caja ({{ comp_ingreso }})</td>
+                <td>DÉBITO {{ cuenta_default }}</td>
+                <td>CRÉDITO (seleccionar)</td>
+                <td>N/A</td>
+              </tr>
+              <tr>
+                <td><span class="pill pill-pendiente">Egreso</span></td>
+                <td style="color:var(--danger); font-family:monospace">- negativo</td>
+                <td>Recibo de pago ({{ comp_egreso }})</td>
+                <td>CRÉDITO {{ cuenta_default }}</td>
+                <td>DÉBITO (seleccionar)</td>
+                <td>Auto-agrupado: crédito banco + débito 53152001</td>
+              </tr>
+              <tr>
+                <td><span class="pill" style="background:rgba(100,100,255,.15);color:#9999ff">Traslado</span></td>
+                <td style="color:var(--accent); font-family:monospace">+ o -</td>
+                <td>Traslado ({{ comp_traslado }}) — manual</td>
+                <td>según signo</td>
+                <td>DÉBITO/CRÉDITO (seleccionar)</td>
+                <td>N/A</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
   </div>
+
+  <!-- ── Actividad reciente: histórico del módulo ── -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Actividad reciente</h2>
+      <a href="#" class="link-more">Ver todo
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </a>
+    </div>
+
+    <div class="act-list">
+      {% for a in actividad %}
+      <div class="act-item">
+        <div class="act-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/></svg>
+          <span class="act-ext">CSV</span>
+        </div>
+        <div class="act-main">
+          <div class="act-name" title="{{ a.archivo }}">{{ a.archivo }}</div>
+          {% if a.estado == 'completada' %}
+          <span class="act-status ok">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>
+            Procesado exitosamente
+          </span>
+          {% else %}
+          <span class="act-status proc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            En procesamiento
+          </span>
+          {% endif %}
+        </div>
+        <div class="act-date">{{ a.fecha }}</div>
+        <div class="act-badge {{ 'ok' if a.estado == 'completada' else 'proc' }}">
+          {{ a.movimientos }}<small>movimientos</small>
+        </div>
+        <button type="button" class="row-menu" aria-label="Acciones">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+        </button>
+      </div>
+      {% else %}
+      <div class="act-empty">Aún no hay actividad en este módulo.</div>
+      {% endfor %}
+    </div>
+  </div>
+
 </div>
 
 {% endblock %}
