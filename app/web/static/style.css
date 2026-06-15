@@ -845,6 +845,7 @@ button { font-family: inherit; }
 .act-status svg { width: 13px; height: 13px; }
 .act-status.ok   { color: var(--success); }
 .act-status.proc { color: var(--warning); }
+.act-status.err  { color: var(--danger); }
 .act-date { flex: 0 0 auto; font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; }
 .act-badge {
   flex: 0 0 auto; text-align: center;
@@ -854,6 +855,7 @@ button { font-family: inherit; }
 .act-badge small { display: block; font-size: 0.64rem; font-weight: 500; }
 .act-badge.ok   { background: var(--success-bg); color: var(--success); }
 .act-badge.proc { background: var(--warning-bg); color: var(--warning); }
+.act-badge.err  { background: var(--danger-bg);  color: var(--danger); }
 .act-empty { padding: 28px 10px; text-align: center; color: var(--text-dim); font-size: 0.84rem; }
 
 @media (max-width: 980px) {

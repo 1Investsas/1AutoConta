@@ -8,6 +8,7 @@ import io
 import logging
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from flask import (
@@ -980,26 +981,43 @@ def banco():
     )
 
 
-def _actividad_banco(emp) -> list[dict]:
-    """
-    Historial reciente del módulo de Bancos para la empresa actual.
+_MESES_ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+              "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-    De momento el módulo no persiste cada proceso, así que se devuelven
-    datos de muestra para la vista. Cuando se registre el historial real
-    (p. ej. en una tabla `procesos_banco`), basta con reemplazar el cuerpo
-    de esta función por la consulta correspondiente; la plantilla ya está
-    preparada para una lista vacía.
 
-    Cada elemento: {"archivo", "estado" ("completada"|"procesando"),
-    "fecha", "movimientos"}.
+def _fmt_fecha_banco(iso: str) -> str:
+    """Formatea una fecha ISO como 'DD Mmm YYYY, HH:MM AM/PM' (mes en español)."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return str(iso)[:16].replace("T", " ")
+    hora12 = dt.hour % 12 or 12
+    ampm = "AM" if dt.hour < 12 else "PM"
+    return f"{dt.day:02d} {_MESES_ABR[dt.month - 1]} {dt.year}, {hora12:02d}:{dt.minute:02d} {ampm}"
+
+
+def _actividad_banco(emp, limite: int = 6) -> list[dict]:
     """
+    Histórico reciente del módulo de Bancos para la empresa actual.
+
+    Lee la tabla `procesos_banco` de la BD de la empresa. Cada elemento:
+    {"archivo", "estado" ("completada"|"procesando"|"error"), "fecha",
+    "movimientos"}. La plantilla soporta lista vacía.
+    """
+    from app.database import inicializar_db, listar_procesos_banco
+
+    inicializar_db(emp.db_path)
+    procesos = listar_procesos_banco(emp.db_path, limite=limite)
     return [
-        {"archivo": "Extracto_Bancolombia_Mayo_2024.csv", "estado": "completada",
-         "fecha": "31 May 2024, 10:30 AM", "movimientos": 124},
-        {"archivo": "Extracto_Davivienda_Abril_2024.csv", "estado": "completada",
-         "fecha": "30 May 2024, 04:15 PM", "movimientos": 98},
-        {"archivo": "Extracto_Bogota_Mayo_2024.csv", "estado": "procesando",
-         "fecha": "29 May 2024, 11:20 AM", "movimientos": 76},
+        {
+            "archivo": p.get("archivo_nombre") or "extracto.csv",
+            "estado": p.get("estado") or "procesando",
+            "fecha": _fmt_fecha_banco(p.get("fecha")),
+            "movimientos": p.get("n_movimientos") or 0,
+        }
+        for p in procesos
     ]
 
 
@@ -1042,10 +1060,23 @@ def banco_previsualizar():
         flash("El archivo CSV no contiene movimientos válidos.", "error")
         return redirect(url_for("web.banco"))
 
+    # Registrar el proceso en el histórico del módulo (estado 'procesando';
+    # pasará a 'completada' al generar el archivo SIIGO).
+    from app.database import inicializar_db, registrar_proceso_banco
+    inicializar_db(emp.db_path)
+    proceso_id = registrar_proceso_banco(
+        archivo_nombre=secure_filename(csv_file.filename),
+        n_movimientos=len(movimientos),
+        cuenta_banco=cuenta_banco,
+        nit_banco=nit_banco,
+        db_path=emp.db_path,
+    )
+
     session_store.guardar(KEY_BANCO, {
         "movimientos":  [a_dict(m) for m in movimientos],
         "cuenta_banco": cuenta_banco,
         "nit_banco":    nit_banco,
+        "proceso_id":   proceso_id,
     })
 
     # Preparar datos para el template
@@ -1106,7 +1137,8 @@ def banco_exportar():
     from app.banco.importador_banco import desde_dict
     from app.banco.exportador_banco import exportar_banco_siigo
 
-    BANCO_CUENTA_DEFAULT = _empresa_actual().cuenta_banco_efectiva()
+    emp = _empresa_actual()
+    BANCO_CUENTA_DEFAULT = emp.cuenta_banco_efectiva()
 
     datos_banco = session_store.cargar(KEY_BANCO)
     if not datos_banco or not datos_banco.get("movimientos"):
@@ -1141,8 +1173,20 @@ def banco_exportar():
         )
     except Exception as exc:
         logger.exception("Error generando Excel banco SIIGO")
+        proceso_id = datos_banco.get("proceso_id")
+        if proceso_id:
+            from app.database import actualizar_proceso_banco
+            actualizar_proceso_banco(proceso_id, estado="error",
+                                     error=str(exc), db_path=emp.db_path)
         flash(f"Error al generar SIIGO: {exc}", "error")
         return redirect(url_for("web.banco"))
+
+    # Marcar el proceso como completado en el histórico del módulo.
+    proceso_id = datos_banco.get("proceso_id")
+    if proceso_id:
+        from app.database import actualizar_proceso_banco
+        actualizar_proceso_banco(proceso_id, estado="completada",
+                                 n_movimientos=len(movimientos), db_path=emp.db_path)
 
     if len(rutas) == 1:
         return send_file(
@@ -1159,6 +1203,18 @@ def banco_exportar():
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="siigo_banco.zip",
                      mimetype="application/zip")
+
+
+# ---------------------------------------------------------------------------
+# GET /banco/historial — Histórico completo de procesos del módulo Bancos
+# ---------------------------------------------------------------------------
+
+@bp.route("/banco/historial")
+def banco_historial():
+    """Lista todos los procesos del módulo Bancos de la empresa actual."""
+    emp = _empresa_actual()
+    actividad = _actividad_banco(emp, limite=200)
+    return render_template("banco_historial.html", actividad=actividad)
 
 
 # ---------------------------------------------------------------------------

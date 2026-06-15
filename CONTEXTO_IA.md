@@ -304,6 +304,11 @@ Diccionario `_GENERADORES` mapea clasificación → función generadora de líne
 | `bitacora` | Log persistente de acciones |
 | `historial_cuentas` | Aprendizaje del motor de sugerencias. Único por (clasificación, nit_tercero, tipo_linea) |
 | `importaciones` | Registro persistente de cada proceso RADIAN (estado, archivo, Excel, errores) para retomar/regenerar |
+| `procesos_banco` | Histórico del módulo Bancos: cada extracto previsualizado/exportado (archivo, cuenta, NIT banco, nº movimientos, estado `procesando`/`completada`/`error`) |
+
+CRUD de procesos de banco: `registrar_proceso_banco` (al previsualizar, estado
+`procesando`), `actualizar_proceso_banco` (a `completada`/`error` al exportar) y
+`listar_procesos_banco` (descendente por id, límite en Python).
 
 ### `storage.py` — abstracción de archivos
 API: `save_file`, `save_local_file`, `load_file`, `get_download_bytes`, `delete_file`,
@@ -367,22 +372,32 @@ Contexto global inyectado en todas las plantillas: empresa actual, empresas disp
 | `/exportar-siigo` | POST | Genera Excel(s) formato SIIGO (ZIP si son varios) |
 | `/analytics` | GET | Reportería (Chart.js): evolución, distribución, top terceros |
 | `/api/cuentas`, `/api/terceros` | GET | Autocompletar (con caché de maestros por mtime) |
-| `/banco` | GET | Formulario de carga de extracto CSV |
-| `/banco/previsualizar` | POST | Parsea el CSV y muestra tabla editable |
-| `/banco/exportar` | POST | Genera Excel(s) SIIGO del banco |
+| `/banco` | GET | Pantalla principal: carga de extracto CSV + guía rápida (stepper) + actividad reciente |
+| `/banco/previsualizar` | POST | Parsea el CSV, registra el proceso (estado `procesando`) y muestra tabla editable |
+| `/banco/exportar` | POST | Genera Excel(s) SIIGO del banco y marca el proceso `completada` (o `error`) |
+| `/banco/historial` | GET | Histórico completo de procesos del módulo Bancos |
 | `/empresas` (+ `/seleccionar`, `/crear`, `/<id>/editar`, `/<id>/actualizar`, `/<id>/eliminar`, `/maestros`) | GET/POST | Administración multi-empresa |
 | `/test-procesar` | GET | Solo en DEBUG: procesa el primer RADIAN de `input/` |
 
 ### Plantillas (`templates/`)
 `base.html` (layout: sidebar, topbar con selector de empresa, modal "Automatizar proceso",
 flash, loading), `index.html`, `resultado.html`, `historial.html`, `analytics.html`,
-`importaciones.html`, `empresas.html`, `banco_upload.html`, `banco_resultado.html`, `error.html`.
+`importaciones.html`, `empresas.html`, `banco_upload.html`, `banco_resultado.html`,
+`banco_historial.html`, `banco_actividad_items.html` (parcial reutilizable de la lista de
+actividad), `error.html`.
 
 ---
 
 ## 9. Subsistema Banco (`app/banco/`)
 
 Convierte un **extracto bancario CSV** en comprobantes Excel formato SIIGO.
+
+> **Pantalla principal e histórico (web).** La cuenta contable y el banco se eligen una sola
+> vez en la empresa; en `/banco` solo se muestra un selector cuando hay varias opciones. El pie
+> de la pantalla tiene una **guía rápida** (stepper de 4 pasos) y un panel de **actividad
+> reciente** alimentado por la tabla `procesos_banco` (real, por empresa): cada previsualización
+> crea un proceso `procesando` que pasa a `completada`/`error` al exportar. `/banco/historial`
+> muestra el listado completo. Componentes CSS reutilizables: `.modulo-bottom`, `.guia-*`, `.act-*`.
 
 - **Formato CSV** (configurable por empresa vía `formato_banco`; default = sin encabezados,
   separado por comas): col 0 cuenta, col 1 código banco, col 3 fecha (`yyyymmdd`), col 5 valor

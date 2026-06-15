@@ -235,43 +235,13 @@
   <div class="panel">
     <div class="panel-head">
       <h2>Actividad reciente</h2>
-      <a href="#" class="link-more">Ver todo
+      <a href="{{ url_for('web.banco_historial') }}" class="link-more">Ver todo
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
       </a>
     </div>
 
     <div class="act-list">
-      {% for a in actividad %}
-      <div class="act-item">
-        <div class="act-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/></svg>
-          <span class="act-ext">CSV</span>
-        </div>
-        <div class="act-main">
-          <div class="act-name" title="{{ a.archivo }}">{{ a.archivo }}</div>
-          {% if a.estado == 'completada' %}
-          <span class="act-status ok">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>
-            Procesado exitosamente
-          </span>
-          {% else %}
-          <span class="act-status proc">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-            En procesamiento
-          </span>
-          {% endif %}
-        </div>
-        <div class="act-date">{{ a.fecha }}</div>
-        <div class="act-badge {{ 'ok' if a.estado == 'completada' else 'proc' }}">
-          {{ a.movimientos }}<small>movimientos</small>
-        </div>
-        <button type="button" class="row-menu" aria-label="Acciones">
-          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
-        </button>
-      </div>
-      {% else %}
-      <div class="act-empty">Aún no hay actividad en este módulo.</div>
-      {% endfor %}
+      {% include "banco_actividad_items.html" %}
     </div>
   </div>
 
