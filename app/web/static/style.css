@@ -458,7 +458,9 @@ button { font-family: inherit; }
 .panel-head h2, .panel-head h3 {
   font-size: 1rem; font-weight: 700; color: var(--text);
   display: flex; align-items: center; gap: 8px;
+  white-space: nowrap;
 }
+.panel-head h2 svg, .panel-head h3 svg { width: 18px; height: 18px; flex: 0 0 auto; }
 .panel-head .link-more {
   font-size: 0.82rem; font-weight: 600; color: var(--blue-600);
   display: inline-flex; align-items: center; gap: 4px;
@@ -751,6 +753,120 @@ button { font-family: inherit; }
 }
 .btn-row-del { flex: 0 0 auto; color: var(--danger); }
 .btn-row-del:hover { border-color: var(--danger); background: var(--danger-bg); }
+
+/* ============================================================
+   PIE DE MÓDULO — GUÍA RÁPIDA (stepper) + ACTIVIDAD RECIENTE
+   Componentes reutilizables para los módulos de Automatizaciones.
+   ============================================================ */
+.modulo-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr);
+  gap: 20px;
+  margin-top: 28px;
+  align-items: start;
+}
+
+/* — Guía rápida (pasos) — */
+.guia-sub { font-size: 0.82rem; color: var(--text-dim); margin: -6px 0 20px; }
+.guia-steps { display: flex; align-items: flex-start; gap: 4px; }
+.guia-step {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 9px;
+}
+.guia-circle {
+  position: relative;
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.guia-circle svg { width: 22px; height: 22px; }
+.guia-num {
+  position: absolute; top: -5px; right: -5px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 0.68rem; font-weight: 700;
+  display: grid; place-items: center;
+}
+.guia-step-title { font-size: 0.82rem; font-weight: 700; line-height: 1.2; }
+.guia-step-desc { font-size: 0.74rem; color: var(--text-dim); line-height: 1.35; }
+.guia-arrow { flex: 0 0 auto; margin-top: 18px; color: #CBD5E1; }
+.guia-arrow svg { width: 20px; height: 20px; display: block; }
+
+/* Colores por paso (círculo y título) */
+.guia-c-blue   { background: var(--blue-500); }
+.guia-c-green  { background: var(--success); }
+.guia-c-orange { background: var(--warning); }
+.guia-c-purple { background: #8B5CF6; }
+.guia-t-blue   { color: var(--blue-600); }
+.guia-t-green  { color: var(--success); }
+.guia-t-orange { color: var(--warning); }
+.guia-t-purple { color: #8B5CF6; }
+
+.guia-footer { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); text-align: center; }
+.guia-tutorial summary {
+  list-style: none; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.82rem; font-weight: 600; color: var(--blue-600);
+}
+.guia-tutorial summary::-webkit-details-marker { display: none; }
+.guia-tutorial summary svg { width: 15px; height: 15px; }
+.guia-tutorial[open] summary { margin-bottom: 4px; }
+
+/* — Actividad reciente (histórico del módulo) — */
+.act-list { display: flex; flex-direction: column; }
+.act-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 2px;
+  border-top: 1px solid var(--border);
+}
+.act-item:first-child { border-top: none; }
+.act-icon {
+  flex: 0 0 auto;
+  width: 42px; height: 48px;
+  border-radius: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+}
+.act-icon svg { width: 18px; height: 18px; color: var(--text-dim); }
+.act-ext { font-size: 0.5rem; font-weight: 800; color: var(--success); letter-spacing: 0.04em; }
+.act-main { flex: 1; min-width: 0; }
+.act-name {
+  font-size: 0.86rem; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.act-status { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem; margin-top: 3px; }
+.act-status svg { width: 13px; height: 13px; }
+.act-status.ok   { color: var(--success); }
+.act-status.proc { color: var(--warning); }
+.act-status.err  { color: var(--danger); }
+.act-date { flex: 0 0 auto; font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; }
+.act-badge {
+  flex: 0 0 auto; text-align: center;
+  padding: 6px 12px; border-radius: var(--radius-sm);
+  font-weight: 700; line-height: 1.15; font-size: 0.92rem;
+}
+.act-badge small { display: block; font-size: 0.64rem; font-weight: 500; }
+.act-badge.ok   { background: var(--success-bg); color: var(--success); }
+.act-badge.proc { background: var(--warning-bg); color: var(--warning); }
+.act-badge.err  { background: var(--danger-bg);  color: var(--danger); }
+.act-empty { padding: 28px 10px; text-align: center; color: var(--text-dim); font-size: 0.84rem; }
+
+@media (max-width: 980px) {
+  .modulo-bottom { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .guia-steps { flex-wrap: wrap; justify-content: center; }
+  .guia-arrow { display: none; }
+  .guia-step { flex: 1 1 42%; }
+  .act-date { display: none; }
+}
 
 /* ============================================================
    FLASH MESSAGES

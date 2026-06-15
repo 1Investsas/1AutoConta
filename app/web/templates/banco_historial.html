@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de Bancos — 1CONTIGO{% endblock %}
+{% block page_title %}🏦 Histórico del módulo Bancos{% endblock %}
+
+{% block content %}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Actividad del módulo</h2>
+    <a href="{{ url_for('web.banco') }}" class="link-more">← Volver al módulo</a>
+  </div>
+  <div class="act-list">
+    {% include "banco_actividad_items.html" %}
+  </div>
+</div>
+
+{% endblock %}

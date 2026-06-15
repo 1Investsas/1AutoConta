@@ -130,7 +130,8 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
     """
     Crea todas las tablas necesarias si no existen.
 
-    Tablas: documentos_importados, bitacora, historial_cuentas, importaciones.
+    Tablas: documentos_importados, bitacora, historial_cuentas, importaciones,
+    procesos_banco.
     """
     conn = get_connection(db_path)
     try:
@@ -200,6 +201,18 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             error           TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS procesos_banco (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha           TEXT    NOT NULL,
+            archivo_nombre  TEXT,
+            cuenta_banco    TEXT,
+            nit_banco       TEXT,
+            n_movimientos   INTEGER DEFAULT 0,
+            estado          TEXT    NOT NULL DEFAULT 'procesando',
+            error           TEXT
+        )
+    """)
 
 
 def _create_tables_mssql(conn: DbConnection) -> None:
@@ -258,6 +271,19 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             n_docs          INT DEFAULT 0,
             n_excepciones   INT DEFAULT 0,
             excel_ref       NVARCHAR(500),
+            estado          NVARCHAR(30)   NOT NULL DEFAULT 'procesando',
+            error           NVARCHAR(MAX)
+        )
+    """)
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'procesos_banco')
+        CREATE TABLE procesos_banco (
+            id              INT IDENTITY(1,1) PRIMARY KEY,
+            fecha           NVARCHAR(50)   NOT NULL,
+            archivo_nombre  NVARCHAR(300),
+            cuenta_banco    NVARCHAR(50),
+            nit_banco       NVARCHAR(50),
+            n_movimientos   INT DEFAULT 0,
             estado          NVARCHAR(30)   NOT NULL DEFAULT 'procesando',
             error           NVARCHAR(MAX)
         )
@@ -668,6 +694,90 @@ def listar_importaciones(db_path: str = DB_PATH, limite: int = 50) -> list[dict]
     try:
         rows = conn.execute(
             "SELECT * FROM importaciones ORDER BY id DESC"
+        ).fetchall()
+        # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
+        return [dict(r) for r in rows[:limite]]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Procesos de banco — histórico persistente del módulo Bancos
+# ---------------------------------------------------------------------------
+
+def registrar_proceso_banco(
+    archivo_nombre: str,
+    n_movimientos: int = 0,
+    cuenta_banco: str = "",
+    nit_banco: str = "",
+    estado: str = "procesando",
+    db_path: str = DB_PATH,
+) -> int:
+    """
+    Crea el registro de un proceso del módulo Bancos y retorna su id.
+
+    Se registra al previsualizar un extracto (estado 'procesando') y se marca
+    'completada' cuando el usuario genera el archivo SIIGO.
+    """
+    conn = get_connection(db_path)
+    try:
+        params = (datetime.now().isoformat(), archivo_nombre, cuenta_banco,
+                  nit_banco, n_movimientos, estado)
+        if conn.is_sqlite:
+            cur = conn.execute(
+                """
+                INSERT INTO procesos_banco
+                    (fecha, archivo_nombre, cuenta_banco, nit_banco, n_movimientos, estado)
+                VALUES (?,?,?,?,?,?)
+                """,
+                params,
+            )
+            proc_id = cur.lastrowid
+        else:
+            conn.execute(
+                """
+                INSERT INTO procesos_banco
+                    (fecha, archivo_nombre, cuenta_banco, nit_banco, n_movimientos, estado)
+                VALUES (?,?,?,?,?,?)
+                """,
+                params,
+            )
+            proc_id = int(conn.execute("SELECT @@IDENTITY").fetchone()[0])
+        conn.commit()
+        return proc_id
+    finally:
+        conn.close()
+
+
+def actualizar_proceso_banco(
+    proceso_id: int,
+    estado: str,
+    n_movimientos: Optional[int] = None,
+    error: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> None:
+    """Actualiza el estado (y opcionalmente el conteo) de un proceso de banco."""
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            UPDATE procesos_banco
+            SET estado = ?, n_movimientos = COALESCE(?, n_movimientos), error = ?
+            WHERE id = ?
+            """,
+            (estado, n_movimientos, error, proceso_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def listar_procesos_banco(db_path: str = DB_PATH, limite: int = 50) -> list[dict]:
+    """Retorna los procesos de banco más recientes (descendente por fecha)."""
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM procesos_banco ORDER BY id DESC"
         ).fetchall()
         # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
         return [dict(r) for r in rows[:limite]]
