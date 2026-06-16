@@ -514,7 +514,7 @@ persiste y los despliegues reemplazan `/home/site/wwwroot`). Por eso la BD va a 
 `pytest` con fixtures realistas en `conftest.py` (`df_radian_basico` con los 6 tipos de
 documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módulo:
 `test_clasificador`, `test_terceros`, `test_impuestos`, `test_preasiento`, `test_validaciones`,
-`test_sugerencias`, `test_empresas`, `test_storage`, `test_siigo_mapeador`.
+`test_sugerencias`, `test_empresas`, `test_storage`, `test_siigo_mapeador`, `test_procesos_banco`.
 
 > Los tests corren en CI antes de cada despliegue: **mantenerlos verdes es requisito para deploy**.
 
@@ -536,6 +536,19 @@ documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módul
   `database.py`; preferir `LIMIT` en Python).
 - **Estado web** grande → siempre vía `session_store`, nunca en la cookie.
 - **Detección de Azure** es automática por variables de entorno de App Service.
+- **Despliegue solo desde `main`:** el workflow publica en Azure **únicamente al hacer push a
+  `main`**. Pushear a una rama de trabajo (p. ej. `claude/...`) **no** despliega; hay que
+  mergear el PR a `main`. Además, en producción Flask **cachea las plantillas Jinja al arrancar**
+  y el código Python solo se recarga al reiniciar el proceso: tras un deploy puede hacer falta
+  recarga forzada del navegador (`Ctrl+Shift+R`) para ver el CSS nuevo.
+- **Estandarización de Automatizaciones (en curso):** se está unificando el diseño de todos los
+  módulos del menú *Automatizaciones* (Nómina, RADIAN, Bancos, Caja general, Cruces, Impuestos…).
+  **Bancos (`/banco`) es el módulo de referencia** ya pulido; el patrón a replicar en los demás:
+  (1) la cuenta/banco/parámetros se configuran **una sola vez** en la empresa y en la pantalla del
+  módulo solo se piden cuando hay **varias** opciones (selector); (2) pie con **guía rápida**
+  (stepper de pasos) + **actividad reciente** real; (3) histórico persistido en una tabla propia
+  del módulo. Reutilizar los componentes CSS `.modulo-bottom`, `.guia-*`, `.act-*` y el parcial
+  `banco_actividad_items.html`.
 
 ---
 
@@ -550,6 +563,9 @@ documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módul
 | Cambiar el Excel de salida | `app/exportador.py` |
 | Cambiar el formato SIIGO | `app/siigo/mapeador.py` y `app/siigo/exportador_siigo.py` |
 | Cambiar el parseo del extracto bancario | `app/banco/` + `Empresa.formato_banco` |
+| Configurar cuentas/bancos de una empresa (varias cuentas o bancos) | `app/empresas.py` (`Empresa.cuentas_banco`, `bancos`, métodos `*_efectivas()`) + `templates/empresas.html` + `_parse_empresa_form` en `routes.py` |
+| Tocar la pantalla principal del módulo Bancos (selector, guía, actividad) | `templates/banco_upload.html` + `web.banco` en `routes.py` |
+| Añadir/ver el histórico de un módulo de Automatizaciones | tabla propia en `app/database.py` + helpers `registrar_/actualizar_/listar_*` (ver `procesos_banco`) + parcial `banco_actividad_items.html` |
 | Añadir un endpoint web | `app/web/routes.py` (+ plantilla en `templates/`) |
 | Tocar el esquema de BD | `app/database.py` (`_create_tables_sqlite` y `_create_tables_mssql`) |
 | Añadir validaciones | `app/validaciones.py` |
