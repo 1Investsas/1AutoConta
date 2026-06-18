@@ -9,8 +9,10 @@ Proporciona la inicialización del esquema, funciones CRUD básicas
 y registro de documentos procesados para detección de duplicados.
 """
 
+import atexit
 import logging
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -18,6 +20,200 @@ from typing import Optional
 from app.config import DB_PATH, USE_SQLITE, DATABASE_URL, DB_JOURNAL_MODE
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Persistencia de la BD SQLite en Blob Storage
+# ───────────────────────────────────────────────────────────────────────────
+# El disco local del contenedor puede ser efímero (Azure App Service for
+# Containers sin almacenamiento persistente, Container Apps, etc.). En esa
+# situación, con SQLite la app "empieza desde cero" en cada reinicio o
+# despliegue aunque los archivos (uploads, Excel, maestros) sí persistan en
+# Blob. Para evitarlo: cuando hay Blob configurado (modo cloud) y se usa
+# SQLite, el archivo .db se respalda en Blob y se restaura al abrir la primera
+# conexión.
+#
+# Las muchas escrituras de un mismo proceso (p. ej. registrar cada documento
+# del RADIAN) se coalescen con un pequeño "debounce": tras cada commit se
+# reprograma una única subida en segundo plano. Al salir el proceso se sube
+# cualquier respaldo pendiente.
+#
+# Nota: esto NO da concurrencia real entre varios workers/instancias (la última
+# subida gana). Para robustez/concurrencia, migrar a Azure SQL (USE_SQLITE=false).
+# ═══════════════════════════════════════════════════════════════════════════
+
+_DB_BLOB_CATEGORY = "db"
+_DB_BACKUP_DEBOUNCE_SEG = 2.0
+
+_sync_lock = threading.Lock()
+_db_restauradas: set[str] = set()
+_db_timers: dict[str, "threading.Timer"] = {}
+
+
+def _db_respaldable(db_path: str) -> bool:
+    """True si la BD SQLite debe respaldarse en Blob Storage."""
+    if not USE_SQLITE:
+        return False
+    from app import storage as store
+    return store.is_cloud()
+
+
+def _blob_ref_db(db_path: str) -> str:
+    """Referencia de Blob donde se respalda una BD SQLite."""
+    return f"blob://{_DB_BLOB_CATEGORY}/{Path(db_path).name}"
+
+
+def _restaurar_db_desde_blob(db_path: str) -> None:
+    """Descarga la BD desde Blob si no existe localmente (una sola vez por ruta)."""
+    if not _db_respaldable(db_path):
+        return
+    with _sync_lock:
+        if db_path in _db_restauradas:
+            return
+    from app import storage as store
+    local = Path(db_path)
+    if local.exists():
+        # Ya hay una BD local (en este contenedor o en almacenamiento
+        # persistente compartido); es la fuente de verdad, no se sobrescribe.
+        with _sync_lock:
+            _db_restauradas.add(db_path)
+        return
+    ref = _blob_ref_db(db_path)
+    try:
+        if store.file_exists(ref):
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_bytes(store.get_download_bytes(ref))
+            logger.info("BD SQLite restaurada desde Blob: %s", ref)
+        with _sync_lock:
+            _db_restauradas.add(db_path)
+    except Exception:
+        # Error transitorio: no marcar como restaurada para reintentar luego.
+        logger.exception("No se pudo restaurar la BD desde Blob: %s", db_path)
+
+
+def _checkpoint_wal(local: Path) -> None:
+    """Integra el WAL en el archivo .db para que el respaldo sea consistente.
+
+    En modo WAL los últimos cambios confirmados pueden vivir en el archivo
+    `-wal`; sin un checkpoint, respaldar solo el `.db` perdería esos datos.
+    En modo DELETE es una operación inocua.
+    """
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(local), timeout=30)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("No se pudo hacer checkpoint WAL de %s", local)
+
+
+def _subir_db_a_blob(db_path: str) -> None:
+    """Sube el archivo .db actual a Blob (best-effort)."""
+    if not _db_respaldable(db_path):
+        return
+    from app import storage as store
+    local = Path(db_path)
+    if not local.exists():
+        return
+    try:
+        _checkpoint_wal(local)
+        store.save_file(local.read_bytes(), _DB_BLOB_CATEGORY, local.name)
+        logger.debug("BD SQLite respaldada en Blob: %s", local.name)
+    except Exception:
+        logger.exception("No se pudo respaldar la BD en Blob: %s", db_path)
+
+
+def _flush_respaldo_db(db_path: str) -> None:
+    """Ejecuta la subida pendiente de una BD y olvida su timer."""
+    with _sync_lock:
+        _db_timers.pop(db_path, None)
+    _subir_db_a_blob(db_path)
+
+
+def _programar_respaldo_db(db_path: str) -> None:
+    """Agenda (con debounce) la subida de la BD a Blob tras un commit."""
+    if not _db_respaldable(db_path):
+        return
+    with _sync_lock:
+        timer = _db_timers.get(db_path)
+        if timer is not None:
+            timer.cancel()
+        nuevo = threading.Timer(
+            _DB_BACKUP_DEBOUNCE_SEG, _flush_respaldo_db, args=(db_path,)
+        )
+        nuevo.daemon = True
+        _db_timers[db_path] = nuevo
+        nuevo.start()
+
+
+def _flush_todos_los_respaldos() -> None:
+    """Sube cualquier respaldo pendiente (se invoca al salir del proceso)."""
+    with _sync_lock:
+        pendientes = list(_db_timers.keys())
+        for timer in _db_timers.values():
+            timer.cancel()
+        _db_timers.clear()
+    for db_path in pendientes:
+        _subir_db_a_blob(db_path)
+
+
+atexit.register(_flush_todos_los_respaldos)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Aislamiento por empresa en Azure SQL (tablas compartidas)
+# ───────────────────────────────────────────────────────────────────────────
+# Con SQLite cada empresa tiene su PROPIO archivo .db (ver app/empresas.py), así
+# que los datos ya quedan aislados y este módulo NO añade ninguna condición: el
+# comportamiento de SQLite es idéntico al original.
+#
+# Con Azure SQL todas las empresas comparten las mismas tablas, por lo que se
+# usa una columna discriminadora `empresa_id`. El id se deriva del nombre del
+# archivo .db que cada empresa pasa como db_path (convención de empresas.py):
+#   db/contable.db        → 'principal'
+#   db/contable_<id>.db   → '<id>'
+# De este modo el aislamiento funciona sin cambiar las firmas existentes ni el
+# comportamiento de SQLite. Hoy esto no se activa (USE_SQLITE=true por defecto);
+# queda listo para cuando se migre a Azure SQL (USE_SQLITE=false + DATABASE_URL).
+# ═══════════════════════════════════════════════════════════════════════════
+
+_EMPRESA_PRINCIPAL_ID = "principal"  # debe coincidir con empresas.EMPRESA_PRINCIPAL_ID
+_PREFIJO_DB_EMPRESA = "contable_"
+
+
+def _empresa_id_desde_db_path(db_path: Optional[str]) -> str:
+    """Deriva el id de empresa a partir de la ruta de su BD SQLite."""
+    nombre = Path(str(db_path or DB_PATH)).stem  # 'contable' o 'contable_<id>'
+    if nombre.startswith(_PREFIJO_DB_EMPRESA):
+        return nombre[len(_PREFIJO_DB_EMPRESA):] or _EMPRESA_PRINCIPAL_ID
+    return _EMPRESA_PRINCIPAL_ID
+
+
+def _cond_empresa(conn: "DbConnection", db_path: Optional[str]):
+    """Condición de aislamiento por empresa.
+
+    Retorna (condicion_sql, params):
+    - SQLite:    ('', ())                        — cada empresa ya tiene su archivo.
+    - Azure SQL: ('empresa_id = ?', ('<id>',))   — tablas compartidas.
+    """
+    if conn.is_sqlite:
+        return "", ()
+    return "empresa_id = ?", (_empresa_id_desde_db_path(db_path),)
+
+
+def _and_empresa(conn: "DbConnection", db_path: Optional[str]):
+    """Cláusula para anexar a un WHERE existente (' AND empresa_id = ?')."""
+    cond, params = _cond_empresa(conn, db_path)
+    return (f" AND {cond}" if cond else ""), params
+
+
+def _where_empresa(conn: "DbConnection", db_path: Optional[str]):
+    """Cláusula WHERE completa por empresa (vacía en SQLite)."""
+    cond, params = _cond_empresa(conn, db_path)
+    return (f" WHERE {cond}" if cond else ""), params
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -61,9 +257,10 @@ class _CursorResult:
 class DbConnection:
     """Conexión unificada que funciona con sqlite3 y pyodbc."""
 
-    def __init__(self, conn, is_sqlite: bool):
+    def __init__(self, conn, is_sqlite: bool, db_path: Optional[str] = None):
         self._conn = conn
         self.is_sqlite = is_sqlite
+        self._db_path = db_path
 
     def execute(self, sql, params=None):
         if self.is_sqlite:
@@ -81,6 +278,9 @@ class DbConnection:
 
     def commit(self):
         self._conn.commit()
+        # Tras confirmar cambios, agendar el respaldo de la BD en Blob (si aplica).
+        if self.is_sqlite and self._db_path:
+            _programar_respaldo_db(self._db_path)
 
     def close(self):
         self._conn.close()
@@ -100,6 +300,9 @@ def get_connection(db_path: str = DB_PATH):
     """
     if USE_SQLITE:
         import sqlite3
+        # Si la BD vive en Blob y no existe localmente, restaurarla antes de
+        # abrir la conexión (evita "empezar desde cero" en disco efímero).
+        _restaurar_db_desde_blob(db_path)
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(path), timeout=30)
@@ -110,7 +313,7 @@ def get_connection(db_path: str = DB_PATH):
         # fallar de inmediato con "database is locked". Relevante con varios
         # workers de gunicorn sobre el mismo archivo SQLite.
         conn.execute("PRAGMA busy_timeout=5000")
-        return DbConnection(conn, is_sqlite=True)
+        return DbConnection(conn, is_sqlite=True, db_path=str(path))
     else:
         import pyodbc
         if not DATABASE_URL:
@@ -217,11 +420,16 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
 
 def _create_tables_mssql(conn: DbConnection) -> None:
     """Crea tablas con sintaxis T-SQL (Azure SQL Database)."""
+    # Nota: cada tabla lleva una columna `empresa_id` discriminadora porque en
+    # Azure SQL todas las empresas comparten las mismas tablas (a diferencia de
+    # SQLite, donde cada empresa tiene su propio archivo). El valor por defecto
+    # 'principal' preserva los datos de instalaciones de una sola empresa.
     conn.execute("""
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'documentos_importados')
         CREATE TABLE documentos_importados (
             id              INT IDENTITY(1,1) PRIMARY KEY,
-            cufe            NVARCHAR(500)  NOT NULL UNIQUE,
+            empresa_id      NVARCHAR(100)  NOT NULL DEFAULT 'principal',
+            cufe            NVARCHAR(500)  NOT NULL,
             tipo_documento  NVARCHAR(100),
             clasificacion   NVARCHAR(100),
             folio           NVARCHAR(100),
@@ -233,13 +441,15 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             total           FLOAT,
             fecha_emision   NVARCHAR(50),
             fecha_proceso   NVARCHAR(50)   NOT NULL,
-            archivo_origen  NVARCHAR(500)
+            archivo_origen  NVARCHAR(500),
+            CONSTRAINT uq_doc_empresa_cufe UNIQUE(empresa_id, cufe)
         )
     """)
     conn.execute("""
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'bitacora')
         CREATE TABLE bitacora (
             id          INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id  NVARCHAR(100) NOT NULL DEFAULT 'principal',
             timestamp   NVARCHAR(50)  NOT NULL,
             nivel       NVARCHAR(20)  NOT NULL,
             modulo      NVARCHAR(100),
@@ -252,19 +462,21 @@ def _create_tables_mssql(conn: DbConnection) -> None:
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'historial_cuentas')
         CREATE TABLE historial_cuentas (
             id              INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id      NVARCHAR(100)  NOT NULL DEFAULT 'principal',
             clasificacion   NVARCHAR(100)  NOT NULL,
             nit_tercero     NVARCHAR(50)   NOT NULL,
             tipo_linea      NVARCHAR(100)  NOT NULL,
             cuenta          NVARCHAR(50)   NOT NULL,
             usos            INT DEFAULT 1,
             ultima_vez      NVARCHAR(50),
-            CONSTRAINT uq_historial UNIQUE(clasificacion, nit_tercero, tipo_linea)
+            CONSTRAINT uq_historial UNIQUE(empresa_id, clasificacion, nit_tercero, tipo_linea)
         )
     """)
     conn.execute("""
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'importaciones')
         CREATE TABLE importaciones (
             id              INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id      NVARCHAR(100)  NOT NULL DEFAULT 'principal',
             fecha           NVARCHAR(50)   NOT NULL,
             archivo_nombre  NVARCHAR(300),
             archivo_ref     NVARCHAR(500),
@@ -279,6 +491,7 @@ def _create_tables_mssql(conn: DbConnection) -> None:
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'procesos_banco')
         CREATE TABLE procesos_banco (
             id              INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id      NVARCHAR(100)  NOT NULL DEFAULT 'principal',
             fecha           NVARCHAR(50)   NOT NULL,
             archivo_nombre  NVARCHAR(300),
             cuenta_banco    NVARCHAR(50),
@@ -303,8 +516,10 @@ def cufe_existe(cufe: str, db_path: str = DB_PATH) -> bool:
     """
     conn = get_connection(db_path)
     try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
         row = conn.execute(
-            "SELECT 1 FROM documentos_importados WHERE cufe = ?", (cufe,)
+            f"SELECT 1 FROM documentos_importados WHERE cufe = ?{and_emp}",
+            (cufe,) + p_emp,
         ).fetchone()
         return row is not None
     finally:
@@ -348,17 +563,19 @@ def registrar_documento(
                 params,
             )
         else:
-            # T-SQL: verificar existencia antes de insertar
+            # T-SQL: verificar existencia antes de insertar (duplicado por empresa)
+            emp_id = _empresa_id_desde_db_path(db_path)
             conn.execute(
                 """
-                IF NOT EXISTS (SELECT 1 FROM documentos_importados WHERE cufe = ?)
+                IF NOT EXISTS (SELECT 1 FROM documentos_importados
+                               WHERE cufe = ? AND empresa_id = ?)
                 INSERT INTO documentos_importados
-                (cufe, tipo_documento, clasificacion, folio, prefijo,
+                (empresa_id, cufe, tipo_documento, clasificacion, folio, prefijo,
                  nit_emisor, nombre_emisor, nit_receptor, nombre_receptor,
                  total, fecha_emision, fecha_proceso, archivo_origen)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
-                (cufe,) + params,
+                (cufe, emp_id, emp_id) + params,
             )
         conn.commit()
     finally:
@@ -375,14 +592,26 @@ def registrar_bitacora_db(
 ) -> None:
     """Inserta un registro en la tabla de bitácora."""
     conn = get_connection(db_path)
+    ts = datetime.now().isoformat()
     try:
-        conn.execute(
-            """
-            INSERT INTO bitacora (timestamp, nivel, modulo, accion, detalle, cufe)
-            VALUES (?,?,?,?,?,?)
-            """,
-            (datetime.now().isoformat(), nivel, modulo, accion, detalle, cufe),
-        )
+        if conn.is_sqlite:
+            conn.execute(
+                """
+                INSERT INTO bitacora (timestamp, nivel, modulo, accion, detalle, cufe)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (ts, nivel, modulo, accion, detalle, cufe),
+            )
+        else:
+            emp_id = _empresa_id_desde_db_path(db_path)
+            conn.execute(
+                """
+                INSERT INTO bitacora
+                    (empresa_id, timestamp, nivel, modulo, accion, detalle, cufe)
+                VALUES (?,?,?,?,?,?,?)
+                """,
+                (emp_id, ts, nivel, modulo, accion, detalle, cufe),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -400,13 +629,14 @@ def obtener_historial_cuenta(
     """
     conn = get_connection(db_path)
     try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
         row = conn.execute(
-            """
+            f"""
             SELECT cuenta FROM historial_cuentas
-            WHERE clasificacion=? AND nit_tercero=? AND tipo_linea=?
+            WHERE clasificacion=? AND nit_tercero=? AND tipo_linea=?{and_emp}
             ORDER BY usos DESC
             """,
-            (clasificacion, nit_tercero, tipo_linea),
+            (clasificacion, nit_tercero, tipo_linea) + p_emp,
         ).fetchone()
         return row["cuenta"] if row else None
     finally:
@@ -446,8 +676,10 @@ def obtener_kpis(db_path: str = DB_PATH) -> dict:
     try:
         mes_actual = datetime.now().strftime("%Y-%m")
         month = _month_expr("fecha_proceso", conn.is_sqlite)
+        where_emp, p_emp = _where_empresa(conn, db_path)
+        and_emp, _ = _and_empresa(conn, db_path)
 
-        row = conn.execute("""
+        row = conn.execute(f"""
             SELECT
                 COUNT(*)                                          AS total_docs,
                 SUM(CASE WHEN clasificacion LIKE '%VENTA%'  THEN 1 ELSE 0 END) AS total_ventas,
@@ -459,13 +691,13 @@ def obtener_kpis(db_path: str = DB_PATH) -> dict:
                 SUM(COALESCE(total, 0))                           AS monto_total,
                 AVG(COALESCE(total, 0))                           AS promedio_por_doc,
                 COUNT(DISTINCT archivo_origen)                    AS archivos_procesados
-            FROM documentos_importados
-        """).fetchone()
+            FROM documentos_importados{where_emp}
+        """, p_emp).fetchone()
 
         docs_mes = conn.execute(f"""
             SELECT COUNT(*) FROM documentos_importados
-            WHERE {month} = ?
-        """, (mes_actual,)).fetchone()[0]
+            WHERE {month} = ?{and_emp}
+        """, (mes_actual,) + p_emp).fetchone()[0]
 
         return {
             "total_docs":          row["total_docs"]          or 0,
@@ -503,6 +735,7 @@ def obtener_evolucion_mensual(db_path: str = DB_PATH, meses: int = 12) -> list[d
             date_filter = f"{month} >= ?"
             param = cutoff.strftime("%Y-%m")
 
+        and_emp, p_emp = _and_empresa(conn, db_path)
         rows = conn.execute(f"""
             SELECT
                 {month}  AS mes,
@@ -516,10 +749,10 @@ def obtener_evolucion_mensual(db_path: str = DB_PATH, meses: int = 12) -> list[d
                           AND clasificacion NOT LIKE '%COMPRA%'  THEN 1 ELSE 0 END) AS otros_count
             FROM documentos_importados
             WHERE fecha_emision IS NOT NULL
-              AND {date_filter}
+              AND {date_filter}{and_emp}
             GROUP BY {month}
             ORDER BY mes ASC
-        """, (param,)).fetchall()
+        """, (param,) + p_emp).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
@@ -531,15 +764,16 @@ def obtener_distribucion_clasificacion(db_path: str = DB_PATH) -> list[dict]:
     """
     conn = get_connection(db_path)
     try:
-        rows = conn.execute("""
+        where_emp, p_emp = _where_empresa(conn, db_path)
+        rows = conn.execute(f"""
             SELECT
                 clasificacion,
                 COUNT(*)             AS count,
                 SUM(COALESCE(total,0)) AS monto
-            FROM documentos_importados
+            FROM documentos_importados{where_emp}
             GROUP BY clasificacion
             ORDER BY count DESC
-        """).fetchall()
+        """, p_emp).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
@@ -564,6 +798,7 @@ def obtener_top_terceros(
             nombre_col = "nombre_emisor"
             filtro     = "clasificacion LIKE '%COMPRA%'"
 
+        and_emp, p_emp = _and_empresa(conn, db_path)
         rows = conn.execute(f"""
             SELECT
                 {nit_col}    AS nit,
@@ -572,10 +807,10 @@ def obtener_top_terceros(
                 SUM(COALESCE(total,0)) AS monto
             FROM documentos_importados
             WHERE {filtro}
-              AND {nit_col} IS NOT NULL AND {nit_col} != ''
+              AND {nit_col} IS NOT NULL AND {nit_col} != ''{and_emp}
             GROUP BY {nit_col}
             ORDER BY monto DESC
-        """).fetchall()
+        """, p_emp).fetchall()
         # Apply limit in Python to avoid SQL dialect issues with TOP vs LIMIT
         return [dict(r) for r in rows[:limite]]
     finally:
@@ -590,6 +825,7 @@ def obtener_actividad_reciente(db_path: str = DB_PATH, limite: int = 30) -> list
     try:
         sub_fe = _substr_expr("fecha_emision", 1, 10, conn.is_sqlite)
         sub_fp = _substr_expr("fecha_proceso", 1, 10, conn.is_sqlite)
+        where_emp, p_emp = _where_empresa(conn, db_path)
 
         rows = conn.execute(f"""
             SELECT
@@ -599,13 +835,90 @@ def obtener_actividad_reciente(db_path: str = DB_PATH, limite: int = 30) -> list
                 nombre_receptor,
                 total,
                 {sub_fp} AS fecha_proceso
-            FROM documentos_importados
+            FROM documentos_importados{where_emp}
             ORDER BY fecha_proceso DESC
-        """).fetchall()
+        """, p_emp).fetchall()
         # Apply limit in Python
         return [dict(r) for r in rows[:limite]]
     finally:
         conn.close()
+
+
+def obtener_resumen_dashboard(db_path: str = DB_PATH) -> dict:
+    """
+    Resumen para el dashboard principal de una empresa.
+
+    Compatible con ambos backends y aislado por empresa (en Azure SQL). Retorna:
+    total_docs, ultimas (conteo por clasificación), ultima_fecha, total_historial.
+    """
+    conn = get_connection(db_path)
+    try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
+
+        total_docs = conn.execute(
+            f"SELECT COUNT(*) FROM documentos_importados{where_emp}", p_emp
+        ).fetchone()[0]
+
+        ultimas = conn.execute(
+            f"""
+            SELECT clasificacion, COUNT(*) as cnt
+            FROM documentos_importados{where_emp}
+            GROUP BY clasificacion
+            ORDER BY cnt DESC
+            """,
+            p_emp,
+        ).fetchall()
+
+        ultima_fecha = conn.execute(
+            f"SELECT MAX(fecha_proceso) FROM documentos_importados{where_emp}", p_emp
+        ).fetchone()[0]
+
+        total_historial = conn.execute(
+            f"SELECT COUNT(*) FROM historial_cuentas{where_emp}", p_emp
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    return {
+        "total_docs": total_docs or 0,
+        "ultimas": [dict(r) for r in ultimas],
+        "ultima_fecha": ultima_fecha,
+        "total_historial": total_historial or 0,
+    }
+
+
+def listar_historial_cuentas(
+    db_path: str = DB_PATH, limite: int = 200
+) -> tuple[list[dict], int]:
+    """
+    Cuentas aprendidas por el motor de sugerencias (para la vista /historial).
+
+    Compatible con ambos backends (el límite se aplica en Python para evitar
+    diferencias TOP vs LIMIT) y aislado por empresa en Azure SQL.
+
+    Returns:
+        (entradas, total) — lista ordenada por usos DESC y total de filas.
+    """
+    conn = get_connection(db_path)
+    try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
+        sub_uv = _substr_expr("ultima_vez", 1, 10, conn.is_sqlite)
+        rows = conn.execute(
+            f"""
+            SELECT clasificacion, nit_tercero, tipo_linea, cuenta, usos,
+                   {sub_uv} as ultima_fecha
+            FROM historial_cuentas{where_emp}
+            ORDER BY usos DESC
+            """,
+            p_emp,
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM historial_cuentas{where_emp}", p_emp
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    return [dict(r) for r in rows[:limite]], (total or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -636,12 +949,14 @@ def registrar_importacion(
             )
             imp_id = cur.lastrowid
         else:
+            emp_id = _empresa_id_desde_db_path(db_path)
             conn.execute(
                 """
-                INSERT INTO importaciones (fecha, archivo_nombre, archivo_ref, estado)
-                VALUES (?,?,?,?)
+                INSERT INTO importaciones
+                    (empresa_id, fecha, archivo_nombre, archivo_ref, estado)
+                VALUES (?,?,?,?,?)
                 """,
-                params,
+                (emp_id,) + params,
             )
             imp_id = int(conn.execute("SELECT @@IDENTITY").fetchone()[0])
         conn.commit()
@@ -662,14 +977,15 @@ def actualizar_importacion(
     """Actualiza el estado y los resultados de una importación existente."""
     conn = get_connection(db_path)
     try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
         conn.execute(
-            """
+            f"""
             UPDATE importaciones
             SET estado = ?, n_docs = ?, n_excepciones = ?,
                 excel_ref = COALESCE(?, excel_ref), error = ?
-            WHERE id = ?
+            WHERE id = ?{and_emp}
             """,
-            (estado, n_docs, n_excepciones, excel_ref, error, imp_id),
+            (estado, n_docs, n_excepciones, excel_ref, error, imp_id) + p_emp,
         )
         conn.commit()
     finally:
@@ -680,8 +996,9 @@ def obtener_importacion(imp_id: int, db_path: str = DB_PATH) -> Optional[dict]:
     """Retorna una importación por id, o None si no existe."""
     conn = get_connection(db_path)
     try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
         row = conn.execute(
-            "SELECT * FROM importaciones WHERE id = ?", (imp_id,)
+            f"SELECT * FROM importaciones WHERE id = ?{and_emp}", (imp_id,) + p_emp
         ).fetchone()
         return dict(row) if row else None
     finally:
@@ -692,8 +1009,9 @@ def listar_importaciones(db_path: str = DB_PATH, limite: int = 50) -> list[dict]
     """Retorna las importaciones más recientes (descendente por fecha)."""
     conn = get_connection(db_path)
     try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
         rows = conn.execute(
-            "SELECT * FROM importaciones ORDER BY id DESC"
+            f"SELECT * FROM importaciones{where_emp} ORDER BY id DESC", p_emp
         ).fetchall()
         # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
         return [dict(r) for r in rows[:limite]]
@@ -734,13 +1052,15 @@ def registrar_proceso_banco(
             )
             proc_id = cur.lastrowid
         else:
+            emp_id = _empresa_id_desde_db_path(db_path)
             conn.execute(
                 """
                 INSERT INTO procesos_banco
-                    (fecha, archivo_nombre, cuenta_banco, nit_banco, n_movimientos, estado)
-                VALUES (?,?,?,?,?,?)
+                    (empresa_id, fecha, archivo_nombre, cuenta_banco, nit_banco,
+                     n_movimientos, estado)
+                VALUES (?,?,?,?,?,?,?)
                 """,
-                params,
+                (emp_id,) + params,
             )
             proc_id = int(conn.execute("SELECT @@IDENTITY").fetchone()[0])
         conn.commit()
@@ -759,13 +1079,14 @@ def actualizar_proceso_banco(
     """Actualiza el estado (y opcionalmente el conteo) de un proceso de banco."""
     conn = get_connection(db_path)
     try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
         conn.execute(
-            """
+            f"""
             UPDATE procesos_banco
             SET estado = ?, n_movimientos = COALESCE(?, n_movimientos), error = ?
-            WHERE id = ?
+            WHERE id = ?{and_emp}
             """,
-            (estado, n_movimientos, error, proceso_id),
+            (estado, n_movimientos, error, proceso_id) + p_emp,
         )
         conn.commit()
     finally:
@@ -776,8 +1097,9 @@ def listar_procesos_banco(db_path: str = DB_PATH, limite: int = 50) -> list[dict
     """Retorna los procesos de banco más recientes (descendente por fecha)."""
     conn = get_connection(db_path)
     try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
         rows = conn.execute(
-            "SELECT * FROM procesos_banco ORDER BY id DESC"
+            f"SELECT * FROM procesos_banco{where_emp} ORDER BY id DESC", p_emp
         ).fetchall()
         # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
         return [dict(r) for r in rows[:limite]]
@@ -810,13 +1132,15 @@ def actualizar_historial_cuenta(
                 (clasificacion, nit_tercero, tipo_linea, cuenta, ahora),
             )
         else:
-            # T-SQL: MERGE para UPSERT
+            # T-SQL: MERGE para UPSERT (aislado por empresa)
+            emp_id = _empresa_id_desde_db_path(db_path)
             conn.execute(
                 """
                 MERGE historial_cuentas AS target
-                USING (SELECT ? AS clasificacion, ? AS nit_tercero,
+                USING (SELECT ? AS empresa_id, ? AS clasificacion, ? AS nit_tercero,
                               ? AS tipo_linea, ? AS cuenta, ? AS ultima_vez) AS source
-                ON target.clasificacion = source.clasificacion
+                ON target.empresa_id = source.empresa_id
+                   AND target.clasificacion = source.clasificacion
                    AND target.nit_tercero = source.nit_tercero
                    AND target.tipo_linea = source.tipo_linea
                 WHEN MATCHED THEN
@@ -824,11 +1148,11 @@ def actualizar_historial_cuenta(
                                ultima_vez = source.ultima_vez,
                                cuenta = source.cuenta
                 WHEN NOT MATCHED THEN
-                    INSERT (clasificacion, nit_tercero, tipo_linea, cuenta, usos, ultima_vez)
-                    VALUES (source.clasificacion, source.nit_tercero, source.tipo_linea,
-                            source.cuenta, 1, source.ultima_vez);
+                    INSERT (empresa_id, clasificacion, nit_tercero, tipo_linea, cuenta, usos, ultima_vez)
+                    VALUES (source.empresa_id, source.clasificacion, source.nit_tercero,
+                            source.tipo_linea, source.cuenta, 1, source.ultima_vez);
                 """,
-                (clasificacion, nit_tercero, tipo_linea, cuenta, ahora),
+                (emp_id, clasificacion, nit_tercero, tipo_linea, cuenta, ahora),
             )
         conn.commit()
     finally:

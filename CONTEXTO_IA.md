@@ -296,6 +296,27 @@ Diccionario `_GENERADORES` mapea clasificación → función generadora de líne
   `obtener_distribucion_clasificacion`, `obtener_top_terceros`, `obtener_actividad_reciente`.
   Usan helpers compatibles entre dialectos (`_month_expr`, `_substr_expr`) y aplican `LIMIT`
   en Python para evitar diferencias `TOP` vs `LIMIT`.
+- **Lecturas para la web**: `obtener_resumen_dashboard` (dashboard `/`) y
+  `listar_historial_cuentas` (`/historial`). Viven aquí —no como SQL crudo en `routes.py`—
+  para ser compatibles con ambos backends (sin `LIMIT`/`SUBSTR` específicos de SQLite) y
+  quedar aisladas por empresa en Azure SQL.
+- **Persistencia de la BD SQLite en Blob** (fix "empieza desde cero"): si hay Blob
+  configurado (modo cloud) y se usa SQLite, el archivo `.db` se **respalda en Blob** (categoría
+  `db/`) y se **restaura** al abrir la primera conexión, por si el disco local es efímero
+  (App Service for Containers / Container Apps sin almacenamiento persistente). Tras cada
+  `commit` se reprograma una única subida con *debounce* (coalesce de muchas escrituras) y se
+  hace `wal_checkpoint(TRUNCATE)` antes de subir para que el respaldo de un solo archivo sea
+  consistente. `atexit` sube cualquier respaldo pendiente. No da concurrencia real entre
+  workers (la última subida gana) → para eso, Azure SQL.
+- **Aislamiento por empresa en Azure SQL** (`empresa_id`): con SQLite cada empresa tiene su
+  propio archivo `.db` (aislamiento total, comportamiento intacto). Con Azure SQL las tablas
+  son compartidas, así que cada tabla lleva una columna **`empresa_id`** y todas las
+  consultas/escrituras la filtran. El id se deriva del nombre del archivo `.db` que cada
+  empresa pasa como `db_path` (`contable.db`→`principal`, `contable_<id>.db`→`<id>`) vía
+  `_empresa_id_desde_db_path`; los helpers `_cond_empresa` / `_and_empresa` / `_where_empresa`
+  devuelven cláusula vacía en SQLite. Las restricciones únicas pasan a incluir `empresa_id`
+  (`UNIQUE(empresa_id, cufe)`, `UNIQUE(empresa_id, clasificacion, nit_tercero, tipo_linea)`).
+  **No se activa hoy** (`USE_SQLITE=true`); queda correcto para `USE_SQLITE=false` + `DATABASE_URL`.
 
 #### Esquema de tablas
 | Tabla | Para qué |
@@ -336,9 +357,10 @@ Categorías usadas: `uploads`, `output`, `data`, `web_sessions`.
 - Registro persistente en `data/empresas.json` (o Blob). API: `listar_empresas`,
   `obtener_empresa`, `crear_empresa`, `actualizar_empresa`, `guardar_empresa`, `eliminar_empresa`
   (la principal no se puede eliminar).
-- **Limitación conocida:** en modo Azure SQL todas las empresas comparten tablas (la separación
-  por empresa hoy depende de archivos SQLite distintos). Para multi-empresa con Azure SQL haría
-  falta una columna discriminadora por empresa.
+- **Aislamiento multi-empresa por backend:** en SQLite la separación es por **archivo** distinto
+  (`db/contable_<id>.db`). En Azure SQL las tablas son compartidas y la separación es por la
+  columna discriminadora **`empresa_id`** (derivada del `db_path`; ver `database.py`). Ambos
+  caminos quedan correctos; Azure SQL no está activo hoy (`USE_SQLITE=true` por defecto).
 
 ---
 
@@ -490,11 +512,14 @@ Plantilla en `.env.example`. Las más importantes:
 
 | Dato | Local (`USE_SQLITE=true`, sin Blob) | Azure |
 |---|---|---|
-| Documentos, historial, importaciones, bitácora | SQLite en `DB_DIR` | SQLite en `/home/data/db` **o** Azure SQL si `USE_SQLITE=false` |
+| Documentos, historial, importaciones, bitácora | SQLite en `DB_DIR` | SQLite en `/home/data/db` (+ **respaldo en Blob** si hay Blob) **o** Azure SQL si `USE_SQLITE=false` |
 | Maestros, `empresas.json`, uploads, Excel, sesiones web | Carpetas del proyecto | Azure Blob Storage si está configurado |
 
 En Azure App Service el sistema de archivos del contenedor es **efímero** (solo `/home`
 persiste y los despliegues reemplazan `/home/site/wwwroot`). Por eso la BD va a `/home/data/db`.
+Además, si hay **Blob configurado**, la BD SQLite se respalda/restaura desde Blob (categoría
+`db/`): así no se "empieza desde cero" aunque el disco local sea efímero (p. ej. App Service for
+Containers o Container Apps sin `/home` persistente). Ver `database.py` §7.
 
 ---
 
