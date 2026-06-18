@@ -122,40 +122,17 @@ def _cargar_maestro_cacheado(loader, path: str):
 @bp.route("/")
 def index():
     """Dashboard principal: estadísticas de la BD + formulario de upload."""
-    from app.database import get_connection, inicializar_db
+    from app.database import inicializar_db, obtener_resumen_dashboard
 
     emp = _empresa_actual()
     inicializar_db(emp.db_path)
-    conn = get_connection(emp.db_path)
-    try:
-        total_docs = conn.execute(
-            "SELECT COUNT(*) FROM documentos_importados"
-        ).fetchone()[0]
-
-        ultimas = conn.execute(
-            """
-            SELECT clasificacion, COUNT(*) as cnt
-            FROM documentos_importados
-            GROUP BY clasificacion
-            ORDER BY cnt DESC
-            """
-        ).fetchall()
-
-        ultima_fecha = conn.execute(
-            "SELECT MAX(fecha_proceso) FROM documentos_importados"
-        ).fetchone()[0]
-
-        total_historial = conn.execute(
-            "SELECT COUNT(*) FROM historial_cuentas"
-        ).fetchone()[0]
-    finally:
-        conn.close()
+    resumen = obtener_resumen_dashboard(emp.db_path)
 
     stats = {
-        "total_docs": total_docs,
-        "ultimas": [dict(r) for r in ultimas],
-        "ultima_fecha": (ultima_fecha or "")[:19].replace("T", " "),
-        "total_historial": total_historial,
+        "total_docs": resumen["total_docs"],
+        "ultimas": resumen["ultimas"],
+        "ultima_fecha": (resumen["ultima_fecha"] or "")[:19].replace("T", " "),
+        "total_historial": resumen["total_historial"],
     }
 
     return render_template("index.html", stats=stats)
@@ -467,26 +444,12 @@ def confirmar():
 @bp.route("/historial")
 def historial():
     """Muestra las cuentas aprendidas por el motor de sugerencias."""
-    from app.database import get_connection, inicializar_db
+    from app.database import inicializar_db, listar_historial_cuentas
 
     db_path = _empresa_actual().db_path
     inicializar_db(db_path)
-    conn = get_connection(db_path)
-    try:
-        rows = conn.execute(
-            """
-            SELECT clasificacion, nit_tercero, tipo_linea, cuenta, usos,
-                   SUBSTR(ultima_vez, 1, 10) as ultima_fecha
-            FROM historial_cuentas
-            ORDER BY usos DESC
-            LIMIT 200
-            """
-        ).fetchall()
-        total = conn.execute("SELECT COUNT(*) FROM historial_cuentas").fetchone()[0]
-    finally:
-        conn.close()
+    entradas, total = listar_historial_cuentas(db_path, limite=200)
 
-    entradas = [dict(r) for r in rows]
     return render_template("historial.html", entradas=entradas, total=total)
 
 
