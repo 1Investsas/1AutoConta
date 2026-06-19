@@ -317,6 +317,8 @@ def generar_preasiento(
         lineas=lineas,
         cuadra=cuadra,
         excepciones=excepciones,
+        tercero_nit_original=str(documento.get("tercero_nit_original", "") or tercero_nit),
+        tercero_corregido=bool(documento.get("tercero_corregido", False)),
     )
 
 
