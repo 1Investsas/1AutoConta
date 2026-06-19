@@ -594,6 +594,20 @@ def importacion_descargar(imp_id):
 # POST /exportar-siigo — Generar archivo(s) SIIGO
 # ---------------------------------------------------------------------------
 
+def _responder_descarga(resp):
+    """Adjunta la cookie de señal de descarga al `Response` de un archivo.
+
+    El frontend envía un `download_token` oculto al exportar; el servidor lo
+    devuelve como cookie `descargaSiigo`. Así el navegador, al iniciar la
+    descarga (sin navegar de página), puede ocultar el overlay de carga y no
+    dejar la pantalla bloqueada en "Generando archivo SIIGO…".
+    """
+    token = request.form.get("download_token", "").strip()
+    if token:
+        resp.set_cookie("descargaSiigo", token, max_age=60, path="/", samesite="Lax")
+    return resp
+
+
 @bp.route("/exportar-siigo", methods=["POST"])
 def exportar_siigo():
     """Genera el Excel en formato SIIGO y lo envía como descarga (o ZIP si hay varios)."""
@@ -631,12 +645,12 @@ def exportar_siigo():
         return redirect(url_for("web.resultado"))
 
     if len(rutas) == 1:
-        return send_file(
+        return _responder_descarga(send_file(
             rutas[0],
             as_attachment=True,
             download_name=Path(rutas[0]).name,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        ))
 
     # Múltiples archivos → empaquetar en ZIP
     buf = io.BytesIO()
@@ -644,12 +658,12 @@ def exportar_siigo():
         for ruta in rutas:
             zf.write(ruta, Path(ruta).name)
     buf.seek(0)
-    return send_file(
+    return _responder_descarga(send_file(
         buf,
         as_attachment=True,
         download_name="siigo_comprobantes.zip",
         mimetype="application/zip",
-    )
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1152,20 +1166,20 @@ def banco_exportar():
                                  n_movimientos=len(movimientos), db_path=emp.db_path)
 
     if len(rutas) == 1:
-        return send_file(
+        return _responder_descarga(send_file(
             rutas[0],
             as_attachment=True,
             download_name=Path(rutas[0]).name,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        ))
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for ruta in rutas:
             zf.write(ruta, Path(ruta).name)
     buf.seek(0)
-    return send_file(buf, as_attachment=True, download_name="siigo_banco.zip",
-                     mimetype="application/zip")
+    return _responder_descarga(send_file(buf, as_attachment=True,
+                     download_name="siigo_banco.zip", mimetype="application/zip"))
 
 
 # ---------------------------------------------------------------------------

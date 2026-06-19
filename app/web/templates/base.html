@@ -273,6 +273,40 @@ document.querySelectorAll('form[data-loading]').forEach(form => {
   });
 });
 
+// Overlay para formularios que generan una DESCARGA (no navegan de página).
+// El servidor responde con la cookie `descargaSiigo=<token>`; cuando aparece,
+// ocultamos el overlay para no dejar la pantalla bloqueada. Un timeout de
+// seguridad garantiza que la pantalla nunca quede bloqueada indefinidamente.
+window.descargaConOverlay = function (form, mensaje) {
+  const overlay = document.getElementById('loadingOverlay');
+  const token = Date.now() + '-' + Math.random().toString(36).slice(2);
+  let campo = form.querySelector('input[name="download_token"]');
+  if (!campo) {
+    campo = document.createElement('input');
+    campo.type = 'hidden';
+    campo.name = 'download_token';
+    form.appendChild(campo);
+  }
+  campo.value = token;
+
+  if (overlay) {
+    const p = overlay.querySelector('p');
+    if (p && mensaje) p.textContent = mensaje;
+    overlay.classList.add('visible');
+  }
+
+  const ocultar = () => {
+    if (overlay) overlay.classList.remove('visible');
+    document.cookie = 'descargaSiigo=; max-age=0; path=/';
+    clearInterval(intervalo);
+    clearTimeout(seguro);
+  };
+  const intervalo = setInterval(() => {
+    if (document.cookie.indexOf('descargaSiigo=' + token) !== -1) ocultar();
+  }, 400);
+  const seguro = setTimeout(ocultar, 120000);
+};
+
 // --- Sidebar móvil ---
 const sidebar = document.getElementById('sidebar');
 const backdrop = document.getElementById('sidebarBackdrop');
