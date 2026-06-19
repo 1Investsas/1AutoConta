@@ -176,7 +176,10 @@ def mapear_preasiento(
     prefijo_doc = preasiento.prefijo or ""
     folio_doc   = preasiento.folio   or ""
     sep         = "-" if prefijo_doc else ""
-    observaciones = (
+    # Referencia del documento: identifica el asiento (clasificación, nº de
+    # documento y tercero). Por decisión de negocio va en la columna
+    # "Descripción" (col 20); la columna "Observaciones" (col 24) se deja vacía.
+    referencia = (
         f"{preasiento.clasificacion.replace('_', ' ')} "
         f"{prefijo_doc}{sep}{folio_doc} "
         f"| {preasiento.tercero_nombre}"
@@ -186,10 +189,10 @@ def mapear_preasiento(
     for linea in preasiento.lineas:
         if linea.es_pendiente:
             codigo_cuenta = ""
-            descripcion   = f"[PENDIENTE] {linea.descripcion_cuenta or linea.concepto}"
+            descripcion   = f"[PENDIENTE] {referencia}"
         else:
             codigo_cuenta = linea.cuenta
-            descripcion   = linea.descripcion_cuenta or linea.concepto or ""
+            descripcion   = referencia
 
         # Cols 13-16: solo cuando la cuenta maneja vencimientos (y no es pendiente)
         tiene_vencimiento = (not linea.es_pendiente) and (linea.cuenta in cuentas_vencimiento)
@@ -205,7 +208,7 @@ def mapear_preasiento(
             codigo_cuenta=codigo_cuenta,
             nit_tercero=linea.tercero_nit or preasiento.tercero_nit or "",
             descripcion=descripcion,
-            observaciones=observaciones,
+            observaciones="",
             prefijo=prefijo_siigo,
             folio=folio_siigo,
             no_cuota=no_cuota,
