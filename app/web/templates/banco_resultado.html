@@ -728,13 +728,9 @@ function actualizarPillTipo(select) {
   /* no hace nada visualmente por ahora — reservado */
 }
 
-/* ── Loading al exportar ── */
+/* ── Loading al exportar (se oculta cuando inicia la descarga del archivo) ── */
 document.getElementById('bancoForm').addEventListener('submit', function () {
-  var overlay = document.getElementById('loadingOverlay');
-  if (overlay) {
-    overlay.querySelector('p').textContent = 'Generando archivo SIIGO…';
-    overlay.classList.add('visible');
-  }
+  window.descargaConOverlay(this, 'Generando archivo SIIGO…');
 });
 </script>
 {% endblock %}
