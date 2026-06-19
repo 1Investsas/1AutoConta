@@ -152,6 +152,8 @@ def procesar_terceros_lote(
     df["tercero_nombre"] = terceros_nombre
     df["tercero_encontrado"] = terceros_encontrado
     df["tercero_estado"] = terceros_estado
+    # NIT identificado desde RADIAN, antes de cualquier corrección aprendida.
+    df["tercero_nit_original"] = terceros_nit
 
     no_encontrados = sum(1 for x in terceros_encontrado if not x)
     logger.info(
@@ -159,4 +161,81 @@ def procesar_terceros_lote(
         len(df) - no_encontrados,
         no_encontrados,
     )
+    return df
+
+
+def aplicar_correcciones_lote(
+    df: pd.DataFrame,
+    df_terceros: pd.DataFrame,
+    db_path: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Reaplica correcciones de tercero aprendidas de procesamientos previos.
+
+    Para cada fila busca en el historial (`correcciones_tercero`) una
+    corrección registrada para su `tercero_nit_original`. Si existe, reemplaza
+    el NIT/nombre del tercero por el corregido, recalcula `tercero_encontrado`
+    cruzando contra el maestro y marca la fila con `tercero_corregido=True`.
+
+    Las filas sin corrección registrada quedan intactas (tercero_corregido=False).
+    Es idempotente y seguro de llamar aunque no haya BD configurada.
+
+    Args:
+        df:          DataFrame ya enriquecido por procesar_terceros_lote().
+        df_terceros: Maestro de terceros (para recalcular tercero_encontrado).
+        db_path:     Ruta a la BD; si es None/falsy no se aplican correcciones.
+
+    Returns:
+        DataFrame con las correcciones aplicadas y la columna 'tercero_corregido'.
+    """
+    df = df.copy()
+
+    if "tercero_nit_original" not in df.columns:
+        df["tercero_nit_original"] = df.get("tercero_nit", "")
+
+    if not db_path:
+        df["tercero_corregido"] = False
+        return df
+
+    from app.database import obtener_correccion_tercero
+
+    nits, nombres, encontrados, corregidos = [], [], [], []
+    n_aplicadas = 0
+
+    for _, row in df.iterrows():
+        nit_orig = str(row.get("tercero_nit_original", row.get("tercero_nit", "")))
+        nit_actual = str(row.get("tercero_nit", ""))
+        nombre_actual = str(row.get("tercero_nombre", ""))
+        encontrado_actual = bool(row.get("tercero_encontrado", False))
+
+        correccion = obtener_correccion_tercero(nit_orig, db_path) if nit_orig else None
+
+        if not correccion:
+            nits.append(nit_actual)
+            nombres.append(nombre_actual)
+            encontrados.append(encontrado_actual)
+            corregidos.append(False)
+            continue
+
+        nit_c = correccion["nit_corregido"]
+        nombre_c = correccion.get("nombre_corregido", "")
+
+        cruce = cruzar_tercero(nit_c, df_terceros) if df_terceros is not None else None
+        encontrado_c = cruce is not None
+        if cruce:
+            nombre_c = cruce.get("Nombre tercero", "") or nombre_c
+
+        nits.append(nit_c)
+        nombres.append(nombre_c or nombre_actual)
+        encontrados.append(encontrado_c)
+        corregidos.append(True)
+        n_aplicadas += 1
+
+    df["tercero_nit"] = nits
+    df["tercero_nombre"] = nombres
+    df["tercero_encontrado"] = encontrados
+    df["tercero_corregido"] = corregidos
+
+    if n_aplicadas:
+        logger.info("Correcciones de tercero aplicadas automáticamente: %d.", n_aplicadas)
     return df

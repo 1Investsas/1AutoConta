@@ -237,7 +237,7 @@ def _ejecutar_pipeline(
         cargar_maestro_cuentas, cargar_maestro_comprobantes,
     )
     from app.clasificador import clasificar_lote
-    from app.terceros import procesar_terceros_lote
+    from app.terceros import procesar_terceros_lote, aplicar_correcciones_lote
     from app.comprobantes import asignar_comprobantes_lote
     from app.impuestos import procesar_impuestos_lote
     from app.preasiento import generar_lote
@@ -272,6 +272,8 @@ def _ejecutar_pipeline(
     # 5-8. Pipeline (con NIT y cuentas propias de la empresa)
     df = clasificar_lote(df, nit_empresa=empresa.nit)
     df = procesar_terceros_lote(df, df_terceros if df_terceros is not None else pd.DataFrame())
+    # Reaplicar correcciones de tercero aprendidas de procesamientos previos.
+    df = aplicar_correcciones_lote(df, df_terceros, db)
     df = asignar_comprobantes_lote(df, df_comprobantes)
     df = procesar_impuestos_lote(df, cuentas_impuestos=empresa.cuentas_impuestos_efectivas())
     preasientos = generar_lote(
@@ -362,6 +364,8 @@ def _ejecutar_pipeline(
             "tercero_nit": p.tercero_nit,
             "tercero_nombre": p.tercero_nombre,
             "tercero_encontrado": p.tercero_encontrado,
+            "tercero_nit_original": getattr(p, "tercero_nit_original", "") or p.tercero_nit,
+            "tercero_corregido": getattr(p, "tercero_corregido", False),
             "total": p.total,
             "cuadra": p.cuadra,
             "excepciones": p.excepciones,
@@ -434,6 +438,96 @@ def confirmar():
 
         flash(f"✓ Cuenta {cuenta} confirmada para {clasificacion} / NIT {nit_tercero}.", "success")
 
+    return redirect(url_for("web.resultado"))
+
+
+# ---------------------------------------------------------------------------
+# POST /corregir-tercero — Editar el tercero de un preasiento
+# ---------------------------------------------------------------------------
+
+def _resolver_tercero(emp, nit: str, nombre_form: str) -> tuple[str, bool]:
+    """Resuelve el nombre y la presencia en maestro de un tercero por su NIT.
+
+    Si el NIT existe en el maestro de la empresa, retorna su nombre oficial y
+    encontrado=True; de lo contrario usa el nombre que envió el formulario y
+    encontrado=False.
+    """
+    from app.importador import cargar_maestro_terceros
+    from app.terceros import cruzar_tercero
+
+    try:
+        terceros_path = emp.ruta_maestro("Listado_de_Terceros.xlsx")
+        df = _cargar_maestro_cacheado(cargar_maestro_terceros, terceros_path)
+        cruce = cruzar_tercero(nit, df)
+    except Exception:
+        cruce = None
+
+    if cruce:
+        nombre = cruce.get("Nombre tercero", "") or nombre_form
+        return nombre, True
+    return nombre_form, False
+
+
+@bp.route("/corregir-tercero", methods=["POST"])
+def corregir_tercero():
+    """Corrige el tercero de un preasiento y aprende la corrección.
+
+    Actualiza el resultado guardado en sesión (para reflejarlo en pantalla y en
+    la exportación SIIGO) y registra la corrección original→corregido en la BD
+    para trazabilidad y para reaplicarla automáticamente en futuras importaciones.
+    """
+    from app.database import inicializar_db, registrar_correccion_tercero
+
+    cufe_full     = request.form.get("cufe_full", "").strip()
+    nit_nuevo     = request.form.get("nit_tercero", "").strip()
+    nombre_form   = request.form.get("nombre_tercero", "").strip()
+    nit_original  = request.form.get("nit_original", "").strip()
+    nombre_orig   = request.form.get("nombre_original", "").strip()
+    clasificacion = request.form.get("clasificacion", "").strip()
+
+    if not cufe_full or not nit_nuevo:
+        flash("Datos incompletos para corregir el tercero.", "error")
+        return redirect(url_for("web.resultado"))
+
+    emp = _empresa_actual()
+    nombre_nuevo, encontrado = _resolver_tercero(emp, nit_nuevo, nombre_form)
+
+    # Actualizar el resultado en sesión para reflejar el cambio en pantalla.
+    resultado = session_store.cargar(KEY_RESULTADO)
+    actualizado = False
+    if resultado:
+        for p in resultado.get("preasientos", []):
+            if p.get("cufe_full") == cufe_full:
+                if not nit_original:
+                    nit_original = p.get("tercero_nit_original") or p.get("tercero_nit", "")
+                    nombre_orig = nombre_orig or p.get("tercero_nombre", "")
+                p["tercero_nit"]       = nit_nuevo
+                p["tercero_nombre"]    = nombre_nuevo
+                p["tercero_encontrado"] = encontrado
+                p["tercero_corregido"] = True
+                actualizado = True
+                break
+        if actualizado:
+            session_store.guardar(KEY_RESULTADO, resultado)
+
+    if not actualizado:
+        flash("No se encontró el documento a corregir en la sesión.", "error")
+        return redirect(url_for("web.resultado"))
+
+    # Registrar la corrección solo si realmente cambió algo respecto al original.
+    cambio = nit_original and (nit_nuevo != nit_original or nombre_nuevo != nombre_orig)
+    if cambio:
+        inicializar_db(emp.db_path)
+        registrar_correccion_tercero(
+            nit_original=nit_original,
+            nombre_original=nombre_orig,
+            nit_corregido=nit_nuevo,
+            nombre_corregido=nombre_nuevo,
+            clasificacion=clasificacion,
+            db_path=emp.db_path,
+        )
+
+    flash(f"✓ Tercero actualizado a {nombre_nuevo or nit_nuevo} (NIT {nit_nuevo}).", "success")
     return redirect(url_for("web.resultado"))
 
 
@@ -930,6 +1024,8 @@ def _deserializar_preasientos(preasientos_data: list[dict]):
             lineas=lineas,
             cuadra=bool(p.get("cuadra", False)),
             excepciones=p.get("excepciones", []),
+            tercero_nit_original=p.get("tercero_nit_original", "") or p.get("tercero_nit", ""),
+            tercero_corregido=bool(p.get("tercero_corregido", False)),
         ))
     return resultado
 

@@ -120,6 +120,11 @@ class PreasientoContable:
     lineas: list[LineaContable] = field(default_factory=list)
     cuadra: bool = False
     excepciones: list[str] = field(default_factory=list)
+    # NIT identificado originalmente desde RADIAN, antes de cualquier corrección
+    # manual o aprendida. Sirve de clave para trazabilidad/aprendizaje (Fase 1).
+    tercero_nit_original: str = ""
+    # True si el tercero fue reemplazado por una corrección aprendida del historial.
+    tercero_corregido: bool = False
 
 
 @dataclass

@@ -416,6 +416,19 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             error           TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS correcciones_tercero (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            nit_original     TEXT    NOT NULL,
+            nombre_original  TEXT,
+            nit_corregido    TEXT    NOT NULL,
+            nombre_corregido TEXT,
+            clasificacion    TEXT,
+            usos             INTEGER DEFAULT 1,
+            ultima_vez       TEXT,
+            UNIQUE(nit_original)
+        )
+    """)
 
 
 def _create_tables_mssql(conn: DbConnection) -> None:
@@ -499,6 +512,21 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             n_movimientos   INT DEFAULT 0,
             estado          NVARCHAR(30)   NOT NULL DEFAULT 'procesando',
             error           NVARCHAR(MAX)
+        )
+    """)
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'correcciones_tercero')
+        CREATE TABLE correcciones_tercero (
+            id               INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id       NVARCHAR(100)  NOT NULL DEFAULT 'principal',
+            nit_original     NVARCHAR(50)   NOT NULL,
+            nombre_original  NVARCHAR(300),
+            nit_corregido    NVARCHAR(50)   NOT NULL,
+            nombre_corregido NVARCHAR(300),
+            clasificacion    NVARCHAR(100),
+            usos             INT DEFAULT 1,
+            ultima_vez       NVARCHAR(50),
+            CONSTRAINT uq_correccion_tercero UNIQUE(empresa_id, nit_original)
         )
     """)
 
@@ -639,6 +667,140 @@ def obtener_historial_cuenta(
             (clasificacion, nit_tercero, tipo_linea) + p_emp,
         ).fetchone()
         return row["cuenta"] if row else None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Correcciones de tercero — trazabilidad y aprendizaje (Fase 1)
+# ---------------------------------------------------------------------------
+
+def obtener_correccion_tercero(
+    nit_original: str,
+    db_path: str = DB_PATH,
+) -> Optional[dict]:
+    """
+    Retorna la corrección de tercero registrada para un NIT original, o None.
+
+    El NIT original es el que identificó el pipeline desde RADIAN antes de
+    cualquier corrección manual. Si el usuario lo corrigió alguna vez, aquí
+    se devuelve el NIT/nombre corregido para reaplicarlo automáticamente.
+
+    Returns:
+        Dict con 'nit_corregido' y 'nombre_corregido', o None si no hay registro.
+    """
+    if not nit_original:
+        return None
+    conn = get_connection(db_path)
+    try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
+        row = conn.execute(
+            f"""
+            SELECT nit_corregido, nombre_corregido FROM correcciones_tercero
+            WHERE nit_original=?{and_emp}
+            """,
+            (nit_original,) + p_emp,
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "nit_corregido": row["nit_corregido"],
+            "nombre_corregido": row["nombre_corregido"] or "",
+        }
+    finally:
+        conn.close()
+
+
+def registrar_correccion_tercero(
+    nit_original: str,
+    nombre_original: str,
+    nit_corregido: str,
+    nombre_corregido: str,
+    clasificacion: str = "",
+    db_path: str = DB_PATH,
+) -> None:
+    """
+    Registra (o actualiza) una corrección de tercero.
+
+    Hace un UPSERT por `nit_original`: si ya existía una corrección para ese
+    NIT, actualiza el destino e incrementa `usos`. Sirve para trazabilidad
+    (qué se corrigió) y aprendizaje (reaplicar la corrección en el futuro).
+    """
+    if not nit_original or not nit_corregido:
+        return
+    conn = get_connection(db_path)
+    ahora = datetime.now().isoformat()
+    try:
+        if conn.is_sqlite:
+            conn.execute(
+                """
+                INSERT INTO correcciones_tercero
+                    (nit_original, nombre_original, nit_corregido,
+                     nombre_corregido, clasificacion, usos, ultima_vez)
+                VALUES (?,?,?,?,?,1,?)
+                ON CONFLICT(nit_original) DO UPDATE SET
+                    nombre_original  = excluded.nombre_original,
+                    nit_corregido    = excluded.nit_corregido,
+                    nombre_corregido = excluded.nombre_corregido,
+                    clasificacion    = excluded.clasificacion,
+                    usos             = usos + 1,
+                    ultima_vez       = excluded.ultima_vez
+                """,
+                (nit_original, nombre_original, nit_corregido,
+                 nombre_corregido, clasificacion, ahora),
+            )
+        else:
+            emp_id = _empresa_id_desde_db_path(db_path)
+            conn.execute(
+                """
+                MERGE correcciones_tercero AS target
+                USING (SELECT ? AS empresa_id, ? AS nit_original, ? AS nombre_original,
+                              ? AS nit_corregido, ? AS nombre_corregido,
+                              ? AS clasificacion, ? AS ultima_vez) AS source
+                ON target.empresa_id = source.empresa_id
+                   AND target.nit_original = source.nit_original
+                WHEN MATCHED THEN
+                    UPDATE SET nombre_original  = source.nombre_original,
+                               nit_corregido    = source.nit_corregido,
+                               nombre_corregido = source.nombre_corregido,
+                               clasificacion    = source.clasificacion,
+                               usos             = target.usos + 1,
+                               ultima_vez       = source.ultima_vez
+                WHEN NOT MATCHED THEN
+                    INSERT (empresa_id, nit_original, nombre_original, nit_corregido,
+                            nombre_corregido, clasificacion, usos, ultima_vez)
+                    VALUES (source.empresa_id, source.nit_original, source.nombre_original,
+                            source.nit_corregido, source.nombre_corregido,
+                            source.clasificacion, 1, source.ultima_vez);
+                """,
+                (emp_id, nit_original, nombre_original, nit_corregido,
+                 nombre_corregido, clasificacion, ahora),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def listar_correcciones_tercero(
+    db_path: str = DB_PATH,
+    limite: int = 200,
+) -> list[dict]:
+    """Lista las correcciones de tercero registradas (más recientes primero)."""
+    conn = get_connection(db_path)
+    try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
+        top = "" if conn.is_sqlite else f"TOP {int(limite)} "
+        limit_sql = f" LIMIT {int(limite)}" if conn.is_sqlite else ""
+        rows = conn.execute(
+            f"""
+            SELECT {top}nit_original, nombre_original, nit_corregido,
+                   nombre_corregido, clasificacion, usos, ultima_vez
+            FROM correcciones_tercero{where_emp}
+            ORDER BY ultima_vez DESC{limit_sql}
+            """,
+            p_emp,
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 

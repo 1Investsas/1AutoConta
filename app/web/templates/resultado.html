@@ -94,8 +94,45 @@
               <span style="font-size:0.75rem">{{ p.clasificacion | replace('_',' ') }}</span>
             </td>
             <td rowspan="{{ rowspan }}" style="border-right:1px solid var(--border)">
-              {{ p.tercero_nombre }}<br>
-              <small class="text-dim">{{ p.tercero_nit }}</small>
+              {% set tedit_id = p.cufe_full %}
+              <!-- Display mode -->
+              <div id="tdisplay_{{ tedit_id }}">
+                {{ p.tercero_nombre }}<br>
+                <small class="text-dim">{{ p.tercero_nit }}</small>
+                {% if p.tercero_corregido %}
+                  <span class="pill pill-sugerida" style="font-size:0.66rem; margin-left:2px">corregido</span>
+                {% elif not p.tercero_encontrado %}
+                  <span class="pill pill-warn" style="font-size:0.66rem; margin-left:2px">sin maestro</span>
+                {% endif %}
+                <button type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding:1px 6px; font-size:0.72rem; line-height:1.4; margin-left:2px"
+                        title="Editar tercero"
+                        onclick="toggleEditTercero('{{ tedit_id }}')">✎</button>
+              </div>
+              <!-- Edit mode (hidden by default) -->
+              <div id="tedit_{{ tedit_id }}" style="display:none">
+                <form class="confirm-form" method="POST"
+                      action="{{ url_for('web.corregir_tercero') }}">
+                  <input type="hidden" name="csrf_token"      value="{{ csrf_token() }}">
+                  <input type="hidden" name="cufe_full"       value="{{ p.cufe_full }}">
+                  <input type="hidden" name="clasificacion"   value="{{ p.clasificacion }}">
+                  <input type="hidden" name="nit_original"    value="{{ p.tercero_nit_original or p.tercero_nit }}">
+                  <input type="hidden" name="nombre_original" value="{{ p.tercero_nombre }}">
+                  <input type="hidden" name="nombre_tercero"  id="tnombre_{{ tedit_id }}" value="{{ p.tercero_nombre }}">
+                  <input type="text" name="nit_tercero"
+                         class="tercero-ac-input"
+                         data-cufe="{{ tedit_id }}"
+                         value="{{ p.tercero_nit }}"
+                         placeholder="NIT o nombre"
+                         autocomplete="off"
+                         title="Busca por NIT o nombre y elige el tercero">
+                  <button type="submit" class="btn btn-primary btn-sm">✓</button>
+                  <button type="button"
+                          class="btn btn-secondary btn-sm"
+                          onclick="toggleEditTercero('{{ tedit_id }}')">✕</button>
+                </form>
+              </div>
             </td>
             <td rowspan="{{ rowspan }}" style="border-right:1px solid var(--border)">
               {{ p.fecha_emision }}
@@ -275,6 +312,34 @@
   background: var(--accent);
   color: #fff;
 }
+#tercero-ac {
+  position: fixed;
+  background: #1a2d44;
+  border: 1px solid #9b59b6;
+  border-radius: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 9999;
+  max-height: 220px;
+  overflow-y: auto;
+  min-width: 300px;
+  display: none;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+#tercero-ac li {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+#tercero-ac li.ac-sel {
+  background: #9b59b6;
+  color: #fff;
+}
 </style>
 
 <script>
@@ -288,6 +353,110 @@ function toggleEditCuenta(id) {
     edit.querySelector('input[name="cuenta"]').focus();
   }
 }
+
+function toggleEditTercero(id) {
+  var display = document.getElementById('tdisplay_' + id);
+  var edit    = document.getElementById('tedit_' + id);
+  var showing = edit.style.display !== 'none';
+  display.style.display = showing ? 'block' : 'none';
+  edit.style.display    = showing ? 'none' : 'block';
+  if (!showing) {
+    edit.querySelector('input[name="nit_tercero"]').focus();
+  }
+}
+
+/* ── Autocompletado de terceros (NIT o nombre) ── */
+(function () {
+  var ac = document.createElement('ul');
+  ac.id = 'tercero-ac';
+  document.body.appendChild(ac);
+
+  var activeInput = null;
+  var timer = null;
+  var selIdx = -1;
+
+  function hide() { ac.style.display = 'none'; selIdx = -1; }
+  function items() { return ac.querySelectorAll('li'); }
+
+  function highlight(idx) {
+    items().forEach(function (li, i) { li.classList.toggle('ac-sel', i === idx); });
+    var sel = items()[idx];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pick(item, input) {
+    input.value = item.nit;
+    var cufe = input.dataset.cufe;
+    var hidden = document.getElementById('tnombre_' + cufe);
+    if (hidden) hidden.value = item.nombre || '';
+    hide();
+    input.focus();
+  }
+
+  function show(data, input) {
+    ac.innerHTML = '';
+    if (!data.length) { hide(); return; }
+    var r = input.getBoundingClientRect();
+    ac.style.left  = r.left + 'px';
+    ac.style.top   = (r.bottom + 2) + 'px';
+    ac.style.width = Math.max(r.width, 300) + 'px';
+    data.forEach(function (item) {
+      var li = document.createElement('li');
+      li._item = item;
+      li.textContent = item.nombre ? item.nit + '  —  ' + item.nombre : item.nit;
+      li.addEventListener('mouseenter', function () {
+        selIdx = Array.from(items()).indexOf(li);
+        highlight(selIdx);
+      });
+      li.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        pick(item, activeInput);
+      });
+      ac.appendChild(li);
+    });
+    ac.style.display = 'block';
+    selIdx = -1;
+  }
+
+  function fetch_(q, input) {
+    if (q.length < 2) { hide(); return; }
+    fetch('/api/terceros?q=' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (data) { if (activeInput === input) show(data, input); })
+      .catch(hide);
+  }
+
+  document.addEventListener('input', function (e) {
+    if (!e.target.classList || !e.target.classList.contains('tercero-ac-input')) return;
+    activeInput = e.target;
+    // Al teclear a mano, descartar el nombre previo: se repuebla al elegir del
+    // listado, o el servidor lo resuelve desde el maestro por el NIT.
+    var hidden = document.getElementById('tnombre_' + e.target.dataset.cufe);
+    if (hidden) hidden.value = '';
+    clearTimeout(timer);
+    timer = setTimeout(function () { fetch_(e.target.value.trim(), e.target); }, 220);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!activeInput || ac.style.display === 'none') return;
+    var its = items();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault(); selIdx = Math.min(selIdx + 1, its.length - 1); highlight(selIdx);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); highlight(selIdx);
+    } else if (e.key === 'Enter' && selIdx >= 0) {
+      e.preventDefault(); its[selIdx] && pick(its[selIdx]._item, activeInput);
+    } else if (e.key === 'Escape') { hide(); }
+  });
+
+  document.addEventListener('focusin', function (e) {
+    if (e.target.classList && e.target.classList.contains('tercero-ac-input')) activeInput = e.target;
+  });
+  document.addEventListener('focusout', function (e) {
+    if (e.target.classList && e.target.classList.contains('tercero-ac-input')) setTimeout(hide, 160);
+  });
+  document.addEventListener('scroll', hide, true);
+}());
 
 /* ── Autocompletado de cuentas contables ── */
 (function () {
