@@ -219,14 +219,10 @@ def procesar():
             comprobantes_path, db, incluir_dup, empresa=emp,
         )
         resultado["importacion_id"] = imp_id
-        actualizar_importacion(
-            imp_id, estado="completada",
-            n_docs=resultado["n_docs"],
-            n_excepciones=resultado["n_excepciones"],
-            excel_ref=resultado["excel_path"],
-            db_path=db,
-        )
         session_store.guardar(KEY_RESULTADO, resultado)
+        # Persistir el snapshot durable (estado 'procesada'): permite retomar la
+        # importación más tarde conservando lo trabajado, sin reprocesar.
+        _persistir_importacion(emp, resultado, "procesada")
         flash(f"✓ Procesados {resultado['n_docs']} documentos. "
               f"{resultado['n_excepciones']} con excepciones.", "success")
         return redirect(url_for("web.resultado"))
@@ -448,6 +444,7 @@ def confirmar():
                                 break
                         break
                 session_store.guardar(KEY_RESULTADO, resultado)
+                _persistir_importacion(_empresa_actual(), resultado, "corregida")
             except (ValueError, TypeError):
                 pass
 
@@ -524,6 +521,7 @@ def corregir_tercero():
                 break
         if actualizado:
             session_store.guardar(KEY_RESULTADO, resultado)
+            _persistir_importacion(emp, resultado, "corregida")
 
     if not actualizado:
         flash("No se encontró el documento a corregir en la sesión.", "error")
@@ -680,6 +678,7 @@ def dividir_linea():
 
     _recalcular_preasiento(preasiento)
     session_store.guardar(KEY_RESULTADO, datos)
+    _persistir_importacion(_empresa_actual(), datos, "corregida")
 
     flash(f"✓ Línea dividida en {len(partes)} cuentas.", "success")
     return redirect(url_for("web.resultado"))
@@ -731,6 +730,45 @@ def descargar():
 # Importaciones — historial persistente, retomar y regenerar archivos
 # ---------------------------------------------------------------------------
 
+def _persistir_importacion(emp, datos: dict, estado: str) -> None:
+    """Guarda el snapshot editable durable de una importación RADIAN.
+
+    Es la copia durable (en BD) del resultado que vive en la sesión de trabajo:
+    así "Abrir" una importación recupera lo trabajado (correcciones de tercero,
+    divisiones, cuentas confirmadas) sin reprocesar el archivo. Best-effort: si
+    falla la persistencia durable no se rompe la edición (ya guardada en sesión).
+    """
+    import json as _json
+    from app.database import actualizar_importacion
+
+    imp_id = datos.get("importacion_id")
+    if not imp_id:
+        return
+    try:
+        actualizar_importacion(
+            imp_id,
+            estado=estado,
+            n_docs=int(datos.get("n_docs", 0) or 0),
+            n_excepciones=int(datos.get("n_excepciones", 0) or 0),
+            excel_ref=datos.get("excel_path") or None,
+            preasientos_json=_json.dumps(datos, ensure_ascii=False),
+            db_path=emp.db_path,
+        )
+    except Exception:
+        logger.exception("No se pudo persistir el snapshot de la importación %s", imp_id)
+
+
+_ESTADOS_IMPORTACION = {
+    "procesando": ("Procesando", "pill"),
+    "procesada":  ("Procesada",  "pill pill-ok"),
+    "completada": ("Procesada",  "pill pill-ok"),   # legado
+    "corregida":  ("Corregida",  "pill pill-info"),
+    "exportada":  ("Exportada",  "pill pill-ok"),
+    "error":      ("Error",      "pill pill-pendiente"),
+    "anulada":    ("Anulada",    "pill pill-muted"),
+}
+
+
 @bp.route("/importaciones")
 def importaciones():
     """Lista las importaciones realizadas con su estado y acciones disponibles."""
@@ -748,8 +786,68 @@ def importaciones():
         r["excel_disponible"] = bool(
             r.get("excel_ref") and store.file_exists(r["excel_ref"])
         )
+        r["tiene_snapshot"] = bool(r.get("tiene_snapshot"))
+        r["anulada"] = r.get("estado") == "anulada"
+        etiqueta, clase = _ESTADOS_IMPORTACION.get(
+            r.get("estado"), (r.get("estado") or "—", "pill")
+        )
+        r["estado_label"] = etiqueta
+        r["estado_clase"] = clase
 
     return render_template("importaciones.html", importaciones=registros)
+
+
+@bp.route("/importaciones/<int:imp_id>/abrir", methods=["POST"])
+def importacion_abrir(imp_id):
+    """Abre una importación cargando su snapshot durable en la sesión de trabajo.
+
+    A diferencia de «Regenerar» (que reprocesa el archivo y pierde las
+    correcciones manuales), «Abrir» recupera exactamente el estado guardado para
+    seguir editándolo y exportarlo.
+    """
+    from app.database import inicializar_db, obtener_snapshot_importacion
+
+    emp = _empresa_actual()
+    db = emp.db_path
+    inicializar_db(db)
+
+    snap = obtener_snapshot_importacion(imp_id, db_path=db)
+    if not snap:
+        flash("Esta importación no tiene un estado guardado para abrir. "
+              "Usa «Regenerar» para reprocesar el archivo original.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    snap["importacion_id"] = imp_id
+    session_store.guardar(KEY_RESULTADO, snap)
+    flash(f"✓ Importación #{imp_id} abierta. Puedes seguir editándola y exportar.",
+          "success")
+    return redirect(url_for("web.resultado"))
+
+
+@bp.route("/importaciones/<int:imp_id>/anular", methods=["POST"])
+def importacion_anular(imp_id):
+    """Marca una importación como anulada (descartada). No borra el histórico."""
+    from app.database import (
+        inicializar_db, obtener_importacion, actualizar_importacion,
+    )
+
+    emp = _empresa_actual()
+    db = emp.db_path
+    inicializar_db(db)
+
+    imp = obtener_importacion(imp_id, db_path=db)
+    if not imp:
+        flash("La importación no existe.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    actualizar_importacion(
+        imp_id, estado="anulada",
+        n_docs=int(imp.get("n_docs", 0) or 0),
+        n_excepciones=int(imp.get("n_excepciones", 0) or 0),
+        db_path=db,
+    )
+    flash(f"Importación #{imp_id} anulada.", "info")
+    return redirect(url_for("web.importaciones"))
 
 
 @bp.route("/importaciones/<int:imp_id>/reprocesar", methods=["POST"])
@@ -789,14 +887,8 @@ def importacion_reprocesar(imp_id):
             comprobantes_path, db, incluir_duplicados=True, empresa=emp,
         )
         resultado["importacion_id"] = imp_id
-        actualizar_importacion(
-            imp_id, estado="completada",
-            n_docs=resultado["n_docs"],
-            n_excepciones=resultado["n_excepciones"],
-            excel_ref=resultado["excel_path"],
-            db_path=db,
-        )
         session_store.guardar(KEY_RESULTADO, resultado)
+        _persistir_importacion(emp, resultado, "procesada")
         flash(f"✓ Importación #{imp_id} retomada: {resultado['n_docs']} documentos, "
               f"{resultado['n_excepciones']} con excepciones. Archivo regenerado.",
               "success")
@@ -891,6 +983,9 @@ def exportar_siigo():
         logger.exception("Error generando archivo SIIGO")
         flash(f"Error al generar archivo SIIGO: {exc}", "error")
         return redirect(url_for("web.resultado"))
+
+    # Marcar la importación como exportada (trazabilidad del ciclo de vida).
+    _persistir_importacion(_empresa_actual(), datos, "exportada")
 
     if len(rutas) == 1:
         return _responder_descarga(send_file(
@@ -1264,7 +1359,7 @@ def _actividad_radian(emp, limite: int = 6) -> list[dict]:
     return [
         {
             "archivo": r.get("archivo_nombre") or "RADIAN.xlsx",
-            "estado": r.get("estado") or "procesando",
+            "estado": _estado_actividad(r.get("estado")),
             "fecha": _fmt_fecha_banco(r.get("fecha")),
             "count": r.get("n_docs") or 0,
             "unidad": "documentos",
@@ -1272,6 +1367,22 @@ def _actividad_radian(emp, limite: int = 6) -> list[dict]:
         }
         for r in registros
     ]
+
+
+# Estados durables de importación → vocabulario del partial de actividad
+# (`_actividad_items.html`: completada / error / anulada / procesando).
+_ESTADO_ACTIVIDAD = {
+    "procesada": "completada",
+    "corregida": "completada",
+    "exportada": "completada",
+    "completada": "completada",
+    "error": "error",
+    "anulada": "anulada",
+}
+
+
+def _estado_actividad(estado: str | None) -> str:
+    return _ESTADO_ACTIVIDAD.get(estado or "", "procesando")
 
 
 # ---------------------------------------------------------------------------

@@ -324,7 +324,7 @@ Diccionario `_GENERADORES` mapea clasificación → función generadora de líne
 | `documentos_importados` | Registro de cada doc procesado (CUFE único → detección de duplicados) + base de la analítica |
 | `bitacora` | Log persistente de acciones |
 | `historial_cuentas` | Aprendizaje del motor de sugerencias. Único por (clasificación, nit_tercero, tipo_linea) |
-| `importaciones` | Registro persistente de cada proceso RADIAN (estado, archivo, Excel, errores) para retomar/regenerar |
+| `importaciones` | Registro persistente de cada proceso RADIAN + **snapshot editable durable** (`preasientos_json`) con ciclo de estados (`procesando/procesada/corregida/exportada/error/anulada`). «Abrir» recupera el estado guardado con las correcciones; «Regenerar» reprocesa desde cero |
 | `procesos_banco` | Histórico del módulo Bancos: cada extracto previsualizado/exportado (archivo, cuenta, NIT banco, nº movimientos, estado `procesando`/`completada`/`error`) |
 
 CRUD de procesos de banco: `registrar_proceso_banco` (al previsualizar, estado
@@ -378,6 +378,10 @@ persiste en `db/.flask_secret_key` (para que las sesiones sobrevivan reinicios e
 Las cookies de Flask (~4 KB) no alcanzan para los resultados. `guardar/cargar/eliminar`
 serializan a JSON en `storage` (categoría `web_sessions`) y guardan solo una **referencia**
 en `session`. Claves: `resultado_ref` (preasientos), `banco_ref` (movimientos), `empresa_id`.
+Esta es la **copia de trabajo** (rápida, por sesión); la **copia durable** del resultado
+RADIAN se guarda en paralelo en `importaciones.preasientos_json` (helper
+`_persistir_importacion` en `routes.py`), para poder «Abrir» una importación más tarde
+conservando las correcciones manuales sin reprocesar.
 
 ### Endpoints (`routes.py`)
 Contexto global inyectado en todas las plantillas: empresa actual, empresas disponibles, NIT, sigla.
@@ -390,8 +394,10 @@ Contexto global inyectado en todas las plantillas: empresa actual, empresas disp
 | `/descargar` | GET | Descarga el Excel generado |
 | `/confirmar` | POST | Registra una cuenta confirmada en el historial (aprendizaje) |
 | `/historial` | GET | Tabla de cuentas aprendidas (motor de sugerencias) |
-| `/importaciones` | GET | Lista de importaciones persistidas |
-| `/importaciones/<id>/reprocesar` | POST | Retoma una importación fallida / regenera Excel |
+| `/importaciones` | GET | Lista de importaciones persistidas (con estado y acciones) |
+| `/importaciones/<id>/abrir` | POST | Carga el snapshot durable en la sesión (retomar **conservando correcciones**), sin reprocesar |
+| `/importaciones/<id>/reprocesar` | POST | Regenera: reprocesa el RADIAN original desde cero (pierde correcciones manuales) |
+| `/importaciones/<id>/anular` | POST | Marca la importación como anulada (descartada) |
 | `/importaciones/<id>/descargar` | GET | Descarga el Excel de una importación previa |
 | `/exportar-siigo` | POST | Genera Excel(s) formato SIIGO (ZIP si son varios) |
 | `/analytics` | GET | Reportería (Chart.js): evolución, distribución, top terceros |

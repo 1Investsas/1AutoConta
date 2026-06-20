@@ -928,6 +928,8 @@ tr.row-sin-tercero td { background: rgba(217,119,6,0.05); }
 .pill-sugerida  { background: var(--orange-bg);  color: var(--orange); }
 .pill-ok        { background: var(--success-bg); color: var(--success); }
 .pill-warn      { background: var(--warning-bg); color: var(--warning); }
+.pill-info      { background: var(--info-bg);    color: var(--info); }
+.pill-muted     { background: var(--bg-soft, #F1F5F9); color: var(--text-dim); }
 
 /* ============================================================
    TABS

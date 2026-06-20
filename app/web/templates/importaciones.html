@@ -11,9 +11,11 @@
 </div>
 
 <p class="text-dim mb-4" style="font-size:0.85rem">
-  Cada vez que procesas un archivo RADIAN queda registrado aquí junto con el
-  archivo original. Si una importación falló o necesitas el Excel de nuevo,
-  usa <strong>Retomar</strong> para reprocesarla y regenerar el archivo.
+  Cada vez que procesas un archivo RADIAN queda registrado aquí junto con su
+  estado de trabajo. Usa <strong>Abrir</strong> para retomar una importación
+  <em>conservando las correcciones</em> que ya hiciste (terceros, divisiones,
+  cuentas) y exportarla. <strong>Regenerar</strong> reprocesa el archivo original
+  desde cero (sin las correcciones manuales); útil sobre todo si falló.
 </p>
 
 {% if importaciones %}
@@ -32,38 +34,56 @@
     </thead>
     <tbody>
       {% for imp in importaciones %}
-      <tr>
+      <tr{% if imp.anulada %} style="opacity:0.55"{% endif %}>
         <td><strong>{{ imp.id }}</strong></td>
         <td class="text-dim">{{ imp.fecha_fmt }}</td>
         <td><code style="font-size:0.78rem">{{ imp.archivo_nombre or '—' }}</code></td>
         <td>
-          {% if imp.estado == 'completada' %}
-            <span class="pill pill-ok">Completada</span>
-          {% elif imp.estado == 'error' %}
-            <span class="pill pill-pendiente" title="{{ imp.error or '' }}">Error</span>
-          {% else %}
-            <span class="pill">Procesando</span>
-          {% endif %}
+          <span class="{{ imp.estado_clase }}"
+                {% if imp.estado == 'error' %}title="{{ imp.error or '' }}"{% endif %}>
+            {{ imp.estado_label }}
+          </span>
         </td>
         <td class="text-right">{{ imp.n_docs }}</td>
         <td class="text-right">{{ imp.n_excepciones }}</td>
         <td>
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            {% if imp.archivo_disponible %}
-            <form method="POST"
-                  action="{{ url_for('web.importacion_reprocesar', imp_id=imp.id) }}"
-                  data-loading="true" style="display:inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-sm btn-primary">
-                {% if imp.estado == 'error' %}🔄 Retomar{% else %}🔄 Regenerar{% endif %}
-              </button>
-            </form>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+            {% if not imp.anulada %}
+              {% if imp.tiene_snapshot %}
+              <form method="POST"
+                    action="{{ url_for('web.importacion_abrir', imp_id=imp.id) }}"
+                    style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-primary">📂 Abrir</button>
+              </form>
+              {% endif %}
+              {% if imp.archivo_disponible %}
+              <form method="POST"
+                    action="{{ url_for('web.importacion_reprocesar', imp_id=imp.id) }}"
+                    data-loading="true" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit"
+                        class="btn btn-sm{% if not imp.tiene_snapshot %} btn-primary{% endif %}"
+                        title="Reprocesa el archivo original desde cero (sin las correcciones manuales)">
+                  {% if imp.estado == 'error' %}🔄 Retomar{% else %}🔄 Regenerar{% endif %}
+                </button>
+              </form>
+              {% elif not imp.tiene_snapshot %}
+              <span class="text-dim" style="font-size:0.75rem">Archivo no disponible</span>
+              {% endif %}
+              {% if imp.excel_disponible %}
+              <a href="{{ url_for('web.importacion_descargar', imp_id=imp.id) }}"
+                 class="btn btn-sm">⬇️ Excel</a>
+              {% endif %}
+              <form method="POST"
+                    action="{{ url_for('web.importacion_anular', imp_id=imp.id) }}"
+                    style="display:inline"
+                    onsubmit="return confirm('¿Anular la importación #{{ imp.id }}? Quedará marcada como descartada.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm" style="color:var(--danger)">✕ Anular</button>
+              </form>
             {% else %}
-            <span class="text-dim" style="font-size:0.75rem">Archivo no disponible</span>
-            {% endif %}
-            {% if imp.excel_disponible %}
-            <a href="{{ url_for('web.importacion_descargar', imp_id=imp.id) }}"
-               class="btn btn-sm">⬇️ Excel</a>
+              <span class="text-dim" style="font-size:0.75rem">Descartada</span>
             {% endif %}
           </div>
           {% if imp.estado == 'error' and imp.error %}
