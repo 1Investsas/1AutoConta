@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}RADIAN — contable-auto{% endblock %}
+{% block page_title %}📄 RADIAN{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Importa el reporte RADIAN de la DIAN, clasifica cada documento, cruza el
+      tercero contra el maestro y genera los preasientos contables listos para
+      exportar al formato de importación SIIGO.
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Compras → Facturas / Soporte</div>
+    <div class="card-value" style="color:var(--danger); font-size:1.4rem">FC · DS</div>
+    <div class="card-sub">crédito proveedor / débito gasto-costo</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Ventas → Facturas</div>
+    <div class="card-value" style="color:var(--success); font-size:1.4rem">FV</div>
+    <div class="card-sub">débito cliente / crédito ingreso</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Notas y nómina</div>
+    <div class="card-value" style="color:var(--accent); font-size:1.4rem">NC · ND · NOM</div>
+    <div class="card-sub">ajustes de compra/venta y pago de nómina</div>
+  </div>
+</div>
+
+<div class="form-section">
+  <h2>⬆ Subir reporte RADIAN</h2>
+
+  <form method="POST" action="{{ url_for('web.procesar') }}"
+        enctype="multipart/form-data" data-loading="true">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Drag & Drop RADIAN -->
+    <div class="drop-zone" id="dropZoneRadianPage">
+      <div class="drop-icon">📂</div>
+      <div class="drop-text">
+        Arrastra tu <strong>RADIAN.xlsx</strong> aquí<br>
+        o <strong><label for="radianFilePage">haz click para elegir</label></strong>
+      </div>
+      <input type="file" id="radianFilePage" name="radian" accept=".xlsx,.xls" required>
+      <div class="file-chosen" id="radianChosenPage"></div>
+    </div>
+
+    {#
+      Los maestros (terceros, cuentas, comprobantes) se configuran una sola vez
+      en Configuraciones › Empresas › Maestros. Aquí solo se piden si se quiere
+      reemplazar puntualmente alguno para este procesamiento.
+    #}
+    <details style="margin-top:18px">
+      <summary style="cursor:pointer; color:var(--text-dim); font-size:0.85rem; user-select:none;">
+        ▸ Archivos maestros opcionales (terceros, cuentas, comprobantes)
+      </summary>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="form-group">
+          <label for="terceros">Listado de Terceros</label>
+          <input type="file" id="terceros" name="terceros" accept=".xlsx,.xls">
+        </div>
+        <div class="form-group">
+          <label for="cuentas">Plan de Cuentas</label>
+          <input type="file" id="cuentas" name="cuentas" accept=".xlsx,.xls">
+        </div>
+        <div class="form-group">
+          <label for="comprobantes">Tipos de Comprobante</label>
+          <input type="file" id="comprobantes" name="comprobantes" accept=".xlsx,.xls">
+        </div>
+      </div>
+    </details>
+
+    <label class="form-check" style="margin-top:16px">
+      <input type="checkbox" name="incluir_duplicados">
+      Incluir documentos ya procesados (duplicados)
+    </label>
+
+    <p class="muted" style="margin-top:16px; font-size:0.82rem">
+      Maestros de la empresa: <code>{{ empresa_sigla }}</code>
+      · <a href="{{ url_for('web.empresas_editar', empresa_id=empresa_actual.id) }}">Configurar en la empresa</a>
+    </p>
+
+    <div style="margin-top:24px">
+      <button type="submit" class="btn btn-primary" id="btnProcesarRadian">
+        <span>⚙</span> Procesar RADIAN
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Pie del módulo: Guía rápida (pasos) + Actividad reciente (histórico) -->
+<div class="modulo-bottom">
+
+  <!-- ── Guía rápida: pasos del proceso ── -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+        Guía rápida
+      </h2>
+    </div>
+    <p class="guia-sub">Pasos para procesar tu reporte RADIAN</p>
+
+    <div class="guia-steps">
+      <!-- Paso 1 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-blue">
+          <span class="guia-num">1</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-blue">Sube tu RADIAN</div>
+        <div class="guia-step-desc">Arrastra o selecciona el reporte .xlsx de la DIAN.</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <!-- Paso 2 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-green">
+          <span class="guia-num">2</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-green">Procesa</div>
+        <div class="guia-step-desc">Se clasifica cada documento y se cruza el tercero.</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <!-- Paso 3 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-orange">
+          <span class="guia-num">3</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.65 1.1 1.31 1.27"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-orange">Revisa y ajusta</div>
+        <div class="guia-step-desc">Corrige el tercero, asigna o divide cuentas pendientes.</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <!-- Paso 4 -->
+      <div class="guia-step">
+        <div class="guia-circle guia-c-purple">
+          <span class="guia-num">4</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-purple">Exporta a SIIGO</div>
+        <div class="guia-step-desc">Descarga el archivo listo para importar en SIIGO.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Actividad reciente: histórico del módulo ── -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Actividad reciente</h2>
+      <a href="{{ url_for('web.importaciones') }}" class="link-more">Ver todo
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </a>
+    </div>
+
+    <div class="act-list">
+      {% include "_actividad_items.html" %}
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

@@ -139,6 +139,21 @@ def index():
 
 
 # ---------------------------------------------------------------------------
+# GET /radian — Página inicial del módulo RADIAN
+# ---------------------------------------------------------------------------
+
+@bp.route("/radian")
+def radian():
+    """Página inicial del módulo RADIAN (misma estructura visual que Bancos).
+
+    Presenta qué hace el módulo, el formulario de carga del reporte RADIAN
+    (que reutiliza el pipeline de /procesar) y la actividad reciente del módulo.
+    """
+    emp = _empresa_actual()
+    return render_template("radian_upload.html", actividad=_actividad_radian(emp))
+
+
+# ---------------------------------------------------------------------------
 # POST /procesar — Ejecuta el pipeline completo
 # ---------------------------------------------------------------------------
 
@@ -1227,9 +1242,35 @@ def _actividad_banco(emp, limite: int = 6) -> list[dict]:
             "archivo": p.get("archivo_nombre") or "extracto.csv",
             "estado": p.get("estado") or "procesando",
             "fecha": _fmt_fecha_banco(p.get("fecha")),
-            "movimientos": p.get("n_movimientos") or 0,
+            "count": p.get("n_movimientos") or 0,
+            "unidad": "movimientos",
+            "ext": "CSV",
         }
         for p in procesos
+    ]
+
+
+def _actividad_radian(emp, limite: int = 6) -> list[dict]:
+    """Histórico reciente del módulo RADIAN para la página inicial del módulo.
+
+    Reutiliza la tabla `importaciones` y la presenta con la misma forma que la
+    actividad de Bancos (claves archivo/estado/fecha/count/unidad/ext), de modo
+    que ambos módulos comparten el partial `_actividad_items.html`.
+    """
+    from app.database import inicializar_db, listar_importaciones
+
+    inicializar_db(emp.db_path)
+    registros = listar_importaciones(emp.db_path, limite=limite)
+    return [
+        {
+            "archivo": r.get("archivo_nombre") or "RADIAN.xlsx",
+            "estado": r.get("estado") or "procesando",
+            "fecha": _fmt_fecha_banco(r.get("fecha")),
+            "count": r.get("n_docs") or 0,
+            "unidad": "documentos",
+            "ext": "XLSX",
+        }
+        for r in registros
     ]
 
 
