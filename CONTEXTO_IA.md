@@ -103,10 +103,10 @@ contable-auto/
 │       ├── mapeador.py          # Preasientos → 27 columnas formato SIIGO
 │       └── exportador_siigo.py  # Excel formato oficial SIIGO
 │
-├── data/                    # Archivos maestros (terceros, cuentas, comprobantes) + empresas.json
+├── data/                    # Archivos maestros (terceros, cuentas, comprobantes); empresas.json legado
 ├── input/                   # Archivos RADIAN descargados (.xlsx)
 ├── output/                  # Excel generados
-├── db/                      # Bases de datos SQLite (+ .flask_secret_key)
+├── db/                      # BD SQLite por-empresa (contable_<id>.db) + sistema.db (registro empresas) + .flask_secret_key
 ├── scripts/                 # Utilidades (instalar servicio Windows, optimizar logo)
 ├── tests/                   # Tests pytest (conftest con fixtures realistas)
 └── .github/workflows/       # CI/CD: tests + deploy a Azure
@@ -354,9 +354,11 @@ Categorías usadas: `uploads`, `output`, `data`, `web_sessions`.
 - Cada empresa tiene **su propia BD** (`db/contable_<id>.db`) y **su propia carpeta de maestros**
   (`data/<id>/`). La empresa **principal** usa `config.DB_PATH` y `data/`, y sale del `.env`
   (pero sus ediciones desde la UI se persisten en el registro y tienen prioridad).
-- Registro persistente en `data/empresas.json` (o Blob). API: `listar_empresas`,
-  `obtener_empresa`, `crear_empresa`, `actualizar_empresa`, `guardar_empresa`, `eliminar_empresa`
-  (la principal no se puede eliminar).
+- Registro persistente en la **tabla SQL `empresas`** (BD de sistema central:
+  `config.SYSTEM_DB_PATH` = `db/sistema.db` en SQLite; tabla compartida en Azure SQL).
+  La primera lectura **migra automáticamente** el `data/empresas.json` legado a la BD.
+  API: `listar_empresas`, `obtener_empresa`, `crear_empresa`, `actualizar_empresa`,
+  `guardar_empresa`, `eliminar_empresa` (la principal no se puede eliminar).
 - **Aislamiento multi-empresa por backend:** en SQLite la separación es por **archivo** distinto
   (`db/contable_<id>.db`). En Azure SQL las tablas son compartidas y la separación es por la
   columna discriminadora **`empresa_id`** (derivada del `db_path`; ver `database.py`). Ambos
@@ -513,7 +515,8 @@ Plantilla en `.env.example`. Las más importantes:
 | Dato | Local (`USE_SQLITE=true`, sin Blob) | Azure |
 |---|---|---|
 | Documentos, historial, importaciones, bitácora | SQLite en `DB_DIR` | SQLite en `/home/data/db` (+ **respaldo en Blob** si hay Blob) **o** Azure SQL si `USE_SQLITE=false` |
-| Maestros, `empresas.json`, uploads, Excel, sesiones web | Carpetas del proyecto | Azure Blob Storage si está configurado |
+| Registro de empresas | Tabla `empresas` en `db/sistema.db` (BD de sistema central) | Tabla compartida `empresas` en Azure SQL (o `sistema.db` en `/home/data/db` con SQLite) |
+| Maestros, uploads, Excel, sesiones web (`empresas.json` legado) | Carpetas del proyecto | Azure Blob Storage si está configurado |
 
 En Azure App Service el sistema de archivos del contenedor es **efímero** (solo `/home`
 persiste y los despliegues reemplazan `/home/site/wwwroot`). Por eso la BD va a `/home/data/db`.

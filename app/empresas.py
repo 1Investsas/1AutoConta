@@ -9,10 +9,11 @@ Cada empresa puede tener:
 - Formato propio del extracto bancario (posiciones de columnas,
   separador, formato de fecha, etc.).
 
-El registro de empresas se guarda en data/empresas.json (o en Blob Storage
-en modo cloud). La empresa "principal" siempre existe y se construye desde
-las variables de entorno, manteniendo compatibilidad con el comportamiento
-de una sola empresa.
+La fuente de verdad del registro de empresas es la tabla SQL `empresas`
+(ver app/database.py, BD de sistema). Para no perder configuraciones previas,
+la primera vez se migra automáticamente el `data/empresas.json` legado a la BD.
+La empresa "principal" siempre existe y se construye desde las variables de
+entorno, manteniendo compatibilidad con el comportamiento de una sola empresa.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ import threading
 from dataclasses import dataclass, field, asdict
 
 from app import config
+from app import database as _db
 from app import storage as store
 
 logger = logging.getLogger(__name__)
@@ -200,10 +202,36 @@ def _empresa_principal() -> Empresa:
 
 
 # ---------------------------------------------------------------------------
-# Persistencia del registro (data/empresas.json)
+# Persistencia del registro (tabla SQL `empresas`, BD de sistema)
 # ---------------------------------------------------------------------------
 
-def _leer_registro() -> dict:
+# Inicialización + migración del registro JSON legado: se ejecuta una sola vez
+# por proceso y por ruta de BD de sistema (las distintas rutas solo aparecen en
+# tests, que aíslan cada caso en su propio directorio temporal).
+_system_lock = threading.Lock()
+_sistema_listo: set[str] = set()
+
+
+def _system_db_path() -> str:
+    """Ruta (dinámica) de la BD de sistema; se lee de config para tests/overrides."""
+    return config.SYSTEM_DB_PATH
+
+
+def _asegurar_sistema() -> None:
+    """Crea la tabla `empresas` y migra el JSON legado una sola vez."""
+    path = _system_db_path()
+    if path in _sistema_listo:
+        return
+    with _system_lock:
+        if path in _sistema_listo:
+            return
+        _db.inicializar_db_sistema(path)
+        _migrar_json_legacy(path)
+        _sistema_listo.add(path)
+
+
+def _leer_registro_json_legacy() -> dict:
+    """Lee el registro `data/empresas.json` legado (vacío si no existe)."""
     try:
         path = store.get_local_data_path(ARCHIVO_EMPRESAS)
         with open(path, encoding="utf-8") as fh:
@@ -212,9 +240,32 @@ def _leer_registro() -> dict:
         return {}
 
 
-def _escribir_registro(registro: dict) -> None:
-    data = json.dumps(registro, ensure_ascii=False, indent=2).encode("utf-8")
-    store.save_file(data, "data", ARCHIVO_EMPRESAS)
+def _migrar_json_legacy(path: str) -> None:
+    """Importa una sola vez el `empresas.json` legado a la BD (si la tabla está vacía)."""
+    try:
+        if _db.contar_empresas_registro(path) > 0:
+            return
+        legacy = _leer_registro_json_legacy()
+        if not legacy:
+            return
+        for emp_id, datos in legacy.items():
+            registro = dict(datos)
+            registro["id"] = emp_id
+            _db.guardar_empresa_registro(registro, path)
+        logger.info(
+            "Registro de empresas migrado de empresas.json a la BD (%d empresas).",
+            len(legacy),
+        )
+    except Exception:
+        logger.exception(
+            "No se pudo migrar empresas.json a la BD; se continúa con la BD actual."
+        )
+
+
+def _leer_registro() -> dict:
+    """Retorna el registro completo {id: {campos}} desde la BD de sistema."""
+    _asegurar_sistema()
+    return _db.listar_empresas_registro(_system_db_path())
 
 
 def _desde_dict(d: dict) -> Empresa:
@@ -271,9 +322,8 @@ def guardar_empresa(empresa: Empresa) -> Empresa:
     entorno, pero su id, base de datos y carpeta de maestros no cambian.
     """
     with _lock:
-        registro = _leer_registro()
-        registro[empresa.id] = asdict(empresa)
-        _escribir_registro(registro)
+        _asegurar_sistema()
+        _db.guardar_empresa_registro(asdict(empresa), _system_db_path())
     logger.info("Empresa guardada: %s (%s)", empresa.nombre, empresa.id)
     return empresa
 
@@ -337,8 +387,6 @@ def eliminar_empresa(empresa_id: str) -> None:
     if empresa_id == EMPRESA_PRINCIPAL_ID:
         raise ValueError("La empresa principal no puede eliminarse.")
     with _lock:
-        registro = _leer_registro()
-        if empresa_id in registro:
-            del registro[empresa_id]
-            _escribir_registro(registro)
-            logger.info("Empresa eliminada: %s", empresa_id)
+        _asegurar_sistema()
+        _db.eliminar_empresa_registro(empresa_id, _system_db_path())
+        logger.info("Empresa eliminada: %s", empresa_id)

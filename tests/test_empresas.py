@@ -15,20 +15,26 @@ from app.empresas import (
 
 @pytest.fixture(autouse=True)
 def registro_temporal(tmp_path, monkeypatch):
-    """Redirige el registro de empresas a un directorio temporal."""
-    registro = tmp_path / "empresas.json"
+    """Redirige el registro de empresas (BD de sistema) a un directorio temporal.
 
+    La fuente de verdad es ahora la tabla SQL `empresas`; este fixture apunta la
+    BD de sistema a un sqlite temporal y limpia la caché de inicialización para
+    que cada test arranque con un registro vacío (sin tocar el db/ del proyecto).
+    """
+    db_sistema = str(tmp_path / "sistema.db")
+    monkeypatch.setattr(config, "SYSTEM_DB_PATH", db_sistema)
+
+    # `data/empresas.json` legado: apuntar a un directorio temporal vacío, de
+    # modo que la migración inicial sea un no-op (no hay JSON que importar).
     def fake_get_local_data_path(filename, category="data"):
         return str(tmp_path / filename)
 
-    def fake_save_file(data, category, filename):
-        path = tmp_path / filename
-        path.write_bytes(data)
-        return str(path)
-
     monkeypatch.setattr(emp_mod.store, "get_local_data_path", fake_get_local_data_path)
-    monkeypatch.setattr(emp_mod.store, "save_file", fake_save_file)
-    return registro
+
+    # Aislar la caché de "sistema listo" por test (rutas distintas por tmp_path).
+    emp_mod._sistema_listo.clear()
+    yield
+    emp_mod._sistema_listo.clear()
 
 
 class TestEmpresaPrincipal:
@@ -67,6 +73,56 @@ class TestCrearEmpresa:
     def test_principal_no_eliminable(self):
         with pytest.raises(ValueError):
             eliminar_empresa(EMPRESA_PRINCIPAL_ID)
+
+
+class TestMigracionJsonLegacy:
+    """La primera lectura migra el `empresas.json` legado a la BD de sistema."""
+
+    def test_migra_empresas_json_a_db(self, tmp_path):
+        legacy = {
+            "acme_sas": {
+                "id": "acme_sas", "nit": "900123456", "nombre": "ACME SAS",
+                "sigla": "ACME", "cuenta_banco_default": "11100501",
+                "nit_banco": "860034313",
+                "cuentas_contraparte": {"FACTURA_COMPRA": "22059999"},
+                "cuentas_impuestos": {},
+                "cuentas_banco": [{"cuenta": "11100501", "etiqueta": "Ahorros"}],
+                "bancos": [{"nit": "860034313", "nombre": "Bancolombia"}],
+                "formato_banco": {"delimitador": ";"},
+            }
+        }
+        (tmp_path / "empresas.json").write_text(
+            json.dumps(legacy), encoding="utf-8"
+        )
+        emp_mod._sistema_listo.clear()  # forzar la migración en esta lectura
+
+        ids = [e.id for e in listar_empresas()]
+        assert "acme_sas" in ids
+
+        re = obtener_empresa("acme_sas")
+        assert re.nit == "900123456"
+        assert re.nombre == "ACME SAS"
+        assert re.cuentas_contraparte_efectivas()["FACTURA_COMPRA"] == "22059999"
+        assert re.bancos_efectivos()[0]["nombre"] == "Bancolombia"
+        assert re.formato_banco_efectivo()["delimitador"] == ";"
+
+    def test_migracion_no_pisa_datos_existentes(self, tmp_path):
+        # Ya hay una empresa en la BD: el JSON legado NO debe importarse.
+        crear_empresa("900", "Existente", sigla="EX")
+        (tmp_path / "empresas.json").write_text(
+            json.dumps({"otra": {"id": "otra", "nit": "1", "nombre": "Otra"}}),
+            encoding="utf-8",
+        )
+        emp_mod._sistema_listo.clear()
+
+        ids = [e.id for e in listar_empresas()]
+        assert "otra" not in ids
+        assert "ex" in ids
+
+    def test_sin_json_legado_arranca_vacio(self):
+        # Sin empresas.json, solo existe la principal.
+        ids = [e.id for e in listar_empresas()]
+        assert ids == [EMPRESA_PRINCIPAL_ID]
 
 
 class TestSigla:
