@@ -246,13 +246,13 @@
   function makeAC(fetchUrl, getLabel, onPick, borderColor) {
     var acEl = document.createElement('ul');
     acEl.style.cssText = 'position:fixed;border:1px solid ' + borderColor + ';'
-      + 'background:#1a2d44;border-radius:6px;list-style:none;margin:0;padding:4px 0;'
-      + 'z-index:9999;max-height:200px;overflow-y:auto;min-width:260px;display:none;'
+      + 'background:var(--surface);border-radius:6px;list-style:none;margin:0;padding:4px 0;'
+      + 'z-index:9999;max-height:200px;overflow-y:auto;overscroll-behavior:contain;min-width:260px;display:none;'
       + 'box-shadow:0 4px 14px rgba(0,0,0,.35);';
     document.body.appendChild(acEl);
     var actInput = null, timer = null;
     function hide() { acEl.style.display = 'none'; }
-    document.addEventListener('scroll', hide, true);
+    document.addEventListener('scroll', function (e) { if (!acEl.contains(e.target)) hide(); }, true);
 
     return function attach(input) {
       input.addEventListener('input', function () {
