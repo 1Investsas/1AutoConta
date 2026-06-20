@@ -152,17 +152,32 @@ class TestMapearPreasiento:
         filas = mapear_preasiento(p)
         assert all(f.fecha == "" for f in filas)
 
-    def test_observaciones_incluye_folio_y_tercero(self):
+    def test_descripcion_incluye_folio_y_tercero(self):
+        # La referencia del documento (clasificación, nº doc y tercero) va en
+        # la columna Descripción (col 20).
         p = _preasiento(folio="2001", prefijo="FC")
         filas = mapear_preasiento(p)
-        assert "FC-2001" in filas[0].observaciones
-        assert "PROVEEDOR SA" in filas[0].observaciones
+        assert "FC-2001" in filas[0].descripcion
+        assert "PROVEEDOR SA" in filas[0].descripcion
 
-    def test_observaciones_sin_prefijo(self):
+    def test_observaciones_siempre_vacia(self):
+        p = _preasiento(folio="2001", prefijo="FC")
+        filas = mapear_preasiento(p)
+        assert all(f.observaciones == "" for f in filas)
+
+    def test_descripcion_no_usa_nombre_contable_de_linea(self):
+        # El nombre contable de la línea (Desc 22050501, etc.) ya NO aparece
+        # en la Descripción de las líneas con cuenta asignada.
+        p = _preasiento(folio="2001", prefijo="FC")
+        filas = mapear_preasiento(p)
+        normales = [f for f in filas if not f.es_pendiente]
+        assert all("Desc " not in f.descripcion for f in normales)
+
+    def test_descripcion_sin_prefijo(self):
         p = _preasiento(folio="9999", prefijo="")
         filas = mapear_preasiento(p)
-        assert "9999" in filas[0].observaciones
-        assert "FC-" not in filas[0].observaciones
+        assert "9999" in filas[0].descripcion
+        assert "FC-" not in filas[0].descripcion
 
     def test_linea_pendiente_tiene_cuenta_vacia(self):
         p = _preasiento()
@@ -209,11 +224,11 @@ class TestMapearPreasiento:
         assert all(f.no_cuota == "" for f in filas)
         assert all(f.fecha_vencimiento == "" for f in filas)
 
-    def test_observaciones_usa_prefijo_y_folio_del_documento(self):
-        # Aunque cols 13-16 estén vacías, las observaciones siguen mostrando el doc
+    def test_descripcion_usa_prefijo_y_folio_del_documento(self):
+        # Aunque cols 13-16 estén vacías, la Descripción muestra el documento
         p = _preasiento(folio="2001", prefijo="FC")
         filas = mapear_preasiento(p)
-        assert "FC-2001" in filas[0].observaciones
+        assert "FC-2001" in filas[0].descripcion
 
     def test_vencimiento_rellena_cols_13_16(self):
         # Cuenta "22050501" marcada con vencimiento → cols 13-16 se rellenan
