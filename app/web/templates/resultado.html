@@ -143,19 +143,31 @@
             <td>
               {% if linea.es_pendiente %}
                 <!-- Inline confirm form -->
-                <form class="confirm-form" method="POST"
-                      action="{{ url_for('web.confirmar') }}">
-                  <input type="hidden" name="csrf_token"     value="{{ csrf_token() }}">
-                  <input type="hidden" name="clasificacion"  value="{{ p.clasificacion }}">
-                  <input type="hidden" name="nit_tercero"    value="{{ p.tercero_nit }}">
-                  <input type="hidden" name="tipo_linea"     value="{{ linea.concepto | lower | replace(' ','_') }}">
-                  <input type="hidden" name="cufe_full"      value="{{ p.cufe_full }}">
-                  <input type="hidden" name="numero_linea"   value="{{ linea.numero_linea }}">
-                  <input type="text" name="cuenta"
-                         placeholder="Ej. 51050501"
-                         title="Ingresa el código de cuenta y presiona Confirmar">
-                  <button type="submit" class="btn btn-primary btn-sm">✓</button>
-                </form>
+                <div style="display:flex; align-items:center; gap:6px">
+                  <form class="confirm-form" method="POST"
+                        action="{{ url_for('web.confirmar') }}">
+                    <input type="hidden" name="csrf_token"     value="{{ csrf_token() }}">
+                    <input type="hidden" name="clasificacion"  value="{{ p.clasificacion }}">
+                    <input type="hidden" name="nit_tercero"    value="{{ p.tercero_nit }}">
+                    <input type="hidden" name="tipo_linea"     value="{{ linea.concepto | lower | replace(' ','_') }}">
+                    <input type="hidden" name="cufe_full"      value="{{ p.cufe_full }}">
+                    <input type="hidden" name="numero_linea"   value="{{ linea.numero_linea }}">
+                    <input type="text" name="cuenta"
+                           placeholder="Ej. 51050501"
+                           title="Ingresa el código de cuenta y presiona Confirmar">
+                    <button type="submit" class="btn btn-primary btn-sm">✓</button>
+                  </form>
+                  <button type="button"
+                          class="btn btn-secondary btn-sm"
+                          style="padding:1px 6px; font-size:0.72rem; line-height:1.4"
+                          title="Dividir esta línea en varias cuentas"
+                          data-cufe="{{ p.cufe_full }}"
+                          data-num="{{ linea.numero_linea }}"
+                          data-side="{{ 'debito' if linea.debito > 0 else 'credito' }}"
+                          data-monto="{{ linea.debito if linea.debito > 0 else linea.credito }}"
+                          data-concepto="{{ linea.concepto }}"
+                          onclick="openDividir(this)">✂</button>
+                </div>
               {% else %}
                 {% set edit_id = p.cufe_full ~ '_' ~ linea.numero_linea %}
                 <!-- Display mode -->
@@ -169,6 +181,16 @@
                           style="padding:1px 6px; font-size:0.72rem; line-height:1.4"
                           title="Editar cuenta"
                           onclick="toggleEditCuenta('{{ edit_id }}')">✎</button>
+                  <button type="button"
+                          class="btn btn-secondary btn-sm"
+                          style="padding:1px 6px; font-size:0.72rem; line-height:1.4"
+                          title="Dividir esta línea en varias cuentas"
+                          data-cufe="{{ p.cufe_full }}"
+                          data-num="{{ linea.numero_linea }}"
+                          data-side="{{ 'debito' if linea.debito > 0 else 'credito' }}"
+                          data-monto="{{ linea.debito if linea.debito > 0 else linea.credito }}"
+                          data-concepto="{{ linea.concepto }}"
+                          onclick="openDividir(this)">✂</button>
                 </div>
                 <!-- Edit mode (hidden by default) -->
                 <div id="edit_{{ edit_id }}" style="display:none">
@@ -278,6 +300,44 @@
           Cancelar
         </button>
         <button type="submit" class="btn btn-primary btn-sm">⬇ Descargar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal dividir línea -->
+<div id="modalDividir" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.5);
+     z-index:1000; align-items:center; justify-content:center">
+  <div style="background:var(--surface); border-radius:10px; padding:24px; width:580px; max-width:94vw;
+              border:1px solid var(--border); max-height:90vh; overflow-y:auto">
+    <h3 style="margin:0 0 6px">✂ Dividir línea en varias cuentas</h3>
+    <p style="color:var(--text-dim); font-size:0.84rem; margin:0 0 14px">
+      Reparte el <strong id="divSideLabel"></strong> de
+      <strong id="divMontoLabel"></strong> entre dos o más cuentas
+      (ej. capital + intereses). La suma de las partes debe igualar el monto original.
+    </p>
+    <form method="POST" action="{{ url_for('web.dividir_linea') }}" id="formDividir">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="cufe_full"    id="divCufe">
+      <input type="hidden" name="numero_linea" id="divNum">
+
+      <div id="divPartes"></div>
+
+      <button type="button" class="btn btn-secondary btn-sm" id="divAddBtn" style="margin-top:6px">
+        + Agregar parte
+      </button>
+
+      <div style="display:flex; justify-content:space-between; align-items:center;
+                  margin-top:16px; padding-top:12px; border-top:1px solid var(--border)">
+        <div style="font-size:0.86rem">
+          Suma <strong id="divSuma">$0</strong> de <span id="divTotal">$0</span>
+          <span id="divRestante" style="margin-left:8px; font-weight:600"></span>
+        </div>
+        <div style="display:flex; gap:8px">
+          <button type="button" class="btn btn-secondary btn-sm"
+                  onclick="document.getElementById('modalDividir').style.display='none'">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="divSubmit" disabled>✓ Dividir</button>
+        </div>
       </div>
     </form>
   </div>
@@ -529,8 +589,13 @@ function toggleEditTercero(id) {
       .catch(hide);
   }
 
+  function isCuenta(el) {
+    return el && (el.name === 'cuenta' ||
+                  (el.classList && el.classList.contains('cuenta-ac')));
+  }
+
   document.addEventListener('input', function (e) {
-    if (e.target.name !== 'cuenta') return;
+    if (!isCuenta(e.target)) return;
     activeInput = e.target;
     clearTimeout(timer);
     timer = setTimeout(function () { fetch_(e.target.value, e.target); }, 220);
@@ -556,14 +621,105 @@ function toggleEditTercero(id) {
   });
 
   document.addEventListener('focusin', function (e) {
-    if (e.target.name === 'cuenta') activeInput = e.target;
+    if (isCuenta(e.target)) activeInput = e.target;
   });
 
   document.addEventListener('focusout', function (e) {
-    if (e.target.name === 'cuenta') setTimeout(hide, 160);
+    if (isCuenta(e.target)) setTimeout(hide, 160);
   });
 
   document.addEventListener('scroll', hide, true);
+}());
+
+/* ── Dividir una línea en varias cuentas ── */
+(function () {
+  var modal    = document.getElementById('modalDividir');
+  var partesEl = document.getElementById('divPartes');
+  var sumaEl   = document.getElementById('divSuma');
+  var totalEl  = document.getElementById('divTotal');
+  var restEl   = document.getElementById('divRestante');
+  var submitEl = document.getElementById('divSubmit');
+  var total    = 0;
+
+  function fmt(n) { return '$' + (n || 0).toLocaleString('es-CO'); }
+
+  function addRow(cuenta, monto, concepto) {
+    var row = document.createElement('div');
+    row.className = 'div-parte';
+    row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px';
+    row.innerHTML =
+      '<input type="text" name="parte_cuenta" class="cuenta-ac" placeholder="Cuenta (ej. 51050501)" ' +
+      'autocomplete="off" style="flex:0 0 150px; font-family:monospace" value="' + (cuenta || '') + '">' +
+      '<input type="text" name="parte_concepto" placeholder="Concepto (opcional)" ' +
+      'style="flex:1" value="' + (concepto || '') + '">' +
+      '<input type="number" name="parte_monto" class="div-monto" placeholder="Monto" ' +
+      'step="0.01" min="0" style="flex:0 0 130px; font-family:monospace" value="' + (monto || '') + '">' +
+      '<button type="button" class="btn btn-secondary btn-sm div-remove" title="Quitar parte">✕</button>';
+    partesEl.appendChild(row);
+  }
+
+  function recalc() {
+    var suma = 0, faltanCuentas = false;
+    partesEl.querySelectorAll('.div-parte').forEach(function (row) {
+      var m = parseFloat(row.querySelector('.div-monto').value) || 0;
+      suma += m;
+      var cta = row.querySelector('input[name="parte_cuenta"]').value.trim();
+      if (m > 0 && !cta) faltanCuentas = true;
+    });
+    suma = Math.round(suma * 100) / 100;
+    sumaEl.textContent = fmt(suma);
+    var rest = Math.round((total - suma) * 100) / 100;
+    var nPartes = partesEl.querySelectorAll('.div-parte').length;
+    var ok = Math.abs(rest) < 0.01 && !faltanCuentas && nPartes >= 2;
+    if (Math.abs(rest) < 0.01) {
+      restEl.textContent = '✓ cuadra';
+      restEl.style.color = 'var(--success)';
+    } else if (rest > 0) {
+      restEl.textContent = 'faltan ' + fmt(rest);
+      restEl.style.color = 'var(--warning)';
+    } else {
+      restEl.textContent = 'sobran ' + fmt(-rest);
+      restEl.style.color = 'var(--danger)';
+    }
+    submitEl.disabled = !ok;
+  }
+
+  window.openDividir = function (btn) {
+    total = parseFloat(btn.dataset.monto) || 0;
+    document.getElementById('divCufe').value = btn.dataset.cufe;
+    document.getElementById('divNum').value  = btn.dataset.num;
+    document.getElementById('divSideLabel').textContent =
+      (btn.dataset.side === 'debito') ? 'débito' : 'crédito';
+    document.getElementById('divMontoLabel').textContent = fmt(total);
+    totalEl.textContent = fmt(total);
+    partesEl.innerHTML = '';
+    addRow('', '', btn.dataset.concepto || '');
+    addRow('', '', '');
+    recalc();
+    modal.style.display = 'flex';
+    var first = partesEl.querySelector('input[name="parte_cuenta"]');
+    if (first) first.focus();
+  };
+
+  document.getElementById('divAddBtn').addEventListener('click', function () {
+    addRow('', '', '');
+    recalc();
+  });
+
+  partesEl.addEventListener('input', recalc);
+  partesEl.addEventListener('click', function (e) {
+    if (e.target.classList.contains('div-remove')) {
+      var rows = partesEl.querySelectorAll('.div-parte');
+      if (rows.length > 2) {
+        e.target.closest('.div-parte').remove();
+        recalc();
+      }
+    }
+  });
+
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) modal.style.display = 'none';
+  });
 }());
 </script>
 

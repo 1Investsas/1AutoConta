@@ -6,29 +6,6 @@
 {% block extra_head %}
 <style>
 /* ── Estilos específicos del módulo banco ── */
-.banco-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 18px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-.banco-header label {
-  font-size: 0.82rem;
-  color: var(--text-dim);
-  margin-right: 4px;
-}
-.banco-header input[type=text] {
-  font-family: monospace;
-  font-size: 0.95rem;
-  width: 140px;
-  padding: 5px 8px;
-}
-
 /* Filas de movimientos */
 .row-ingreso  { background: rgba(39,174,96,.06); }
 .row-egreso   { background: rgba(231,76,60,.06); }
@@ -72,20 +49,6 @@
 .pill-111 { background:rgba(39,174,96,.2);  color:#2ecc71; }
 .pill-112 { background:rgba(231,76,60,.2);  color:#e74c3c; }
 .pill-110 { background:rgba(100,100,255,.2);color:#9999ff; }
-
-/* Sticky bottom bar */
-.sticky-bar {
-  position: sticky;
-  bottom: 0;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  z-index: 100;
-  flex-wrap: wrap;
-}
 
 /* Account autocomplete dropdown */
 #banco-ac {
@@ -204,46 +167,8 @@
 <form method="POST" action="{{ url_for('web.banco_exportar') }}" id="bancoForm">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-<div class="banco-header">
-  <span style="font-weight:600; font-size:0.95rem">Cuenta bancaria:</span>
-  <input type="text" name="cuenta_banco" value="{{ cuenta_banco }}"
-         id="cuentaBancoForm" placeholder="11100501"
-         title="Código contable de la cuenta bancaria (aplica a todos los movimientos)">
-  <span style="color:var(--text-dim); font-size:0.82rem">— aplica a todos los movimientos</span>
-
-  <!-- ── Selector NIT del banco (editable + autocomplete) ── -->
-  <div class="banco-nit-selector">
-    <label for="nitBancoHeader">🏦 NIT Banco</label>
-    <div style="display:flex; flex-direction:column; gap:2px">
-      <input type="text"
-             id="nitBancoHeader"
-             class="banco-nit-header-ac"
-             placeholder="NIT o nombre del banco"
-             value="{{ nit_banco }}"
-             autocomplete="off"
-             title="Selecciona el banco una vez — se aplica a 4x1000, intereses y cuota de manejo">
-      <span id="nitBancoNombreH"></span>
-    </div>
-    <button type="button" class="btn-apply-banco" id="btnAplicarBanco"
-            title="Propaga el NIT del banco a todos los movimientos bancarios (4x1000, intereses, cuota de manejo)">
-      ✔ Aplicar a todos
-    </button>
-  </div>
-
-  <!-- Campo oculto que envía el NIT al servidor -->
-  <input type="hidden" name="nit_banco" id="nitBancoHidden" value="{{ nit_banco }}">
-
-  <div style="margin-left:auto; display:flex; gap:10px; align-items:center">
-    <!-- Leyenda -->
-    <span class="pill pill-ok" style="font-size:0.75rem">🟢 Ingreso ({{ comp_ingreso }})</span>
-    <span class="pill pill-pendiente" style="font-size:0.75rem">🔴 Egreso ({{ comp_egreso }})</span>
-    <span class="pill" style="font-size:0.75rem; background:rgba(255,193,7,.15);color:#f39c12">🟡 4x1000 auto</span>
-    <span class="pill" style="font-size:0.75rem; background:rgba(100,100,255,.15);color:#9999ff">🔵 Traslado ({{ comp_traslado }})</span>
-  </div>
-</div>
-
-<!-- Resumen -->
-<div class="stats-grid" style="margin-bottom:20px">
+<!-- Summary cards (modelo visual unificado, igual que RADIAN) -->
+<div class="stats-grid" style="margin-bottom:24px">
   <div class="card">
     <div class="card-title">Movimientos totales</div>
     <div class="card-value">{{ n_total }}</div>
@@ -259,6 +184,58 @@
     <div class="card-value" style="font-size:1rem; font-family:monospace; padding-top:8px">{{ cuenta_4x1000 }}</div>
     <div class="card-sub">53152001 — Impuesto GTE 4x1000</div>
   </div>
+  <div class="card" style="display:flex; flex-direction:column; justify-content:space-between">
+    <div class="card-title">Acciones</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+      <button type="submit" class="btn btn-primary btn-sm" id="btnExportar">⬇ Generar SIIGO</button>
+      <a href="{{ url_for('web.banco') }}" class="btn btn-secondary btn-sm">← Volver</a>
+    </div>
+  </div>
+</div>
+
+<!-- Leyenda de colores (modelo visual unificado) -->
+<div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap">
+  <span class="pill pill-ok">🟢 Ingreso ({{ comp_ingreso }})</span>
+  <span class="pill pill-pendiente">🔴 Egreso ({{ comp_egreso }})</span>
+  <span class="pill" style="background:rgba(255,193,7,.15);color:#f39c12">🟡 4x1000 auto</span>
+  <span class="pill" style="background:rgba(100,100,255,.15);color:#9999ff">🔵 Traslado ({{ comp_traslado }})</span>
+</div>
+
+<!-- Configuración del extracto (parametrización propia del módulo Bancos) -->
+<div class="card" style="margin-bottom:20px">
+  <div class="card-title" style="margin-bottom:10px">Configuración del extracto</div>
+  <div style="display:flex; align-items:flex-end; gap:18px; flex-wrap:wrap">
+    <div>
+      <label for="cuentaBancoForm" style="font-size:0.8rem; color:var(--text-dim); display:block; margin-bottom:4px">
+        Cuenta bancaria <small>— aplica a todos los movimientos</small>
+      </label>
+      <input type="text" name="cuenta_banco" value="{{ cuenta_banco }}"
+             id="cuentaBancoForm" class="input-cuenta" style="width:160px" placeholder="11100501"
+             title="Código contable de la cuenta bancaria (aplica a todos los movimientos)">
+    </div>
+
+    <!-- ── Selector NIT del banco (editable + autocomplete) ── -->
+    <div class="banco-nit-selector">
+      <label for="nitBancoHeader">🏦 NIT Banco</label>
+      <div style="display:flex; flex-direction:column; gap:2px">
+        <input type="text"
+               id="nitBancoHeader"
+               class="banco-nit-header-ac"
+               placeholder="NIT o nombre del banco"
+               value="{{ nit_banco }}"
+               autocomplete="off"
+               title="Selecciona el banco una vez — se aplica a 4x1000, intereses y cuota de manejo">
+        <span id="nitBancoNombreH"></span>
+      </div>
+      <button type="button" class="btn-apply-banco" id="btnAplicarBanco"
+              title="Propaga el NIT del banco a todos los movimientos bancarios (4x1000, intereses, cuota de manejo)">
+        ✔ Aplicar a todos
+      </button>
+    </div>
+  </div>
+
+  <!-- Campo oculto que envía el NIT al servidor -->
+  <input type="hidden" name="nit_banco" id="nitBancoHidden" value="{{ nit_banco }}">
 </div>
 
 <!-- Tabla de movimientos -->
@@ -417,19 +394,15 @@
   </table>
 </div>
 
-<!-- Sticky bar con botón de exportar -->
-<div class="sticky-bar">
-  <div>
-    <strong>{{ n_principales }}</strong> movimientos listos para asignar
-    <span style="color:var(--text-dim); margin-left:8px; font-size:0.82rem">
-      — completa la cuenta contrapartida y el NIT de cada fila
-    </span>
-  </div>
-  <div style="margin-left:auto; display:flex; gap:10px; align-items:center">
+<!-- Acción de exportación al pie (refuerza la del panel "Acciones" en tablas largas) -->
+<div style="display:flex; align-items:center; gap:12px; margin-top:20px">
+  <span style="color:var(--text-dim); font-size:0.85rem">
+    <strong>{{ n_principales }}</strong> movimientos listos — completa la cuenta
+    contrapartida y el NIT de cada fila.
+  </span>
+  <div style="margin-left:auto; display:flex; gap:10px">
     <a href="{{ url_for('web.banco') }}" class="btn btn-secondary btn-sm">← Volver</a>
-    <button type="submit" class="btn btn-primary" id="btnExportar">
-      ⬇ Generar SIIGO
-    </button>
+    <button type="submit" class="btn btn-primary btn-sm">⬇ Generar SIIGO</button>
   </div>
 </div>
 

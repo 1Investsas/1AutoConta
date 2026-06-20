@@ -43,7 +43,7 @@
     <div class="nav-children" data-group-body="auto">
       <div class="nav-subgroup">Flujos indirectos de efectivo</div>
       <a href="#" class="nav-sub">Nómina</a>
-      <a href="#" class="nav-sub" data-automatizar>RADIAN</a>
+      <a href="{{ url_for('web.radian') }}" class="nav-sub {% if request.endpoint == 'web.radian' %}active{% endif %}">RADIAN</a>
 
       <div class="nav-subgroup">Flujos directos de efectivo</div>
       <a href="{{ url_for('web.banco') }}" class="nav-sub {% if request.endpoint in ('web.banco','web.banco_previsualizar') %}active{% endif %}">Bancos</a>

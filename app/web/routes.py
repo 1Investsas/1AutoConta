@@ -139,6 +139,21 @@ def index():
 
 
 # ---------------------------------------------------------------------------
+# GET /radian — Página inicial del módulo RADIAN
+# ---------------------------------------------------------------------------
+
+@bp.route("/radian")
+def radian():
+    """Página inicial del módulo RADIAN (misma estructura visual que Bancos).
+
+    Presenta qué hace el módulo, el formulario de carga del reporte RADIAN
+    (que reutiliza el pipeline de /procesar) y la actividad reciente del módulo.
+    """
+    emp = _empresa_actual()
+    return render_template("radian_upload.html", actividad=_actividad_radian(emp))
+
+
+# ---------------------------------------------------------------------------
 # POST /procesar — Ejecuta el pipeline completo
 # ---------------------------------------------------------------------------
 
@@ -528,6 +543,145 @@ def corregir_tercero():
         )
 
     flash(f"✓ Tercero actualizado a {nombre_nuevo or nit_nuevo} (NIT {nit_nuevo}).", "success")
+    return redirect(url_for("web.resultado"))
+
+
+# ---------------------------------------------------------------------------
+# POST /dividir-linea — Partir una línea de un preasiento en varias cuentas
+# ---------------------------------------------------------------------------
+
+def _recalcular_preasiento(p: dict) -> None:
+    """Recalcula `cuadra` y `excepciones` de un preasiento serializado en sesión.
+
+    Replica la lógica de `app.preasiento.generar_preasiento`: el preasiento
+    cuadra si Σ débitos = Σ créditos (tolerancia $0.01) y se listan como
+    excepciones el descuadre y las líneas con cuenta [PENDIENTE].
+    """
+    lineas = p.get("lineas", [])
+    total_d = sum(float(l.get("debito", 0) or 0) for l in lineas)
+    total_c = sum(float(l.get("credito", 0) or 0) for l in lineas)
+    cuadra = abs(total_d - total_c) < 0.01
+    p["cuadra"] = cuadra
+
+    exc = []
+    if not cuadra:
+        exc.append(f"No cuadra: débitos={total_d:.2f}, créditos={total_c:.2f}")
+    n_pend = sum(1 for l in lineas if l.get("es_pendiente"))
+    if n_pend:
+        exc.append(f"{n_pend} línea(s) con cuenta [PENDIENTE]")
+    p["excepciones"] = exc
+
+
+@bp.route("/dividir-linea", methods=["POST"])
+def dividir_linea():
+    """Divide una línea de un preasiento en varias partes (cuentas distintas).
+
+    Cada parte conserva el mismo lado contable (débito o crédito) de la línea
+    original; la suma de las partes debe igualar el monto original para
+    preservar el cuadre. Sirve para separar, por ejemplo, un pago en capital +
+    intereses, o repartir una base/gasto entre varias cuentas. El resultado se
+    actualiza en sesión y se refleja en pantalla y en la exportación SIIGO.
+    """
+    cufe_full    = request.form.get("cufe_full", "").strip()
+    numero_linea = request.form.get("numero_linea", "").strip()
+
+    cuentas   = request.form.getlist("parte_cuenta")
+    montos    = request.form.getlist("parte_monto")
+    conceptos = request.form.getlist("parte_concepto")
+
+    if not cufe_full or not numero_linea:
+        flash("Datos incompletos para dividir la línea.", "error")
+        return redirect(url_for("web.resultado"))
+
+    datos = session_store.cargar(KEY_RESULTADO)
+    if not datos:
+        flash("No hay resultados en sesión. Procesa primero un archivo RADIAN.", "error")
+        return redirect(url_for("web.index"))
+
+    try:
+        num = int(numero_linea)
+    except ValueError:
+        flash("Número de línea inválido.", "error")
+        return redirect(url_for("web.resultado"))
+
+    # Localizar preasiento y línea a dividir
+    preasiento = next(
+        (p for p in datos.get("preasientos", []) if p.get("cufe_full") == cufe_full),
+        None,
+    )
+    if not preasiento:
+        flash("No se encontró el documento a dividir en la sesión.", "error")
+        return redirect(url_for("web.resultado"))
+
+    lineas = preasiento.get("lineas", [])
+    pos = next((i for i, l in enumerate(lineas) if l.get("numero_linea") == num), None)
+    if pos is None:
+        flash("No se encontró la línea a dividir.", "error")
+        return redirect(url_for("web.resultado"))
+
+    original = lineas[pos]
+    es_debito = float(original.get("debito", 0) or 0) > 0
+    monto_original = float(original.get("debito", 0) or 0) if es_debito \
+        else float(original.get("credito", 0) or 0)
+
+    # Construir las partes a partir del formulario (ignorando filas vacías)
+    partes = []
+    for i, cta in enumerate(cuentas):
+        cta = (cta or "").strip()
+        monto_raw = (montos[i] if i < len(montos) else "").strip()
+        if not cta and not monto_raw:
+            continue
+        if not cta:
+            flash("Cada parte debe tener una cuenta contable.", "error")
+            return redirect(url_for("web.resultado"))
+        try:
+            monto = round(float(monto_raw), 2)
+        except ValueError:
+            flash(f"Monto inválido en una de las partes: '{monto_raw}'.", "error")
+            return redirect(url_for("web.resultado"))
+        if monto <= 0:
+            flash("Cada parte debe tener un monto mayor que cero.", "error")
+            return redirect(url_for("web.resultado"))
+        concepto = (conceptos[i].strip() if i < len(conceptos) and conceptos[i] else
+                    original.get("concepto", ""))
+        partes.append({"cuenta": cta, "monto": monto, "concepto": concepto})
+
+    if len(partes) < 2:
+        flash("Indica al menos dos partes para dividir la línea.", "error")
+        return redirect(url_for("web.resultado"))
+
+    suma = round(sum(p["monto"] for p in partes), 2)
+    if abs(suma - round(monto_original, 2)) >= 0.01:
+        flash(
+            f"La suma de las partes (${suma:,.2f}) debe igualar el monto "
+            f"original (${monto_original:,.2f}).",
+            "error",
+        )
+        return redirect(url_for("web.resultado"))
+
+    # Reemplazar la línea original por las partes (mismo lado contable)
+    nuevas = []
+    for parte in partes:
+        nuevas.append({
+            "numero_linea": 0,  # se renumera abajo
+            "cuenta": parte["cuenta"],
+            "descripcion_cuenta": original.get("descripcion_cuenta", ""),
+            "debito": parte["monto"] if es_debito else 0.0,
+            "credito": 0.0 if es_debito else parte["monto"],
+            "concepto": parte["concepto"],
+            "es_pendiente": False,
+            "es_sugerida": False,
+        })
+    lineas[pos:pos + 1] = nuevas
+
+    # Renumerar líneas de forma consecutiva (numero_linea debe ser único)
+    for i, l in enumerate(lineas, start=1):
+        l["numero_linea"] = i
+
+    _recalcular_preasiento(preasiento)
+    session_store.guardar(KEY_RESULTADO, datos)
+
+    flash(f"✓ Línea dividida en {len(partes)} cuentas.", "success")
     return redirect(url_for("web.resultado"))
 
 
@@ -1088,9 +1242,35 @@ def _actividad_banco(emp, limite: int = 6) -> list[dict]:
             "archivo": p.get("archivo_nombre") or "extracto.csv",
             "estado": p.get("estado") or "procesando",
             "fecha": _fmt_fecha_banco(p.get("fecha")),
-            "movimientos": p.get("n_movimientos") or 0,
+            "count": p.get("n_movimientos") or 0,
+            "unidad": "movimientos",
+            "ext": "CSV",
         }
         for p in procesos
+    ]
+
+
+def _actividad_radian(emp, limite: int = 6) -> list[dict]:
+    """Histórico reciente del módulo RADIAN para la página inicial del módulo.
+
+    Reutiliza la tabla `importaciones` y la presenta con la misma forma que la
+    actividad de Bancos (claves archivo/estado/fecha/count/unidad/ext), de modo
+    que ambos módulos comparten el partial `_actividad_items.html`.
+    """
+    from app.database import inicializar_db, listar_importaciones
+
+    inicializar_db(emp.db_path)
+    registros = listar_importaciones(emp.db_path, limite=limite)
+    return [
+        {
+            "archivo": r.get("archivo_nombre") or "RADIAN.xlsx",
+            "estado": r.get("estado") or "procesando",
+            "fecha": _fmt_fecha_banco(r.get("fecha")),
+            "count": r.get("n_docs") or 0,
+            "unidad": "documentos",
+            "ext": "XLSX",
+        }
+        for r in registros
     ]
 
 

@@ -3,7 +3,7 @@
 > **Cómo usar este archivo:** súbelo (o pégalo) al iniciar un chat nuevo. Es autocontenido: explica el proyecto, el plan por fases, **lo que ya se hizo**, **el siguiente paso**, y la orientación mínima del código para que una IA pueda continuar sin re-explorar todo.
 >
 > **Prompt sugerido para el chat nuevo:**
-> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/dazzling-franklin-fh407p`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
+> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/bold-turing-arhhqi`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
 
 ---
 
@@ -57,11 +57,12 @@ El trabajo está definido por dos documentos fuente:
 ### Fase 0 — Higiene y preparación (en prueba)
 Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de rollback; confirmar comportamiento `USE_SQLITE`/`DATABASE_URL` en `app/config.py`.
 
-### Fase 1 — Quick wins funcionales (en prueba)  ← **FASE ACTUAL (casi cerrada)**
+### Fase 1 — Quick wins funcionales (en prueba)  ← **CERRADA**
 - ✅ **Bug "Generando archivo SIIGO"** (módulo bancos). **HECHO** — en `main`, PR #18.
 - ✅ **Editar tercero inline** + trazabilidad/aprendizaje. **HECHO** (ver §4).
 - ✅ **Mapeo concepto/observación** (export RADIAN). **HECHO** (ver §4).
-- ⏳ **Agregar/dividir movimientos** (caso capital/intereses "Frutos de la Palma"), validando cuadre. ← **SIGUIENTE** (ver §5).
+- ✅ **Agregar/dividir movimientos** en RADIAN (caso capital/intereses), validando cuadre. **HECHO** (ver §4).
+- ✅ **Estandarización de UI**: template de edición unificado (modelo RADIAN) + página inicial de módulo unificada (modelo Bancos) + landing de RADIAN. **HECHO** (ver §4).
 
 ### Fase 2 — Modelo de datos durable + retomar importaciones
 Persistencia durable de líneas/versiones con estados (borrador, procesada, exportada, corregida, anulada) → habilita "retomar importación", duplicar corregida y trazabilidad. Mover la fuente de verdad de empresas de `data/empresas.json` a tabla SQL `dbo.empresas`. Confirmar `empresa_id` + índices tenant-aware.
@@ -115,24 +116,30 @@ Decisión de negocio confirmada con caso real: en `app/siigo/mapeador.py::mapear
 - **No se tocó el módulo de Bancos** (su `Descripción` es el texto real del movimiento; convención propia — ver §9).
 - **Tests** actualizados en `tests/test_siigo_mapeador.py`.
 
-**Verificación global:** `pytest` → **204/204 OK**.
+### ✅ Agregar/dividir movimientos en RADIAN (commit `5525edd`)
+Permite **partir una línea de un preasiento en N cuentas** antes de exportar, conservando el lado contable (débito/crédito) y el **cuadre** (Σ partes = monto original). Caso típico: separar un pago en **capital + intereses**, o repartir una base/gasto entre varias cuentas.
+- **Endpoint `POST /dividir-linea`** (`routes.py`): reemplaza la línea por las partes (mismo lado), renumera, recalcula `cuadra`/`excepciones` con el helper `_recalcular_preasiento()` y actualiza la sesión. El cambio se refleja en pantalla **y** en la exportación SIIGO (las líneas fluyen vía `_deserializar_preasientos`; el mapeador SIIGO no usa `numero_linea`).
+- **UI `resultado.html`**: botón ✂ por línea (pendiente y asignada) + **modal** con filas dinámicas (cuenta con autocomplete + concepto + monto), validación de suma en vivo (faltan/sobran/✓ cuadra) y submit deshabilitado hasta cuadrar. El autocomplete de cuentas se extendió a la clase `cuenta-ac`.
+- **Tests**: `tests/test_dividir_linea.py` (6 casos: débito/crédito OK + validaciones suma/cuenta/<2 partes/doc inexistente). Es el **primer test de rutas web** con `test_client` (siembra la sesión vía `session_store`/`storage`).
+
+### ✅ Estandarización de UI (commits `4956b03`, `94e986d`)
+Un solo modelo visual por tipo de página, con parametrización por módulo (decisión del usuario).
+- **Template de edición** (modelo **RADIAN/`resultado.html`**): `banco_resultado.html` adopta la jerarquía *summary cards → leyenda dedicada → tabla*. Se reemplazó el `banco-header`/`sticky-bar` por una cuadrícula de tarjetas (panel **Acciones** con Generar SIIGO) + leyenda de pills + tarjeta **"Configuración del extracto"** (cuenta/NIT banco). Se conservan todos los IDs/clases del JS y la lógica 4x1000/intereses. CSS muerto eliminado.
+- **Página inicial de módulo** (modelo **Bancos/`banco_upload.html`**): nueva **landing de RADIAN** (`GET /radian` + `radian_upload.html`) con *¿qué hace el módulo? · carga · guía rápida · actividad reciente*; antes RADIAN solo existía como modal "Automatizar proceso" (que sigue disponible en la topbar). El sidebar enlaza RADIAN a su landing.
+- **Partial genérico `_actividad_items.html`** (claves `archivo/estado/fecha/count/unidad/ext`) reutilizado por Bancos y RADIAN; reemplaza a `banco_actividad_items.html` (eliminado). Helpers `_actividad_radian()` (sobre `importaciones`) y `_actividad_banco()` exponen esas claves.
+
+**Verificación global:** `pytest` → **210/210 OK**.
 
 ---
 
 ## 5. Siguiente paso
 
-**Cerrar la Fase 1 con "Agregar/dividir movimientos".**
+**Fase 1 cerrada.** Sigue la **Fase 2 — Modelo de datos durable + retomar importaciones** (ver §3): persistir líneas/versiones con estados (borrador, procesada, exportada, corregida, anulada), mover la fuente de verdad de empresas de `data/empresas.json` a una tabla SQL `dbo.empresas`, y confirmar `empresa_id` + índices tenant-aware. Es el refactor más grande y condiciona Fases 6–7: **diseñarlo con cuidado** antes de codificar.
 
-Objetivo: poder **dividir una línea/movimiento en varias** (y/o **agregar** líneas) antes de exportar, manteniendo el **cuadre** (Σ débitos = Σ créditos). Caso de uso típico: un pago que mezcla **capital + intereses** (ej. "Frutos de la Palma") debe separarse en dos cuentas con montos distintos.
-
-Dónde aplica y consideraciones:
-- **Flujo RADIAN (`resultado.html` + `routes.py`)**: hoy las líneas de un preasiento se muestran pero no se pueden dividir/agregar desde la UI. Habría que: (a) UI para partir una línea en N (montos + cuenta + tercero por parte) y validar que la suma de las partes = monto original; (b) endpoint que actualice el resultado en sesión (`session_store`, `KEY_RESULTADO`) y recalcule `cuadra`/excepciones; (c) que la exportación SIIGO use las líneas resultantes (ya funciona vía `_deserializar_preasientos`).
-- **Flujo Bancos (`banco_resultado.html`)**: análogo, pero el modelo es `MovimientoBanco` con asignaciones por fila. Confirmar con el usuario **en cuál flujo** se necesita primero (el caso "capital/intereses" suena a un movimiento bancario o a un pago).
-- **Validación de cuadre**: reutilizar/extender la lógica de `app/validaciones.py` y el cálculo de `cuadra` en `app/preasiento.py`.
-
-**Pregunta abierta para el usuario antes de implementar:** ¿la división aplica al **preasiento RADIAN** (partir la base/gasto en varias cuentas) o al **movimiento bancario** (partir capital/intereses)? Pedir **1 caso real** con los montos esperados de cada parte.
-
-> Alternativa: si el usuario prefiere, se puede dejar Fase 1 aquí y crear una **PR** para revisar los 2 incrementos de esta rama (`f833d86`, `5b17cdf`) antes de seguir.
+Antes de iniciar Fase 2, opciones rápidas si el usuario lo pide:
+- **Abrir PR** de esta rama (`claude/bold-turing-arhhqi`) para revisar los 3 incrementos (`5525edd`, `4956b03`, `94e986d`) antes de seguir.
+- **Llevar la división a Bancos** (hoy solo RADIAN): el template ya está unificado; faltaría el endpoint análogo sobre `MovimientoBanco`.
+- **Vista de trazabilidad** de `listar_correcciones_tercero()` (aún sin UI, §9).
 
 ---
 
@@ -141,8 +148,8 @@ Dónde aplica y consideraciones:
 **Stack:** Python 3.11 + Flask, Gunicorn en Azure App Service Linux. SQLite (local/dev: un archivo por empresa `contable_<id>.db`) **o** Azure SQL vía `pyodbc` (`USE_SQLITE=false`, tablas con columna `empresa_id`). Storage local **o** Azure Blob. Sin librerías de auth aún.
 
 **Archivos clave:**
-- **Web/rutas:** `app/web/routes.py` (~24 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, endpoints `/confirmar`, `/corregir-tercero`, `/exportar-siigo`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (resultados server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`).
-- **Plantillas:** `app/web/templates/{base,index,resultado,banco_resultado,banco_upload,banco_historial,importaciones,empresas,analytics,historial}.html`. UI en HTML + CSS propio (`static/style.css`), JS vanilla, sin framework. `resultado.html` tiene autocomplete de **cuentas** y de **terceros** (clase `tercero-ac-input`) y edición inline de cuenta (`toggleEditCuenta`) y tercero (`toggleEditTercero`).
+- **Web/rutas:** `app/web/routes.py` (~26 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, `_recalcular_preasiento()`, `_actividad_radian()`/`_actividad_banco()`, endpoints `/radian`, `/confirmar`, `/corregir-tercero`, `/dividir-linea`, `/exportar-siigo`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (resultados server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`).
+- **Plantillas:** `app/web/templates/{base,index,radian_upload,resultado,banco_resultado,banco_upload,banco_historial,importaciones,empresas,analytics,historial}.html` + partial `_actividad_items.html`. UI en HTML + CSS propio (`static/style.css`), JS vanilla, sin framework. **Modelo visual único:** páginas de edición siguen `resultado.html` (autocomplete de **cuentas**/**terceros**, edición inline `toggleEditCuenta`/`toggleEditTercero`, división ✂ por línea); páginas iniciales de módulo siguen `banco_upload.html` (¿qué hace? · carga · guía · actividad).
 - **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; tablas: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones`, `procesos_banco`, **`correcciones_tercero`**), `app/empresas.py` (dataclass `Empresa`, hoy persiste en `data/empresas.json`), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}`, pero uploads/output/db **no**).
 - **Dominio:** `app/importador.py` (RADIAN), `app/clasificador.py`, `app/terceros.py` (`identificar_tercero`, `cruzar_tercero`, `procesar_terceros_lote`, **`aplicar_correcciones_lote`**), `app/preasiento.py` (genera `LineaContable`/`PreasientoContable`), `app/models.py` (`PreasientoContable` con `tercero_nit_original`/`tercero_corregido`, `LineaContable`, `MovimientoBanco`), `app/sugerencias.py` (motor de cuentas por historial), `app/validaciones.py`.
 - **SIIGO:** `app/siigo/mapeador.py` (27 columnas; **Descripción=referencia del doc, Observaciones vacía**), `app/siigo/exportador_siigo.py`, `app/siigo/api_client.py`.
@@ -167,7 +174,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 
 ## 8. Notas de entorno y git
 
-- **Rama de trabajo:** `claude/dazzling-franklin-fh407p`. **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Últimos commits: `5b17cdf` (concepto/observación), `f833d86` (editar tercero).
+- **Rama de trabajo:** `claude/bold-turing-arhhqi` (parte de `main`, que ya incluye el trabajo de la rama anterior vía PR #19/#20). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Últimos commits: `94e986d` (unificar edición Bancos), `4956b03` (landing RADIAN + actividad), `5525edd` (dividir/agregar movimientos RADIAN).
 - **Cuentas actuales: de PRUEBA** (GitHub `JuanCamiloVergara/contable-auto` + Azure de prueba). La migración a cuentas oficiales se hace en el punto híbrido (§2).
 - **Entorno remoto efímero:** todo lo que valga la pena debe quedar **commiteado y pusheado**. Este handoff vive en el repo como `HANDOFF.md`.
 
@@ -176,7 +183,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 ## 9. Riesgos / decisiones pendientes
 
 - **Bancos — Descripción/Observaciones:** ¿aplicar también al export de Bancos la regla de "Observaciones vacía"? Hoy Bancos mantiene su convención propia (Descripción = texto real del movimiento; Observaciones = metadatos `Banco … | Cód… | …`). Pendiente de decisión del usuario.
-- **Agregar/dividir movimientos:** confirmar flujo (RADIAN vs Bancos) y obtener 1 caso real con montos por parte antes de implementar (§5).
+- **Agregar/dividir movimientos:** implementado en **RADIAN** (`/dividir-linea`). Pendiente (opcional) llevarlo a **Bancos** sobre `MovimientoBanco` si el usuario lo pide; el template de edición ya está unificado.
 - **El modelo durable de líneas/versiones** (Fase 2) es el refactor más grande; condiciona Fases 6–7. Diseñarlo con cuidado.
 - La auth Entra exige que el equipo administrativo tenga identidades en el **tenant oficial** (asumido por la decisión tomada).
 - `listar_correcciones_tercero()` existe pero **no tiene UI**; opcional: una vista de trazabilidad de correcciones de tercero.
