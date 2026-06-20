@@ -197,3 +197,52 @@ class TestFuncionesNuevas:
         entradas, total = db.listar_historial_cuentas(db_path, limite=3)
         assert total == 5
         assert len(entradas) == 3
+
+
+class TestTenantAwareAzure:
+    """En Azure SQL todas las tablas compartidas llevan empresa_id e índices."""
+
+    def test_ddl_todas_las_tablas_tienen_empresa_id(self):
+        conn = _RecConn(is_sqlite=False)
+        db._create_tables_mssql(conn)
+        creates = [sql for sql, _ in conn.calls if "CREATE TABLE" in sql]
+        # documentos_importados, bitacora, historial_cuentas, importaciones,
+        # procesos_banco, correcciones_tercero (la tabla `empresas` es el catálogo
+        # y se crea aparte, sin empresa_id).
+        assert len(creates) == 6
+        assert all("empresa_id" in sql for sql in creates)
+
+    def test_asegurar_indices_idempotente_y_por_empresa(self):
+        conn = _RecConn(is_sqlite=False)
+        db._asegurar_indices_mssql(conn)
+        sqls = [sql for sql, _ in conn.calls]
+        assert len(sqls) == 3
+        # Todos guardados por IF NOT EXISTS (idempotencia) y liderados por empresa_id.
+        assert all("IF NOT EXISTS" in sql for sql in sqls)
+        assert any("CREATE INDEX ix_importaciones_empresa ON importaciones (empresa_id, id)" in sql
+                   for sql in sqls)
+        assert any("ix_procesos_banco_empresa" in sql and "(empresa_id, id)" in sql
+                   for sql in sqls)
+        assert any("ix_documentos_empresa_clasif" in sql
+                   and "(empresa_id, clasificacion)" in sql for sql in sqls)
+
+    def test_inicializar_db_azure_crea_indices(self, monkeypatch):
+        conn = _RecConn(is_sqlite=False)
+        monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+        db.inicializar_db("db/contable_acme.db")
+        sqls = [sql for sql, _ in conn.calls]
+        # La inicialización en modo Azure debe emitir los CREATE INDEX tenant-aware.
+        assert any("CREATE INDEX ix_importaciones_empresa" in sql for sql in sqls)
+        assert any("CREATE INDEX ix_procesos_banco_empresa" in sql for sql in sqls)
+        assert any("CREATE INDEX ix_documentos_empresa_clasif" in sql for sql in sqls)
+
+    def test_sqlite_no_crea_indices_mssql(self, tmp_path):
+        """En SQLite no hay empresa_id; inicializar_db no debe emitir índices Azure."""
+        db_path = str(tmp_path / "contable.db")
+        db.inicializar_db(db_path)  # no debe fallar
+        import sqlite3
+        nombres = [
+            r[1] for r in sqlite3.connect(db_path)
+            .execute("PRAGMA index_list(importaciones)").fetchall()
+        ]
+        assert "ix_importaciones_empresa" not in nombres

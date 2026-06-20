@@ -345,10 +345,75 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
             _create_tables_sqlite(conn)
         else:
             _create_tables_mssql(conn)
+        # Migraciones aditivas para BD ya existentes (las tablas nuevas ya
+        # incluyen la columna; este ALTER cubre instalaciones previas).
+        _asegurar_columna(conn, "importaciones", "preasientos_json",
+                          "TEXT", "NVARCHAR(MAX)")
+        # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
+        # cada empresa tiene su propio archivo y no hay columna empresa_id.
+        if not conn.is_sqlite:
+            _asegurar_indices_mssql(conn)
         conn.commit()
         logger.info("Base de datos inicializada correctamente.")
     finally:
         conn.close()
+
+
+def _columna_existe(conn: "DbConnection", tabla: str, columna: str) -> bool:
+    """True si `tabla` ya tiene la columna `columna` (en ambos backends)."""
+    if conn.is_sqlite:
+        rows = conn.execute(f"PRAGMA table_info({tabla})").fetchall()
+        return any(r["name"] == columna for r in rows)
+    row = conn.execute(
+        "SELECT 1 FROM sys.columns "
+        "WHERE object_id = OBJECT_ID(?) AND name = ?",
+        (tabla, columna),
+    ).fetchone()
+    return row is not None
+
+
+def _asegurar_columna(
+    conn: "DbConnection", tabla: str, columna: str,
+    tipo_sqlite: str, tipo_mssql: str,
+) -> None:
+    """Agrega una columna a una tabla existente si aún no está (migración aditiva)."""
+    if _columna_existe(conn, tabla, columna):
+        return
+    if conn.is_sqlite:
+        conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo_sqlite}")
+    else:
+        conn.execute(f"ALTER TABLE {tabla} ADD {columna} {tipo_mssql}")
+
+
+# Índices tenant-aware para Azure SQL (tablas compartidas entre empresas). Cada
+# entrada es (nombre_índice, tabla, columnas). El nombre lleva el prefijo de la
+# tabla porque los nombres de índice son únicos por base de datos en SQL Server.
+#
+# Las tablas con UNIQUE(empresa_id, …) (documentos_importados, historial_cuentas,
+# correcciones_tercero) ya tienen un índice que cubre el filtro por empresa, así
+# que no se repiten aquí. `bitacora` solo se escribe (no se lee por empresa), por
+# lo que indexarla solo añadiría costo de escritura.
+_INDICES_MSSQL = (
+    # Listados por empresa ordenados por id descendente.
+    ("ix_importaciones_empresa",     "importaciones",        "empresa_id, id"),
+    ("ix_procesos_banco_empresa",    "procesos_banco",       "empresa_id, id"),
+    # Analítica: distribución/evolución agrupada por clasificación dentro de la empresa.
+    ("ix_documentos_empresa_clasif", "documentos_importados", "empresa_id, clasificacion"),
+)
+
+
+def _asegurar_indices_mssql(conn: "DbConnection") -> None:
+    """Crea los índices tenant-aware en Azure SQL si no existen (idempotente).
+
+    No aplica a SQLite: allí cada empresa tiene su propio archivo .db y las tablas
+    no tienen columna `empresa_id`.
+    """
+    for nombre, tabla, columnas in _INDICES_MSSQL:
+        conn.execute(
+            f"IF NOT EXISTS (SELECT 1 FROM sys.indexes "
+            f"WHERE name = '{nombre}' AND object_id = OBJECT_ID('{tabla}')) "
+            f"CREATE INDEX {nombre} ON {tabla} ({columnas})"
+        )
 
 
 def _create_tables_sqlite(conn: DbConnection) -> None:
@@ -404,7 +469,8 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             n_excepciones   INTEGER DEFAULT 0,
             excel_ref       TEXT,
             estado          TEXT    NOT NULL DEFAULT 'procesando',
-            error           TEXT
+            error           TEXT,
+            preasientos_json TEXT
         )
     """)
     conn.execute("""
@@ -500,7 +566,8 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             n_excepciones   INT DEFAULT 0,
             excel_ref       NVARCHAR(500),
             estado          NVARCHAR(30)   NOT NULL DEFAULT 'procesando',
-            error           NVARCHAR(MAX)
+            error           NVARCHAR(MAX),
+            preasientos_json NVARCHAR(MAX)
         )
     """)
     conn.execute("""
@@ -1363,9 +1430,15 @@ def actualizar_importacion(
     n_excepciones: int = 0,
     excel_ref: Optional[str] = None,
     error: Optional[str] = None,
+    preasientos_json: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> None:
-    """Actualiza el estado y los resultados de una importación existente."""
+    """Actualiza el estado y los resultados de una importación existente.
+
+    `preasientos_json` (snapshot editable durable) y `excel_ref` solo se
+    sobrescriben cuando se pasan (COALESCE); así una transición de estado puede
+    conservar el snapshot/Excel previos sin reenviarlos.
+    """
     conn = get_connection(db_path)
     try:
         and_emp, p_emp = _and_empresa(conn, db_path)
@@ -1373,10 +1446,13 @@ def actualizar_importacion(
             f"""
             UPDATE importaciones
             SET estado = ?, n_docs = ?, n_excepciones = ?,
-                excel_ref = COALESCE(?, excel_ref), error = ?
+                excel_ref = COALESCE(?, excel_ref),
+                preasientos_json = COALESCE(?, preasientos_json),
+                error = ?
             WHERE id = ?{and_emp}
             """,
-            (estado, n_docs, n_excepciones, excel_ref, error, imp_id) + p_emp,
+            (estado, n_docs, n_excepciones, excel_ref, preasientos_json,
+             error, imp_id) + p_emp,
         )
         conn.commit()
     finally:
@@ -1396,13 +1472,53 @@ def obtener_importacion(imp_id: int, db_path: str = DB_PATH) -> Optional[dict]:
         conn.close()
 
 
+def obtener_snapshot_importacion(
+    imp_id: int, db_path: str = DB_PATH
+) -> Optional[dict]:
+    """Retorna el snapshot editable durable de una importación (o None).
+
+    Es el mismo dict que vive en la sesión de trabajo (preasientos, excepciones,
+    conteos, ruta del Excel). Permite "abrir" una importación conservando las
+    correcciones manuales, en lugar de reprocesar el archivo desde cero.
+    """
+    conn = get_connection(db_path)
+    try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
+        row = conn.execute(
+            f"SELECT preasientos_json FROM importaciones WHERE id = ?{and_emp}",
+            (imp_id,) + p_emp,
+        ).fetchone()
+        if not row or not row["preasientos_json"]:
+            return None
+        try:
+            return json.loads(row["preasientos_json"])
+        except (ValueError, TypeError):
+            return None
+    finally:
+        conn.close()
+
+
+# Columnas livianas de la importación para los listados (sin el snapshot JSON,
+# que puede ser grande). `tiene_snapshot` indica si hay estado guardado.
+_IMPORTACION_COLS_LISTA = (
+    "id, fecha, archivo_nombre, archivo_ref, n_docs, n_excepciones, "
+    "excel_ref, estado, error, "
+    "CASE WHEN preasientos_json IS NOT NULL THEN 1 ELSE 0 END AS tiene_snapshot"
+)
+
+
 def listar_importaciones(db_path: str = DB_PATH, limite: int = 50) -> list[dict]:
-    """Retorna las importaciones más recientes (descendente por fecha)."""
+    """Retorna las importaciones más recientes (descendente por fecha).
+
+    No incluye el snapshot JSON (puede ser grande); expone `tiene_snapshot`.
+    """
     conn = get_connection(db_path)
     try:
         where_emp, p_emp = _where_empresa(conn, db_path)
         rows = conn.execute(
-            f"SELECT * FROM importaciones{where_emp} ORDER BY id DESC", p_emp
+            f"SELECT {_IMPORTACION_COLS_LISTA} FROM importaciones{where_emp} "
+            f"ORDER BY id DESC",
+            p_emp,
         ).fetchall()
         # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
         return [dict(r) for r in rows[:limite]]

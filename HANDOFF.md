@@ -64,10 +64,10 @@ Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de
 - ✅ **Agregar/dividir movimientos** en RADIAN (caso capital/intereses), validando cuadre. **HECHO** (ver §4).
 - ✅ **Estandarización de UI**: template de edición unificado (modelo RADIAN) + página inicial de módulo unificada (modelo Bancos) + landing de RADIAN. **HECHO** (ver §4).
 
-### Fase 2 — Modelo de datos durable + retomar importaciones  ← **EN CURSO**
+### Fase 2 — Modelo de datos durable + retomar importaciones  ← **CERRADA**
 - ✅ **Empresas → SQL**: la fuente de verdad del registro de empresas pasó de `data/empresas.json` a la tabla SQL `empresas` (BD de sistema central). **HECHO** (ver §4). Es la base para el RBAC de la Fase 3.
-- ⏳ **Modelo durable de importaciones + retomar conservando correcciones**: persistencia durable de líneas/versiones con estados (borrador, procesada, exportada, corregida, anulada) → habilita "retomar importación" sin perder las correcciones manuales, duplicar corregida y trazabilidad. **PENDIENTE** (pieza estelar y de mayor riesgo).
-- ⏳ Confirmar `empresa_id` + índices tenant-aware.
+- ✅ **Modelo durable de importaciones + retomar conservando correcciones**: cada importación guarda un **snapshot editable durable** en BD (`importaciones.preasientos_json`) con ciclo de **estados** (`procesando → procesada → corregida → exportada`, + `error`/`anulada`). Nuevo endpoint **«Abrir»** carga el estado guardado (con las correcciones) sin reprocesar; **«Regenerar»** sigue reprocesando desde cero. **HECHO** (ver §4).
+- ✅ **`empresa_id` + índices tenant-aware**: confirmado que toda tabla compartida lleva `empresa_id` y que las consultas filtran por él; añadidos índices en Azure SQL para listados/analítica por empresa (`ix_importaciones_empresa`, `ix_procesos_banco_empresa`, `ix_documentos_empresa_clasif`). **HECHO** (ver §4). El aislamiento ya funcionaba: por archivo en SQLite y por `empresa_id` en Azure SQL.
 
 ### Fase 3 — RBAC + autorización en la app (con stub de auth dev)
 Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log`. Módulos nuevos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission` en rutas. Validar selección de empresa. Aislamiento de blobs por empresa (`empresas/{empresa_id}/...`). Auditoría de acciones clave.
@@ -137,20 +137,32 @@ La fuente de verdad del registro de empresas pasó de `data/empresas.json` a una
 - **`app/empresas.py`**: la persistencia (`_leer_registro`, `guardar_empresa`, `eliminar_empresa`) ahora va contra la BD. **Migración automática** una sola vez por proceso: si la tabla está vacía y existe el `empresas.json` legado, se importa (`_asegurar_sistema`/`_migrar_json_legacy`). El `Empresa` dataclass y la API pública **no cambiaron** (rutas/tests intactos).
 - **Tests**: `tests/test_empresas_db.py` (11 casos: CRUD UPSERT, columnas JSON, conteo, MERGE T-SQL con conteo de parámetros, catálogo sin filtro `empresa_id`) + 3 casos de migración en `tests/test_empresas.py`. Fixture de `test_empresas.py` adaptado para redirigir la BD de sistema a un temporal.
 
-**Verificación global:** `pytest` → **223/223 OK**.
+### ✅ Modelo durable de importaciones + retomar conservando correcciones (Fase 2, parte 2)
+Antes, los preasientos vivían **solo en la sesión** (server-side, efímeros) y «Retomar» reprocesaba el RADIAN desde cero → **perdía las correcciones manuales**. Ahora cada importación guarda un **snapshot editable durable en BD** y se puede **«Abrir»** para seguir donde se quedó.
+- **`app/database.py`**: nueva columna `importaciones.preasientos_json` (SQLite + T-SQL) con **migración aditiva** (`_asegurar_columna`/`_columna_existe`: `ALTER TABLE ... ADD` si falta, para BD ya existentes). `actualizar_importacion` acepta `preasientos_json` (COALESCE: una transición de estado conserva el snapshot/Excel previos). Nueva `obtener_snapshot_importacion`. `listar_importaciones` ahora selecciona columnas explícitas + `tiene_snapshot` (CASE) **sin** arrastrar el JSON pesado.
+- **Ciclo de estados**: `procesando → procesada → corregida → exportada` (+ `error`, `anulada`). `/procesar` y `/importaciones/<id>/reprocesar` → `procesada`; las ediciones (`/corregir-tercero`, `/dividir-linea`, `/confirmar`) → `corregida`; `/exportar-siigo` → `exportada`.
+- **`app/web/routes.py`**: helper `_persistir_importacion(emp, datos, estado)` (best-effort: guarda el snapshot durable junto al de sesión en cada punto de cambio). Nuevos endpoints **`POST /importaciones/<id>/abrir`** (carga el snapshot durable en la sesión → `/resultado`, sin reprocesar) y **`POST /importaciones/<id>/anular`**. `session_store` sigue siendo la copia de trabajo rápida; la BD es la copia durable (se actualizan juntas).
+- **UI `importaciones.html`**: pills por estado (`_ESTADOS_IMPORTACION`), botón **📂 Abrir** (cuando hay snapshot), **🔄 Regenerar/Retomar** (reprocesa desde cero, con tooltip), **⬇️ Excel** y **✕ Anular** (con confirmación); filas anuladas atenuadas. Partial `_actividad_items.html` ganó una rama `anulada` (Bancos no la emite). Dos clases CSS nuevas: `.pill-info`, `.pill-muted`.
+- **Tests**: `tests/test_importaciones_durable.py` (9 casos: migración de columna, round-trip del snapshot, COALESCE en transición de estado, `tiene_snapshot`, y rutas Abrir/editar→corregida/Anular/render). Fixture de rutas que redirige `config.DB_PATH`/`SYSTEM_DB_PATH` a temporales.
+
+### ✅ `empresa_id` + índices tenant-aware (Fase 2, cierre)
+- **Confirmación**: todas las tablas compartidas de Azure SQL llevan `empresa_id` y todas las consultas filtran por él (`_where_empresa`/`_and_empresa`). En SQLite el aislamiento es por archivo (`contable_<id>.db`), sin columna `empresa_id`.
+- **`app/database.py`**: helper idempotente `_asegurar_indices_mssql` (invocado desde `inicializar_db` solo en Azure SQL) que crea índices `IF NOT EXISTS` (chequeo por `name` + `object_id`): `ix_importaciones_empresa(empresa_id,id)`, `ix_procesos_banco_empresa(empresa_id,id)`, `ix_documentos_empresa_clasif(empresa_id,clasificacion)`. Las tablas con `UNIQUE(empresa_id,…)` (documentos/historial/correcciones) ya tenían índice que cubre el filtro; `bitacora` solo se escribe, así que no se indexa.
+- **Tests**: `TestTenantAwareAzure` en `tests/test_aislamiento_empresa.py` (4 casos: DDL con `empresa_id` en las 6 tablas, índices idempotentes y por `empresa_id`, que `inicializar_db` los emite en Azure y NO en SQLite).
+
+**Verificación global:** `pytest` → **236/236 OK**.
 
 ---
 
 ## 5. Siguiente paso
 
-**Fase 2 en curso.** Hecha la **parte 1 (Empresas → SQL)** (ver §4). Sigue la **parte 2: modelo durable de importaciones + retomar conservando correcciones**:
-- Hoy los preasientos viven solo en sesión (server-side, efímeros) y **«Retomar» re-ejecuta el pipeline desde el RADIAN original → pierde las correcciones manuales** (tercero, divisiones ✂, cuentas confirmadas). Esto es lo que la pieza durable debe arreglar.
-- Diseño sugerido (a confirmar): persistir el estado editado de cada importación (snapshot de preasientos por `importacion_id`, p. ej. `preasientos_ref`/tabla durable) + ciclo de **estados** (borrador → procesada → exportada → corregida → anulada). «Retomar» cargaría el estado guardado en vez de re-correr el pipeline. Es el refactor más grande y condiciona Fases 6–7: **diseñarlo con cuidado**.
-- Falta también confirmar `empresa_id` + índices tenant-aware en las tablas por-empresa.
+**Fase 2 CERRADA.** Hechas las 3 piezas: parte 1 (Empresas → SQL), parte 2 (modelo durable de importaciones + «Abrir» conservando correcciones) y el cierre (`empresa_id` + índices tenant-aware) — ver §4.
+
+Siguiente fase grande: **Fase 3 — RBAC + autorización en la app** (con stub de auth dev). Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log` (reutilizan la **BD de sistema** ya creada en la parte 1). Módulos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission`. Validar selección de empresa. Aislamiento de blobs por empresa. Es el **bloqueante #1** para habilitar el equipo administrativo (ver §0).
 
 Opciones rápidas si el usuario lo pide:
-- **Abrir PR** de esta rama (`claude/brave-meitner-cehpv0`) para revisar el incremento Empresas→SQL antes de seguir.
-- **Llevar la división a Bancos** (hoy solo RADIAN): el template ya está unificado; faltaría el endpoint análogo sobre `MovimientoBanco`.
+- **Abrir PR** de esta rama (`claude/brave-meitner-cehpv0`) para revisar la Fase 2 completa antes de arrancar la Fase 3.
+- **Llevar la división y el modelo durable a Bancos** (hoy el durable es solo RADIAN; Bancos usa su propio `procesos_banco` sin snapshot editable).
 - **Vista de trazabilidad** de `listar_correcciones_tercero()` (aún sin UI, §9).
 
 ---
@@ -160,15 +172,15 @@ Opciones rápidas si el usuario lo pide:
 **Stack:** Python 3.11 + Flask, Gunicorn en Azure App Service Linux. SQLite (local/dev: un archivo por empresa `contable_<id>.db`) **o** Azure SQL vía `pyodbc` (`USE_SQLITE=false`, tablas con columna `empresa_id`). Storage local **o** Azure Blob. Sin librerías de auth aún.
 
 **Archivos clave:**
-- **Web/rutas:** `app/web/routes.py` (~26 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, `_recalcular_preasiento()`, `_actividad_radian()`/`_actividad_banco()`, endpoints `/radian`, `/confirmar`, `/corregir-tercero`, `/dividir-linea`, `/exportar-siigo`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (resultados server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`).
+- **Web/rutas:** `app/web/routes.py` (~28 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, `_recalcular_preasiento()`, `_persistir_importacion()` (snapshot durable), `_actividad_radian()`/`_actividad_banco()`, endpoints `/radian`, `/confirmar`, `/corregir-tercero`, `/dividir-linea`, `/exportar-siigo`, `/importaciones/<id>/{abrir,reprocesar,anular,descargar}`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (copia de trabajo server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`; la copia **durable** del resultado vive en `importaciones.preasientos_json`).
 - **Plantillas:** `app/web/templates/{base,index,radian_upload,resultado,banco_resultado,banco_upload,banco_historial,importaciones,empresas,analytics,historial}.html` + partial `_actividad_items.html`. UI en HTML + CSS propio (`static/style.css`), JS vanilla, sin framework. **Modelo visual único:** páginas de edición siguen `resultado.html` (autocomplete de **cuentas**/**terceros**, edición inline `toggleEditCuenta`/`toggleEditTercero`, división ✂ por línea); páginas iniciales de módulo siguen `banco_upload.html` (¿qué hace? · carga · guía · actividad).
-- **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; tablas por-empresa: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones`, `procesos_banco`, **`correcciones_tercero`**; **tabla de sistema `empresas`** —registro central, sin filtro `empresa_id`— con `inicializar_db_sistema`/`*_empresa_registro`), `app/empresas.py` (dataclass `Empresa`; persiste en la tabla SQL `empresas` vía BD de sistema `config.SYSTEM_DB_PATH`; migra `empresas.json` legado la 1ª vez), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}`, pero uploads/output/db **no**).
+- **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; migración aditiva de columnas vía `_asegurar_columna`; tablas por-empresa: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones` —con **`preasientos_json`** (snapshot durable) y estados; `procesos_banco`, **`correcciones_tercero`**; **tabla de sistema `empresas`** —registro central, sin filtro `empresa_id`— con `inicializar_db_sistema`/`*_empresa_registro`; snapshot vía `obtener_snapshot_importacion`/`actualizar_importacion(preasientos_json=…)`), `app/empresas.py` (dataclass `Empresa`; persiste en la tabla SQL `empresas` vía BD de sistema `config.SYSTEM_DB_PATH`; migra `empresas.json` legado la 1ª vez), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}`, pero uploads/output/db **no**).
 - **Dominio:** `app/importador.py` (RADIAN), `app/clasificador.py`, `app/terceros.py` (`identificar_tercero`, `cruzar_tercero`, `procesar_terceros_lote`, **`aplicar_correcciones_lote`**), `app/preasiento.py` (genera `LineaContable`/`PreasientoContable`), `app/models.py` (`PreasientoContable` con `tercero_nit_original`/`tercero_corregido`, `LineaContable`, `MovimientoBanco`), `app/sugerencias.py` (motor de cuentas por historial), `app/validaciones.py`.
 - **SIIGO:** `app/siigo/mapeador.py` (27 columnas; **Descripción=referencia del doc, Observaciones vacía**), `app/siigo/exportador_siigo.py`, `app/siigo/api_client.py`.
 - **Banco:** `app/banco/{importador_banco,mapeador_banco,exportador_banco}.py` (consolida intereses, enlaza 4x1000; su `Descripción`/`Observaciones` siguen su propia convención).
 - **Infra/deploy:** `application.py`, `startup.sh` (instala ODBC 18 si `USE_SQLITE=false`; gunicorn), `azure-setup.sh`, `.github/workflows/main_contable-auto.yml` (CI test + deploy OIDC), `app/config.py`, `.env.example`. Docs: `CONTEXTO_IA.md`, `docs/arquitectura.md`.
 
-**Rutas que aceptan IDs de objeto (revisar ownership en Fase 3):** `/importaciones/<imp_id>/reprocesar`, `/importaciones/<imp_id>/descargar`, `/empresas/<empresa_id>/...`.
+**Rutas que aceptan IDs de objeto (revisar ownership en Fase 3):** `/importaciones/<imp_id>/{abrir,reprocesar,anular,descargar}`, `/empresas/<empresa_id>/...`. (Hoy se aíslan por empresa vía `db_path`/`empresa_id`; falta validar que el usuario tenga acceso a esa empresa.)
 
 ---
 
@@ -196,6 +208,6 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 
 - **Bancos — Descripción/Observaciones:** ¿aplicar también al export de Bancos la regla de "Observaciones vacía"? Hoy Bancos mantiene su convención propia (Descripción = texto real del movimiento; Observaciones = metadatos `Banco … | Cód… | …`). Pendiente de decisión del usuario.
 - **Agregar/dividir movimientos:** implementado en **RADIAN** (`/dividir-linea`). Pendiente (opcional) llevarlo a **Bancos** sobre `MovimientoBanco` si el usuario lo pide; el template de edición ya está unificado.
-- **El modelo durable de líneas/versiones** (Fase 2) es el refactor más grande; condiciona Fases 6–7. Diseñarlo con cuidado.
+- **El modelo durable de importaciones** (Fase 2, parte 2) se resolvió con un **snapshot por importación** (`importaciones.preasientos_json`) en vez de tablas normalizadas de líneas/versiones — pragmático y de bajo riesgo. Si en el futuro se requieren versiones/diffs finos o consultas por línea, habría que normalizar; por ahora el snapshot cubre «retomar conservando correcciones» y la trazabilidad por estado.
 - La auth Entra exige que el equipo administrativo tenga identidades en el **tenant oficial** (asumido por la decisión tomada).
 - `listar_correcciones_tercero()` existe pero **no tiene UI**; opcional: una vista de trazabilidad de correcciones de tercero.
