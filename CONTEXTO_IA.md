@@ -363,6 +363,10 @@ Categorías usadas: `uploads`, `output`, `data`, `web_sessions`.
   (`db/contable_<id>.db`). En Azure SQL las tablas son compartidas y la separación es por la
   columna discriminadora **`empresa_id`** (derivada del `db_path`; ver `database.py`). Ambos
   caminos quedan correctos; Azure SQL no está activo hoy (`USE_SQLITE=true` por defecto).
+- **Índices tenant-aware (Azure SQL):** las tablas con `UNIQUE(empresa_id, …)` ya tienen índice
+  por `empresa_id`; además `inicializar_db` crea (idempotente, `_asegurar_indices_mssql`)
+  `ix_importaciones_empresa`, `ix_procesos_banco_empresa` e `ix_documentos_empresa_clasif` para
+  los listados/analítica por empresa. En SQLite no aplican (cada empresa es un archivo aparte).
 
 ---
 

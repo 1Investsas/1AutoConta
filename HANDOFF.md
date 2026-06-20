@@ -64,10 +64,10 @@ Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de
 - ✅ **Agregar/dividir movimientos** en RADIAN (caso capital/intereses), validando cuadre. **HECHO** (ver §4).
 - ✅ **Estandarización de UI**: template de edición unificado (modelo RADIAN) + página inicial de módulo unificada (modelo Bancos) + landing de RADIAN. **HECHO** (ver §4).
 
-### Fase 2 — Modelo de datos durable + retomar importaciones  ← **CASI CERRADA**
+### Fase 2 — Modelo de datos durable + retomar importaciones  ← **CERRADA**
 - ✅ **Empresas → SQL**: la fuente de verdad del registro de empresas pasó de `data/empresas.json` a la tabla SQL `empresas` (BD de sistema central). **HECHO** (ver §4). Es la base para el RBAC de la Fase 3.
 - ✅ **Modelo durable de importaciones + retomar conservando correcciones**: cada importación guarda un **snapshot editable durable** en BD (`importaciones.preasientos_json`) con ciclo de **estados** (`procesando → procesada → corregida → exportada`, + `error`/`anulada`). Nuevo endpoint **«Abrir»** carga el estado guardado (con las correcciones) sin reprocesar; **«Regenerar»** sigue reprocesando desde cero. **HECHO** (ver §4).
-- ⏳ Confirmar `empresa_id` + índices tenant-aware (pendiente menor; el aislamiento ya funciona por archivo en SQLite y por `empresa_id` en Azure SQL).
+- ✅ **`empresa_id` + índices tenant-aware**: confirmado que toda tabla compartida lleva `empresa_id` y que las consultas filtran por él; añadidos índices en Azure SQL para listados/analítica por empresa (`ix_importaciones_empresa`, `ix_procesos_banco_empresa`, `ix_documentos_empresa_clasif`). **HECHO** (ver §4). El aislamiento ya funcionaba: por archivo en SQLite y por `empresa_id` en Azure SQL.
 
 ### Fase 3 — RBAC + autorización en la app (con stub de auth dev)
 Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log`. Módulos nuevos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission` en rutas. Validar selección de empresa. Aislamiento de blobs por empresa (`empresas/{empresa_id}/...`). Auditoría de acciones clave.
@@ -145,19 +145,23 @@ Antes, los preasientos vivían **solo en la sesión** (server-side, efímeros) y
 - **UI `importaciones.html`**: pills por estado (`_ESTADOS_IMPORTACION`), botón **📂 Abrir** (cuando hay snapshot), **🔄 Regenerar/Retomar** (reprocesa desde cero, con tooltip), **⬇️ Excel** y **✕ Anular** (con confirmación); filas anuladas atenuadas. Partial `_actividad_items.html` ganó una rama `anulada` (Bancos no la emite). Dos clases CSS nuevas: `.pill-info`, `.pill-muted`.
 - **Tests**: `tests/test_importaciones_durable.py` (9 casos: migración de columna, round-trip del snapshot, COALESCE en transición de estado, `tiene_snapshot`, y rutas Abrir/editar→corregida/Anular/render). Fixture de rutas que redirige `config.DB_PATH`/`SYSTEM_DB_PATH` a temporales.
 
-**Verificación global:** `pytest` → **232/232 OK**.
+### ✅ `empresa_id` + índices tenant-aware (Fase 2, cierre)
+- **Confirmación**: todas las tablas compartidas de Azure SQL llevan `empresa_id` y todas las consultas filtran por él (`_where_empresa`/`_and_empresa`). En SQLite el aislamiento es por archivo (`contable_<id>.db`), sin columna `empresa_id`.
+- **`app/database.py`**: helper idempotente `_asegurar_indices_mssql` (invocado desde `inicializar_db` solo en Azure SQL) que crea índices `IF NOT EXISTS` (chequeo por `name` + `object_id`): `ix_importaciones_empresa(empresa_id,id)`, `ix_procesos_banco_empresa(empresa_id,id)`, `ix_documentos_empresa_clasif(empresa_id,clasificacion)`. Las tablas con `UNIQUE(empresa_id,…)` (documentos/historial/correcciones) ya tenían índice que cubre el filtro; `bitacora` solo se escribe, así que no se indexa.
+- **Tests**: `TestTenantAwareAzure` en `tests/test_aislamiento_empresa.py` (4 casos: DDL con `empresa_id` en las 6 tablas, índices idempotentes y por `empresa_id`, que `inicializar_db` los emite en Azure y NO en SQLite).
+
+**Verificación global:** `pytest` → **236/236 OK**.
 
 ---
 
 ## 5. Siguiente paso
 
-**Fase 2 prácticamente cerrada.** Hechas la **parte 1 (Empresas → SQL)** y la **parte 2 (modelo durable de importaciones + «Abrir» conservando correcciones)** (ver §4). Queda un pendiente menor: confirmar `empresa_id` + **índices** tenant-aware en las tablas por-empresa (el aislamiento ya funciona; faltan índices para rendimiento en Azure SQL).
+**Fase 2 CERRADA.** Hechas las 3 piezas: parte 1 (Empresas → SQL), parte 2 (modelo durable de importaciones + «Abrir» conservando correcciones) y el cierre (`empresa_id` + índices tenant-aware) — ver §4.
 
 Siguiente fase grande: **Fase 3 — RBAC + autorización en la app** (con stub de auth dev). Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log` (reutilizan la **BD de sistema** ya creada en la parte 1). Módulos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission`. Validar selección de empresa. Aislamiento de blobs por empresa. Es el **bloqueante #1** para habilitar el equipo administrativo (ver §0).
 
 Opciones rápidas si el usuario lo pide:
-- **Abrir PR** de esta rama (`claude/brave-meitner-cehpv0`) para revisar los incrementos de la Fase 2 antes de seguir.
-- **Índices tenant-aware** en Azure SQL (`empresa_id` + claves de búsqueda) — pendiente menor de la Fase 2.
+- **Abrir PR** de esta rama (`claude/brave-meitner-cehpv0`) para revisar la Fase 2 completa antes de arrancar la Fase 3.
 - **Llevar la división y el modelo durable a Bancos** (hoy el durable es solo RADIAN; Bancos usa su propio `procesos_banco` sin snapshot editable).
 - **Vista de trazabilidad** de `listar_correcciones_tercero()` (aún sin UI, §9).
 

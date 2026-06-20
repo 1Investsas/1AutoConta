@@ -349,6 +349,10 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
         # incluyen la columna; este ALTER cubre instalaciones previas).
         _asegurar_columna(conn, "importaciones", "preasientos_json",
                           "TEXT", "NVARCHAR(MAX)")
+        # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
+        # cada empresa tiene su propio archivo y no hay columna empresa_id.
+        if not conn.is_sqlite:
+            _asegurar_indices_mssql(conn)
         conn.commit()
         logger.info("Base de datos inicializada correctamente.")
     finally:
@@ -379,6 +383,37 @@ def _asegurar_columna(
         conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo_sqlite}")
     else:
         conn.execute(f"ALTER TABLE {tabla} ADD {columna} {tipo_mssql}")
+
+
+# Índices tenant-aware para Azure SQL (tablas compartidas entre empresas). Cada
+# entrada es (nombre_índice, tabla, columnas). El nombre lleva el prefijo de la
+# tabla porque los nombres de índice son únicos por base de datos en SQL Server.
+#
+# Las tablas con UNIQUE(empresa_id, …) (documentos_importados, historial_cuentas,
+# correcciones_tercero) ya tienen un índice que cubre el filtro por empresa, así
+# que no se repiten aquí. `bitacora` solo se escribe (no se lee por empresa), por
+# lo que indexarla solo añadiría costo de escritura.
+_INDICES_MSSQL = (
+    # Listados por empresa ordenados por id descendente.
+    ("ix_importaciones_empresa",     "importaciones",        "empresa_id, id"),
+    ("ix_procesos_banco_empresa",    "procesos_banco",       "empresa_id, id"),
+    # Analítica: distribución/evolución agrupada por clasificación dentro de la empresa.
+    ("ix_documentos_empresa_clasif", "documentos_importados", "empresa_id, clasificacion"),
+)
+
+
+def _asegurar_indices_mssql(conn: "DbConnection") -> None:
+    """Crea los índices tenant-aware en Azure SQL si no existen (idempotente).
+
+    No aplica a SQLite: allí cada empresa tiene su propio archivo .db y las tablas
+    no tienen columna `empresa_id`.
+    """
+    for nombre, tabla, columnas in _INDICES_MSSQL:
+        conn.execute(
+            f"IF NOT EXISTS (SELECT 1 FROM sys.indexes "
+            f"WHERE name = '{nombre}' AND object_id = OBJECT_ID('{tabla}')) "
+            f"CREATE INDEX {nombre} ON {tabla} ({columnas})"
+        )
 
 
 def _create_tables_sqlite(conn: DbConnection) -> None:
