@@ -3,7 +3,7 @@
 > **Cómo usar este archivo:** súbelo (o pégalo) al iniciar un chat nuevo. Es autocontenido: explica el proyecto, el plan por fases, **lo que ya se hizo**, **el siguiente paso**, y la orientación mínima del código para que una IA pueda continuar sin re-explorar todo.
 >
 > **Prompt sugerido para el chat nuevo:**
-> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/bold-turing-arhhqi`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
+> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/brave-meitner-cehpv0`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
 
 ---
 
@@ -64,8 +64,10 @@ Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de
 - ✅ **Agregar/dividir movimientos** en RADIAN (caso capital/intereses), validando cuadre. **HECHO** (ver §4).
 - ✅ **Estandarización de UI**: template de edición unificado (modelo RADIAN) + página inicial de módulo unificada (modelo Bancos) + landing de RADIAN. **HECHO** (ver §4).
 
-### Fase 2 — Modelo de datos durable + retomar importaciones
-Persistencia durable de líneas/versiones con estados (borrador, procesada, exportada, corregida, anulada) → habilita "retomar importación", duplicar corregida y trazabilidad. Mover la fuente de verdad de empresas de `data/empresas.json` a tabla SQL `dbo.empresas`. Confirmar `empresa_id` + índices tenant-aware.
+### Fase 2 — Modelo de datos durable + retomar importaciones  ← **EN CURSO**
+- ✅ **Empresas → SQL**: la fuente de verdad del registro de empresas pasó de `data/empresas.json` a la tabla SQL `empresas` (BD de sistema central). **HECHO** (ver §4). Es la base para el RBAC de la Fase 3.
+- ⏳ **Modelo durable de importaciones + retomar conservando correcciones**: persistencia durable de líneas/versiones con estados (borrador, procesada, exportada, corregida, anulada) → habilita "retomar importación" sin perder las correcciones manuales, duplicar corregida y trazabilidad. **PENDIENTE** (pieza estelar y de mayor riesgo).
+- ⏳ Confirmar `empresa_id` + índices tenant-aware.
 
 ### Fase 3 — RBAC + autorización en la app (con stub de auth dev)
 Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log`. Módulos nuevos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission` en rutas. Validar selección de empresa. Aislamiento de blobs por empresa (`empresas/{empresa_id}/...`). Auditoría de acciones clave.
@@ -92,7 +94,7 @@ Rediseño gráfico, dashboard ejecutivo/operativo, analítica de errores, audito
 
 ## 4. Lo que YA se hizo (estado actual)
 
-> **Rama de trabajo actual: `claude/dazzling-franklin-fh407p`.** La rama anterior (`claude/sweet-galileo-gripn9`, PR #18) **ya se mergeó a `main`**, y esta rama parte de ese `main`. **No hay PR abierta** por ahora (los commits van a la rama; abrir PR solo si el usuario lo pide).
+> **Rama de trabajo actual: `claude/brave-meitner-cehpv0`.** Parte de `main` (que ya incluye la Fase 1 vía PRs #21/#22). **No hay PR abierta** por ahora (los commits van a la rama; abrir PR solo si el usuario lo pide).
 
 ### ✅ Bug "Generando archivo SIIGO" (módulo bancos) — en `main` (PR #18)
 La descarga no navega de página → el overlay *"Generando archivo SIIGO…"* nunca se ocultaba. Solución con **cookie de descarga**: `_responder_descarga(resp)` en `app/web/routes.py` adjunta cookie `descargaSiigo=<token>`; `app/web/templates/base.html` expone `window.descargaConOverlay(form, mensaje)` que muestra el overlay y lo oculta al detectar la cookie (timeout de 120 s). Usado en `banco_resultado.html`.
@@ -128,16 +130,26 @@ Un solo modelo visual por tipo de página, con parametrización por módulo (dec
 - **Página inicial de módulo** (modelo **Bancos/`banco_upload.html`**): nueva **landing de RADIAN** (`GET /radian` + `radian_upload.html`) con *¿qué hace el módulo? · carga · guía rápida · actividad reciente*; antes RADIAN solo existía como modal "Automatizar proceso" (que sigue disponible en la topbar). El sidebar enlaza RADIAN a su landing.
 - **Partial genérico `_actividad_items.html`** (claves `archivo/estado/fecha/count/unidad/ext`) reutilizado por Bancos y RADIAN; reemplaza a `banco_actividad_items.html` (eliminado). Helpers `_actividad_radian()` (sobre `importaciones`) y `_actividad_banco()` exponen esas claves.
 
-**Verificación global:** `pytest` → **210/210 OK**.
+### ✅ Empresas → SQL (Fase 2, parte 1)
+La fuente de verdad del registro de empresas pasó de `data/empresas.json` a una **tabla SQL `empresas`** en una **BD de sistema central** (`config.SYSTEM_DB_PATH` = `db/sistema.db` en SQLite; tabla compartida en Azure SQL). Es la base que la Fase 3 reutilizará para `usuarios/roles`.
+- **`app/config.py`**: nueva `SYSTEM_DB_PATH` (BD central; se ignora en Azure SQL, donde todo vive en la misma BD).
+- **`app/database.py`**: tabla `empresas` (SQLite + T-SQL) + funciones `inicializar_db_sistema`, `listar_empresas_registro`, `obtener_empresa_registro`, `guardar_empresa_registro` (UPSERT: `ON CONFLICT`/`MERGE`), `eliminar_empresa_registro`, `contar_empresas_registro`. Los campos con estructura (`cuentas_*`, `bancos`, `formato_banco`) se guardan serializados como **JSON** en columnas de texto (no se normalizó de más; el objetivo es mover la fuente de verdad a SQL, no rediseñar la config de empresa). **La tabla `empresas` NO se filtra por `empresa_id`**: ES el catálogo de empresas.
+- **`app/empresas.py`**: la persistencia (`_leer_registro`, `guardar_empresa`, `eliminar_empresa`) ahora va contra la BD. **Migración automática** una sola vez por proceso: si la tabla está vacía y existe el `empresas.json` legado, se importa (`_asegurar_sistema`/`_migrar_json_legacy`). El `Empresa` dataclass y la API pública **no cambiaron** (rutas/tests intactos).
+- **Tests**: `tests/test_empresas_db.py` (11 casos: CRUD UPSERT, columnas JSON, conteo, MERGE T-SQL con conteo de parámetros, catálogo sin filtro `empresa_id`) + 3 casos de migración en `tests/test_empresas.py`. Fixture de `test_empresas.py` adaptado para redirigir la BD de sistema a un temporal.
+
+**Verificación global:** `pytest` → **223/223 OK**.
 
 ---
 
 ## 5. Siguiente paso
 
-**Fase 1 cerrada.** Sigue la **Fase 2 — Modelo de datos durable + retomar importaciones** (ver §3): persistir líneas/versiones con estados (borrador, procesada, exportada, corregida, anulada), mover la fuente de verdad de empresas de `data/empresas.json` a una tabla SQL `dbo.empresas`, y confirmar `empresa_id` + índices tenant-aware. Es el refactor más grande y condiciona Fases 6–7: **diseñarlo con cuidado** antes de codificar.
+**Fase 2 en curso.** Hecha la **parte 1 (Empresas → SQL)** (ver §4). Sigue la **parte 2: modelo durable de importaciones + retomar conservando correcciones**:
+- Hoy los preasientos viven solo en sesión (server-side, efímeros) y **«Retomar» re-ejecuta el pipeline desde el RADIAN original → pierde las correcciones manuales** (tercero, divisiones ✂, cuentas confirmadas). Esto es lo que la pieza durable debe arreglar.
+- Diseño sugerido (a confirmar): persistir el estado editado de cada importación (snapshot de preasientos por `importacion_id`, p. ej. `preasientos_ref`/tabla durable) + ciclo de **estados** (borrador → procesada → exportada → corregida → anulada). «Retomar» cargaría el estado guardado en vez de re-correr el pipeline. Es el refactor más grande y condiciona Fases 6–7: **diseñarlo con cuidado**.
+- Falta también confirmar `empresa_id` + índices tenant-aware en las tablas por-empresa.
 
-Antes de iniciar Fase 2, opciones rápidas si el usuario lo pide:
-- **Abrir PR** de esta rama (`claude/bold-turing-arhhqi`) para revisar los 3 incrementos (`5525edd`, `4956b03`, `94e986d`) antes de seguir.
+Opciones rápidas si el usuario lo pide:
+- **Abrir PR** de esta rama (`claude/brave-meitner-cehpv0`) para revisar el incremento Empresas→SQL antes de seguir.
 - **Llevar la división a Bancos** (hoy solo RADIAN): el template ya está unificado; faltaría el endpoint análogo sobre `MovimientoBanco`.
 - **Vista de trazabilidad** de `listar_correcciones_tercero()` (aún sin UI, §9).
 
@@ -150,7 +162,7 @@ Antes de iniciar Fase 2, opciones rápidas si el usuario lo pide:
 **Archivos clave:**
 - **Web/rutas:** `app/web/routes.py` (~26 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, `_recalcular_preasiento()`, `_actividad_radian()`/`_actividad_banco()`, endpoints `/radian`, `/confirmar`, `/corregir-tercero`, `/dividir-linea`, `/exportar-siigo`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (resultados server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`).
 - **Plantillas:** `app/web/templates/{base,index,radian_upload,resultado,banco_resultado,banco_upload,banco_historial,importaciones,empresas,analytics,historial}.html` + partial `_actividad_items.html`. UI en HTML + CSS propio (`static/style.css`), JS vanilla, sin framework. **Modelo visual único:** páginas de edición siguen `resultado.html` (autocomplete de **cuentas**/**terceros**, edición inline `toggleEditCuenta`/`toggleEditTercero`, división ✂ por línea); páginas iniciales de módulo siguen `banco_upload.html` (¿qué hace? · carga · guía · actividad).
-- **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; tablas: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones`, `procesos_banco`, **`correcciones_tercero`**), `app/empresas.py` (dataclass `Empresa`, hoy persiste en `data/empresas.json`), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}`, pero uploads/output/db **no**).
+- **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; tablas por-empresa: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones`, `procesos_banco`, **`correcciones_tercero`**; **tabla de sistema `empresas`** —registro central, sin filtro `empresa_id`— con `inicializar_db_sistema`/`*_empresa_registro`), `app/empresas.py` (dataclass `Empresa`; persiste en la tabla SQL `empresas` vía BD de sistema `config.SYSTEM_DB_PATH`; migra `empresas.json` legado la 1ª vez), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}`, pero uploads/output/db **no**).
 - **Dominio:** `app/importador.py` (RADIAN), `app/clasificador.py`, `app/terceros.py` (`identificar_tercero`, `cruzar_tercero`, `procesar_terceros_lote`, **`aplicar_correcciones_lote`**), `app/preasiento.py` (genera `LineaContable`/`PreasientoContable`), `app/models.py` (`PreasientoContable` con `tercero_nit_original`/`tercero_corregido`, `LineaContable`, `MovimientoBanco`), `app/sugerencias.py` (motor de cuentas por historial), `app/validaciones.py`.
 - **SIIGO:** `app/siigo/mapeador.py` (27 columnas; **Descripción=referencia del doc, Observaciones vacía**), `app/siigo/exportador_siigo.py`, `app/siigo/api_client.py`.
 - **Banco:** `app/banco/{importador_banco,mapeador_banco,exportador_banco}.py` (consolida intereses, enlaza 4x1000; su `Descripción`/`Observaciones` siguen su propia convención).
@@ -174,7 +186,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 
 ## 8. Notas de entorno y git
 
-- **Rama de trabajo:** `claude/bold-turing-arhhqi` (parte de `main`, que ya incluye el trabajo de la rama anterior vía PR #19/#20). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Últimos commits: `94e986d` (unificar edición Bancos), `4956b03` (landing RADIAN + actividad), `5525edd` (dividir/agregar movimientos RADIAN).
+- **Rama de trabajo:** `claude/brave-meitner-cehpv0` (parte de `main`, que ya incluye la Fase 1 vía PRs #21/#22). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Último incremento: **Empresas → SQL** (Fase 2, parte 1).
 - **Cuentas actuales: de PRUEBA** (GitHub `JuanCamiloVergara/contable-auto` + Azure de prueba). La migración a cuentas oficiales se hace en el punto híbrido (§2).
 - **Entorno remoto efímero:** todo lo que valga la pena debe quedar **commiteado y pusheado**. Este handoff vive en el repo como `HANDOFF.md`.
 

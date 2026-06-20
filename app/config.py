@@ -56,6 +56,14 @@ def _db_dir_por_defecto() -> str:
 DB_DIR: str = os.getenv("DB_DIR", _db_dir_por_defecto())
 DB_PATH: str = os.getenv("DB_PATH", os.path.join(DB_DIR, "contable.db"))
 
+# Base de datos "de sistema": registro central de empresas (y, más adelante,
+# usuarios/roles para el RBAC de la Fase 3). A diferencia de las BD por-empresa
+# (contable_<id>.db), esta es CENTRAL: debe poder consultarse antes de saber qué
+# empresa está activa (p. ej. para listar las empresas disponibles). En modo
+# Azure SQL (USE_SQLITE=false) todo vive en la misma BD, así que esta ruta se
+# ignora y la tabla `empresas` queda como una tabla compartida más.
+SYSTEM_DB_PATH: str = os.getenv("SYSTEM_DB_PATH", os.path.join(DB_DIR, "sistema.db"))
+
 # Modo de journal de SQLite. WAL no es compatible con sistemas de archivos de
 # red (el montaje /home de Azure App Service es SMB), por lo que en la nube se
 # usa el journal por defecto (DELETE). En local se mantiene WAL por rendimiento.
