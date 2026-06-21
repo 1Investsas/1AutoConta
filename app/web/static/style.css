@@ -698,6 +698,7 @@ button { font-family: inherit; }
   gap: 2px;
 }
 .row-menu-list[hidden] { display: none; }
+.row-menu-list form { margin: 0; width: 100%; }
 .row-menu-list a,
 .row-menu-list button {
   display: flex; align-items: center; gap: 9px;

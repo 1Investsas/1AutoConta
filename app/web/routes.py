@@ -1039,6 +1039,84 @@ def importacion_descargar(imp_id):
     )
 
 
+@bp.route("/importaciones/<int:imp_id>/descargar-original")
+@require_permission("importaciones.ver")
+def importacion_descargar_original(imp_id):
+    """Descarga el archivo RADIAN original que se importó."""
+    from app.database import inicializar_db, obtener_importacion
+
+    db_path = _empresa_actual().db_path
+    inicializar_db(db_path)
+    imp = obtener_importacion(imp_id, db_path=db_path)
+
+    archivo_ref = (imp or {}).get("archivo_ref") or ""
+    if not imp or not archivo_ref or not store.file_exists(archivo_ref):
+        flash("El archivo importado ya no está disponible en el servidor.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    content = store.get_download_bytes(archivo_ref)
+    download_name = imp.get("archivo_nombre") or Path(archivo_ref.replace("blob://", "")).name
+    return send_file(
+        io.BytesIO(content),
+        as_attachment=True,
+        download_name=download_name,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@bp.route("/importaciones/<int:imp_id>/descargar-siigo")
+@require_permission("importaciones.ver")
+def importacion_descargar_siigo(imp_id):
+    """Regenera y descarga el archivo SIIGO de una importación desde su snapshot.
+
+    Reutiliza el estado guardado (preasientos con las correcciones manuales) para
+    producir el mismo Excel SIIGO que la pantalla de resultados, sin reprocesar.
+    """
+    from app.database import inicializar_db, obtener_snapshot_importacion
+
+    emp = _empresa_actual()
+    db_path = emp.db_path
+    inicializar_db(db_path)
+
+    datos = obtener_snapshot_importacion(imp_id, db_path=db_path)
+    if not datos or not datos.get("preasientos"):
+        flash("Esta importación no tiene un estado guardado para exportar a SIIGO. "
+              "Usa «Regenerar» para reprocesar el archivo original.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    try:
+        rutas = _generar_archivos_siigo(datos)
+    except Exception as exc:
+        logger.exception("Error generando archivo SIIGO de la importación %s", imp_id)
+        flash(f"Error al generar el archivo SIIGO: {exc}", "error")
+        return redirect(url_for("web.importaciones"))
+
+    audit.registrar("importacion.descargar_siigo", empresa_id=emp.id,
+                    detalle=f"importacion={imp_id} archivos={len(rutas)}")
+    return _enviar_archivos_siigo(rutas)
+
+
+@bp.route("/importaciones/<int:imp_id>/eliminar", methods=["POST"])
+@require_permission("importaciones.gestionar")
+def importacion_eliminar(imp_id):
+    """Elimina definitivamente una importación del histórico."""
+    from app.database import inicializar_db, obtener_importacion, eliminar_importacion
+
+    emp = _empresa_actual()
+    db = emp.db_path
+    inicializar_db(db)
+
+    imp = obtener_importacion(imp_id, db_path=db)
+    if not imp:
+        flash("La importación no existe.", "error")
+        return redirect(url_for("web.importaciones"))
+
+    eliminar_importacion(imp_id, db_path=db)
+    audit.registrar("importacion.eliminar", empresa_id=emp.id, detalle=f"importacion={imp_id}")
+    flash(f"Automatización #{imp_id} eliminada.", "info")
+    return redirect(url_for("web.importaciones"))
+
+
 # ---------------------------------------------------------------------------
 # POST /exportar-siigo — Generar archivo(s) SIIGO
 # ---------------------------------------------------------------------------
@@ -1057,13 +1135,58 @@ def _responder_descarga(resp):
     return resp
 
 
+def _generar_archivos_siigo(datos: dict, incluir_pendientes: bool = False) -> list:
+    """Genera el/los Excel en formato SIIGO a partir de un resultado.
+
+    `datos` es el dict del resultado (de la sesión de trabajo o de un snapshot
+    durable de importación). Reconstruye los PreasientoContable serializados y
+    delega en el exportador SIIGO. Retorna la lista de rutas generadas.
+    """
+    from app.siigo.exportador_siigo import exportar_siigo as _exportar
+    from app.importador import cargar_maestro_cuentas
+
+    preasientos = _deserializar_preasientos(datos.get("preasientos", []))
+
+    # Cargar plan de cuentas para determinar columnas de vencimiento (cols 13-16)
+    try:
+        _cuentas_path = _empresa_actual().ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
+        df_cuentas_siigo = cargar_maestro_cuentas(_cuentas_path)
+    except Exception:
+        df_cuentas_siigo = None
+
+    return _exportar(
+        preasientos,
+        output_path=os.path.join(_project_root(), "output"),
+        incluir_pendientes=incluir_pendientes,
+        df_cuentas=df_cuentas_siigo,
+    )
+
+
+def _enviar_archivos_siigo(rutas: list, zip_name: str = "siigo_comprobantes.zip"):
+    """Envía como descarga un único Excel SIIGO, o un ZIP si hay varios."""
+    import zipfile
+
+    if len(rutas) == 1:
+        return send_file(
+            rutas[0],
+            as_attachment=True,
+            download_name=Path(rutas[0]).name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for ruta in rutas:
+            zf.write(ruta, Path(ruta).name)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name=zip_name,
+                     mimetype="application/zip")
+
+
 @bp.route("/exportar-siigo", methods=["POST"])
 @require_permission("radian.exportar")
 def exportar_siigo():
     """Genera el Excel en formato SIIGO y lo envía como descarga (o ZIP si hay varios)."""
-    import zipfile
-    from app.siigo.exportador_siigo import exportar_siigo as _exportar
-
     datos = session_store.cargar(KEY_RESULTADO)
     if not datos or not datos.get("preasientos"):
         flash("No hay resultados para exportar. Procesa primero un archivo RADIAN.", "error")
@@ -1071,24 +1194,8 @@ def exportar_siigo():
 
     incluir_pendientes = request.form.get("incluir_pendientes") == "on"
 
-    # Re-construir la lista de PreasientoContable desde la sesión
-    preasientos = _deserializar_preasientos(datos["preasientos"])
-
-    # Cargar plan de cuentas para determinar columnas de vencimiento (cols 13-16)
-    from app.importador import cargar_maestro_cuentas
     try:
-        _cuentas_path = _empresa_actual().ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
-        df_cuentas_siigo = cargar_maestro_cuentas(_cuentas_path)
-    except Exception:
-        df_cuentas_siigo = None
-
-    try:
-        rutas = _exportar(
-            preasientos,
-            output_path=os.path.join(_project_root(), "output"),
-            incluir_pendientes=incluir_pendientes,
-            df_cuentas=df_cuentas_siigo,
-        )
+        rutas = _generar_archivos_siigo(datos, incluir_pendientes)
     except Exception as exc:
         logger.exception("Error generando archivo SIIGO")
         flash(f"Error al generar archivo SIIGO: {exc}", "error")
@@ -1102,26 +1209,7 @@ def exportar_siigo():
         detalle=f"archivos={len(rutas)} pendientes={'si' if incluir_pendientes else 'no'}",
     )
 
-    if len(rutas) == 1:
-        return _responder_descarga(send_file(
-            rutas[0],
-            as_attachment=True,
-            download_name=Path(rutas[0]).name,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ))
-
-    # Múltiples archivos → empaquetar en ZIP
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for ruta in rutas:
-            zf.write(ruta, Path(ruta).name)
-    buf.seek(0)
-    return _responder_descarga(send_file(
-        buf,
-        as_attachment=True,
-        download_name="siigo_comprobantes.zip",
-        mimetype="application/zip",
-    ))
+    return _responder_descarga(_enviar_archivos_siigo(rutas))
 
 
 # ---------------------------------------------------------------------------
