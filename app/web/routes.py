@@ -1096,27 +1096,6 @@ def importacion_descargar_siigo(imp_id):
     return _enviar_archivos_siigo(rutas)
 
 
-@bp.route("/importaciones/<int:imp_id>/eliminar", methods=["POST"])
-@require_permission("importaciones.gestionar")
-def importacion_eliminar(imp_id):
-    """Elimina definitivamente una importación del histórico."""
-    from app.database import inicializar_db, obtener_importacion, eliminar_importacion
-
-    emp = _empresa_actual()
-    db = emp.db_path
-    inicializar_db(db)
-
-    imp = obtener_importacion(imp_id, db_path=db)
-    if not imp:
-        flash("La importación no existe.", "error")
-        return redirect(url_for("web.importaciones"))
-
-    eliminar_importacion(imp_id, db_path=db)
-    audit.registrar("importacion.eliminar", empresa_id=emp.id, detalle=f"importacion={imp_id}")
-    flash(f"Automatización #{imp_id} eliminada.", "info")
-    return redirect(url_for("web.importaciones"))
-
-
 # ---------------------------------------------------------------------------
 # POST /exportar-siigo — Generar archivo(s) SIIGO
 # ---------------------------------------------------------------------------
