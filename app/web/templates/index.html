@@ -219,7 +219,26 @@
             <td class="text-dim">20/may/2025 09:15</td>
             <td><span class="badge badge-success">Validado</span></td>
             <td>María Gómez</td>
-            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+            <td>
+              <div class="row-actions">
+                <button type="button" class="row-menu" aria-label="Acciones" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button>
+                <div class="row-menu-list" role="menu" hidden>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Ver detalle
+                  </a>
+                  <a href="{{ url_for('web.analytics') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+                    Ver analítica
+                  </a>
+                  <hr>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    Ver toda la actividad
+                  </a>
+                </div>
+              </div>
+            </td>
           </tr>
           <tr>
             <td><strong>Soportes pendientes</strong></td>
@@ -227,7 +246,26 @@
             <td class="text-dim">20/may/2025 08:40</td>
             <td><span class="badge badge-warning">Pendiente</span></td>
             <td>Juan Pérez</td>
-            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+            <td>
+              <div class="row-actions">
+                <button type="button" class="row-menu" aria-label="Acciones" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button>
+                <div class="row-menu-list" role="menu" hidden>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Ver detalle
+                  </a>
+                  <a href="{{ url_for('web.analytics') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+                    Ver analítica
+                  </a>
+                  <hr>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    Ver toda la actividad
+                  </a>
+                </div>
+              </div>
+            </td>
           </tr>
           <tr>
             <td><strong>Cierres</strong></td>
@@ -235,7 +273,26 @@
             <td class="text-dim">19/may/2025 18:30</td>
             <td><span class="badge badge-warning">Requiere revisión</span></td>
             <td>Laura Martínez</td>
-            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+            <td>
+              <div class="row-actions">
+                <button type="button" class="row-menu" aria-label="Acciones" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button>
+                <div class="row-menu-list" role="menu" hidden>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Ver detalle
+                  </a>
+                  <a href="{{ url_for('web.analytics') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+                    Ver analítica
+                  </a>
+                  <hr>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    Ver toda la actividad
+                  </a>
+                </div>
+              </div>
+            </td>
           </tr>
           <tr>
             <td><strong>Reportes gerenciales</strong></td>
@@ -243,7 +300,26 @@
             <td class="text-dim">19/may/2025 16:05</td>
             <td><span class="badge badge-info">Disponible</span></td>
             <td>Carlos Ramírez</td>
-            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+            <td>
+              <div class="row-actions">
+                <button type="button" class="row-menu" aria-label="Acciones" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button>
+                <div class="row-menu-list" role="menu" hidden>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Ver detalle
+                  </a>
+                  <a href="{{ url_for('web.analytics') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+                    Ver analítica
+                  </a>
+                  <hr>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    Ver toda la actividad
+                  </a>
+                </div>
+              </div>
+            </td>
           </tr>
           <tr>
             <td><strong>Impuestos</strong></td>
@@ -251,7 +327,26 @@
             <td class="text-dim">19/may/2025 11:20</td>
             <td><span class="badge badge-warning">Pendiente</span></td>
             <td>Sofía López</td>
-            <td><button class="row-menu" aria-label="Acciones"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></td>
+            <td>
+              <div class="row-actions">
+                <button type="button" class="row-menu" aria-label="Acciones" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button>
+                <div class="row-menu-list" role="menu" hidden>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Ver detalle
+                  </a>
+                  <a href="{{ url_for('web.analytics') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+                    Ver analítica
+                  </a>
+                  <hr>
+                  <a href="{{ url_for('web.importaciones') }}" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    Ver toda la actividad
+                  </a>
+                </div>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
