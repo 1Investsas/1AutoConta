@@ -160,6 +160,24 @@
   transition: background .15s;
 }
 .btn-apply-banco:hover { background: rgba(155,89,182,.45); color: #fff; }
+
+/* Botón ✂ subdividir contrapartida */
+.btn-subdividir {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 5px 7px;
+  background: rgba(155,89,182,.15);
+  border: 1px solid rgba(155,89,182,.4);
+  color: #9b59b6;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background .15s;
+}
+.btn-subdividir:hover { background: rgba(155,89,182,.35); color: #fff; }
+
+/* Filas de partes dentro del modal de subdivisión */
+.contra-multi { margin-top: 4px; }
 </style>
 {% endblock %}
 
@@ -313,17 +331,34 @@
             </select>
           </td>
 
-          <!-- Cuenta contrapartida con autocomplete -->
+          <!-- Cuenta contrapartida con autocomplete (subdividible) -->
           <td>
-            <input type="text"
-                   name="cuenta_{{ m.idx }}"
-                   class="input-cuenta banco-cuenta-ac"
-                   value="{{ m.cuenta_auto }}"
-                   placeholder="ej. 51050501"
-                   autocomplete="off"
-                   {% if m.es_4x1000 and m.idx_padre is none %}
-                     title="4x1000 huérfano — cuenta sugerida: {{ cuenta_4x1000 }}"
-                   {% endif %}>
+            <div class="contra-wrapper" id="contra-wrapper-{{ m.idx }}"
+                 data-idx="{{ m.idx }}"
+                 data-valor="{{ (m.valor | float) | abs }}"
+                 data-desc="{{ m.descripcion }}"
+                 data-nit="{{ m.nit_auto }}">
+              <div class="contra-single" id="contra-single-{{ m.idx }}"
+                   style="display:flex; gap:6px; align-items:center">
+                <input type="text"
+                       name="cuenta_{{ m.idx }}"
+                       id="cuenta-{{ m.idx }}"
+                       class="input-cuenta banco-cuenta-ac"
+                       value="{{ m.cuenta_auto }}"
+                       placeholder="ej. 51050501"
+                       autocomplete="off"
+                       {% if m.es_4x1000 and m.idx_padre is none %}
+                         title="4x1000 huérfano — cuenta sugerida: {{ cuenta_4x1000 }}"
+                       {% endif %}>
+                <button type="button" class="btn-subdividir"
+                        title="Subdividir la contrapartida en varias cuentas"
+                        onclick="abrirSubdividir({{ m.idx }})">✂</button>
+              </div>
+              <!-- Resumen cuando la contrapartida está subdividida (lo llena el JS) -->
+              <div class="contra-multi" id="contra-multi-{{ m.idx }}" style="display:none"></div>
+              <!-- Inputs ocultos de las partes (los llena el JS, viajan en el form) -->
+              <div class="contra-hidden" id="contra-hidden-{{ m.idx }}"></div>
+            </div>
           </td>
 
           <!-- NIT Tercero con autocomplete -->
@@ -413,6 +448,41 @@
 <!-- Autocomplete dropdowns -->
 <ul id="banco-ac"></ul>
 <ul id="tercero-ac"></ul>
+
+<!-- Modal subdividir contrapartida -->
+<div id="modalSubdividir" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.5);
+     z-index:1000; align-items:center; justify-content:center">
+  <div style="background:var(--surface); border-radius:10px; padding:24px; width:720px; max-width:96vw;
+              border:1px solid var(--border); max-height:90vh; overflow-y:auto">
+    <h3 style="margin:0 0 6px">✂ Subdividir contrapartida</h3>
+    <p style="color:var(--text-dim); font-size:0.84rem; margin:0 0 14px">
+      El movimiento bancario permanece por un solo valor
+      (<strong id="subMontoLabel"></strong>). Reparte la <strong>contrapartida</strong>
+      entre dos o más cuentas — pueden ser cuentas y terceros distintos por
+      importes diferentes. La suma de las partes debe igualar el valor del movimiento.
+    </p>
+
+    <div id="subPartes"></div>
+
+    <button type="button" class="btn btn-secondary btn-sm" id="subAddBtn" style="margin-top:6px">
+      + Agregar cuenta
+    </button>
+
+    <div style="display:flex; justify-content:space-between; align-items:center;
+                margin-top:16px; padding-top:12px; border-top:1px solid var(--border)">
+      <div style="font-size:0.86rem">
+        Suma <strong id="subSuma">$0</strong> de <span id="subTotal">$0</span>
+        <span id="subRestante" style="margin-left:8px; font-weight:600"></span>
+      </div>
+      <div style="display:flex; gap:8px">
+        <button type="button" class="btn btn-secondary btn-sm" id="subQuitar"
+                style="display:none" title="Volver a una sola cuenta contrapartida">↺ Quitar</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="subCancel">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-sm" id="subAplicar" disabled>✓ Aplicar</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 {% endblock %}
 
@@ -509,6 +579,10 @@ function makeAC(acEl, fetchUrl, getKey, getLabel, onPick) {
   });
   document.addEventListener('keydown', ctrl.keydown);
   document.addEventListener('scroll', function (e) { if (!ac.contains(e.target)) ac.style.display = 'none'; }, true);
+
+  // Reutilizable: permite enganchar el autocomplete a inputs creados dinámicamente
+  // (p. ej. las filas del modal de subdivisión).
+  window.bancoAttachCuenta = function (inp) { ctrl.attach(inp); };
 }());
 
 /* ── Autocomplete NIT BANCO (header) ── */
@@ -673,7 +747,7 @@ document.getElementById('btnAplicarBanco').addEventListener('click', function ()
       .catch(hide);
   }
 
-  document.querySelectorAll('.banco-nit-ac').forEach(function (input) {
+  function attach(input) {
     input.addEventListener('input', function () {
       actInput = input;
       clearTimeout(timer);
@@ -681,7 +755,12 @@ document.getElementById('btnAplicarBanco').addEventListener('click', function ()
     });
     input.addEventListener('focusin',  function () { actInput = input; });
     input.addEventListener('focusout', function () { setTimeout(hide, 160); });
-  });
+  }
+
+  document.querySelectorAll('.banco-nit-ac').forEach(attach);
+
+  // Reutilizable para inputs creados dinámicamente (modal de subdivisión).
+  window.bancoAttachTercero = attach;
 
   document.addEventListener('keydown', function (e) {
     if (!actInput || ac.style.display === 'none') return;
@@ -702,6 +781,178 @@ document.getElementById('btnAplicarBanco').addEventListener('click', function ()
 function actualizarPillTipo(select) {
   /* no hace nada visualmente por ahora — reservado */
 }
+
+/* ── Subdividir la contrapartida de un movimiento en varias cuentas ── */
+(function () {
+  var modal     = document.getElementById('modalSubdividir');
+  var partesEl  = document.getElementById('subPartes');
+  var sumaEl    = document.getElementById('subSuma');
+  var totalEl   = document.getElementById('subTotal');
+  var restEl    = document.getElementById('subRestante');
+  var aplicarEl = document.getElementById('subAplicar');
+  var quitarEl  = document.getElementById('subQuitar');
+  var montoLbl  = document.getElementById('subMontoLabel');
+  var total     = 0;
+  var curIdx    = null;
+
+  // Estado de subdivisiones por idx: { idx: [ {cuenta, monto, nit, concepto}, … ] }
+  var estado = {};
+
+  function fmt(n) { return '$' + (Math.round((n || 0) * 100) / 100).toLocaleString('es-CO'); }
+  function escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
+  function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  function addRow(p) {
+    p = p || {};
+    var row = document.createElement('div');
+    row.className = 'sub-parte';
+    row.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:8px';
+    row.innerHTML =
+      '<input type="text" class="sub-cuenta" placeholder="Cuenta (ej. 51050501)" ' +
+      'autocomplete="off" style="flex:0 0 145px; font-family:monospace" value="' + escAttr(p.cuenta) + '">' +
+      '<input type="text" class="sub-nit" placeholder="NIT (opc.)" ' +
+      'autocomplete="off" style="flex:0 0 115px; font-family:monospace" value="' + escAttr(p.nit) + '">' +
+      '<input type="text" class="sub-concepto" placeholder="Concepto (opc.)" ' +
+      'style="flex:1" value="' + escAttr(p.concepto) + '">' +
+      '<input type="number" class="sub-monto" placeholder="Monto" step="0.01" min="0" ' +
+      'style="flex:0 0 120px; font-family:monospace" value="' + escAttr(p.monto) + '">' +
+      '<button type="button" class="btn btn-secondary btn-sm sub-remove" title="Quitar">✕</button>';
+    partesEl.appendChild(row);
+    // Enganchar autocompletes a los inputs recién creados
+    if (window.bancoAttachCuenta) window.bancoAttachCuenta(row.querySelector('.sub-cuenta'));
+    if (window.bancoAttachTercero) window.bancoAttachTercero(row.querySelector('.sub-nit'));
+  }
+
+  function recalc() {
+    var suma = 0, faltanCuentas = false, n = 0;
+    partesEl.querySelectorAll('.sub-parte').forEach(function (row) {
+      var m = parseFloat(row.querySelector('.sub-monto').value) || 0;
+      suma += m;
+      n++;
+      if (m > 0 && !row.querySelector('.sub-cuenta').value.trim()) faltanCuentas = true;
+    });
+    suma = Math.round(suma * 100) / 100;
+    sumaEl.textContent = fmt(suma);
+    var rest = Math.round((total - suma) * 100) / 100;
+    var ok = Math.abs(rest) < 0.01 && !faltanCuentas && n >= 2;
+    if (Math.abs(rest) < 0.01) {
+      restEl.textContent = '✓ cuadra'; restEl.style.color = 'var(--success)';
+    } else if (rest > 0) {
+      restEl.textContent = 'faltan ' + fmt(rest); restEl.style.color = 'var(--warning)';
+    } else {
+      restEl.textContent = 'sobran ' + fmt(-rest); restEl.style.color = 'var(--danger)';
+    }
+    aplicarEl.disabled = !ok;
+  }
+
+  function leerPartes() {
+    var partes = [];
+    partesEl.querySelectorAll('.sub-parte').forEach(function (row) {
+      var cuenta   = row.querySelector('.sub-cuenta').value.trim();
+      var monto    = parseFloat(row.querySelector('.sub-monto').value) || 0;
+      var nit      = row.querySelector('.sub-nit').value.trim();
+      var concepto = row.querySelector('.sub-concepto').value.trim();
+      if (!cuenta && monto <= 0) return;
+      partes.push({ cuenta: cuenta, monto: monto, nit: nit, concepto: concepto });
+    });
+    return partes;
+  }
+
+  window.abrirSubdividir = function (idx) {
+    var wrap = document.getElementById('contra-wrapper-' + idx);
+    if (!wrap) return;
+    curIdx = idx;
+    total = parseFloat(wrap.dataset.valor) || 0;
+    montoLbl.textContent = fmt(total);
+    totalEl.textContent  = fmt(total);
+    partesEl.innerHTML = '';
+
+    var existentes = estado[idx];
+    if (existentes && existentes.length) {
+      existentes.forEach(addRow);
+      quitarEl.style.display = '';
+    } else {
+      // Prefill: cuenta única actual + NIT de la fila, más una segunda fila vacía
+      var single    = document.getElementById('cuenta-' + idx);
+      var nitSingle = document.querySelector('input[name="nit_' + idx + '"]');
+      addRow({ cuenta: single ? single.value.trim() : '',
+               nit:    nitSingle ? nitSingle.value.trim() : '' });
+      addRow({});
+      quitarEl.style.display = 'none';
+    }
+    recalc();
+    modal.style.display = 'flex';
+    var first = partesEl.querySelector('.sub-cuenta');
+    if (first) first.focus();
+  };
+
+  function aplicar() {
+    var idx = curIdx;
+    var partes = leerPartes();
+    estado[idx] = partes;
+
+    // Inputs ocultos dentro del form (arreglos paralelos sub_<idx>_*)
+    var hidden = document.getElementById('contra-hidden-' + idx);
+    var html = '';
+    partes.forEach(function (p) {
+      html +=
+        '<input type="hidden" name="sub_' + idx + '_cuenta"   value="' + escAttr(p.cuenta) + '">' +
+        '<input type="hidden" name="sub_' + idx + '_monto"    value="' + escAttr(p.monto) + '">' +
+        '<input type="hidden" name="sub_' + idx + '_nit"      value="' + escAttr(p.nit) + '">' +
+        '<input type="hidden" name="sub_' + idx + '_concepto" value="' + escAttr(p.concepto) + '">';
+    });
+    hidden.innerHTML = html;
+
+    // El input de cuenta única no debe viajar mientras esté subdividido
+    var single = document.getElementById('cuenta-' + idx);
+    if (single) single.disabled = true;
+    document.getElementById('contra-single-' + idx).style.display = 'none';
+
+    // Resumen visual
+    var detalle = partes.map(function (p) {
+      return '<div style="font-size:0.74rem; font-family:monospace; color:var(--text-dim)">' +
+             '↳ ' + escHtml(p.cuenta || '—') + ' · ' + fmt(p.monto) +
+             (p.nit ? ' · NIT ' + escHtml(p.nit) : '') + '</div>';
+    }).join('');
+    var multi = document.getElementById('contra-multi-' + idx);
+    multi.innerHTML =
+      '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap">' +
+      '<span class="pill" style="background:rgba(155,89,182,.18); color:#9b59b6; font-size:0.72rem">' +
+      '✂ ' + partes.length + ' cuentas</span>' +
+      '<button type="button" class="btn-subdividir" title="Editar subdivisión" ' +
+      'onclick="abrirSubdividir(' + idx + ')">✏️</button>' +
+      '</div>' + detalle;
+    multi.style.display = '';
+
+    modal.style.display = 'none';
+  }
+
+  function quitar() {
+    var idx = curIdx;
+    delete estado[idx];
+    document.getElementById('contra-hidden-' + idx).innerHTML = '';
+    var single = document.getElementById('cuenta-' + idx);
+    if (single) single.disabled = false;
+    document.getElementById('contra-single-' + idx).style.display = 'flex';
+    var multi = document.getElementById('contra-multi-' + idx);
+    multi.style.display = 'none';
+    multi.innerHTML = '';
+    modal.style.display = 'none';
+  }
+
+  document.getElementById('subAddBtn').addEventListener('click', function () { addRow({}); recalc(); });
+  partesEl.addEventListener('input', recalc);
+  partesEl.addEventListener('click', function (e) {
+    if (e.target.classList.contains('sub-remove')) {
+      var rows = partesEl.querySelectorAll('.sub-parte');
+      if (rows.length > 2) { e.target.closest('.sub-parte').remove(); recalc(); }
+    }
+  });
+  aplicarEl.addEventListener('click', aplicar);
+  quitarEl.addEventListener('click', quitar);
+  document.getElementById('subCancel').addEventListener('click', function () { modal.style.display = 'none'; });
+  modal.addEventListener('click', function (e) { if (e.target === modal) modal.style.display = 'none'; });
+}());
 
 /* ── Loading al exportar (se oculta cuando inicia la descarga del archivo) ── */
 document.getElementById('bancoForm').addEventListener('submit', function () {
