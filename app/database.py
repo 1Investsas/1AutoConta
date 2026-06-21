@@ -369,6 +369,11 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
             # incluyen la columna; este ALTER cubre instalaciones previas).
             _asegurar_columna(conn, "importaciones", "preasientos_json",
                               "TEXT", "NVARCHAR(MAX)")
+            # Modelo durable del módulo Bancos: archivo original + snapshot editable.
+            _asegurar_columna(conn, "procesos_banco", "archivo_ref",
+                              "TEXT", "NVARCHAR(500)")
+            _asegurar_columna(conn, "procesos_banco", "snapshot_json",
+                              "TEXT", "NVARCHAR(MAX)")
             # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
             # cada empresa tiene su propio archivo y no hay columna empresa_id.
             if not conn.is_sqlite:
@@ -505,11 +510,13 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha           TEXT    NOT NULL,
             archivo_nombre  TEXT,
+            archivo_ref     TEXT,
             cuenta_banco    TEXT,
             nit_banco       TEXT,
             n_movimientos   INTEGER DEFAULT 0,
             estado          TEXT    NOT NULL DEFAULT 'procesando',
-            error           TEXT
+            error           TEXT,
+            snapshot_json   TEXT
         )
     """)
     conn.execute("""
@@ -604,11 +611,13 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             empresa_id      NVARCHAR(100)  NOT NULL DEFAULT 'principal',
             fecha           NVARCHAR(50)   NOT NULL,
             archivo_nombre  NVARCHAR(300),
+            archivo_ref     NVARCHAR(500),
             cuenta_banco    NVARCHAR(50),
             nit_banco       NVARCHAR(50),
             n_movimientos   INT DEFAULT 0,
             estado          NVARCHAR(30)   NOT NULL DEFAULT 'procesando',
-            error           NVARCHAR(MAX)
+            error           NVARCHAR(MAX),
+            snapshot_json   NVARCHAR(MAX)
         )
     """)
     conn.execute("""
@@ -2150,19 +2159,6 @@ def listar_importaciones(db_path: str = DB_PATH, limite: int = 50) -> list[dict]
         conn.close()
 
 
-def eliminar_importacion(imp_id: int, db_path: str = DB_PATH) -> None:
-    """Elimina definitivamente una importación del histórico (incluido su snapshot)."""
-    conn = get_connection(db_path)
-    try:
-        and_emp, p_emp = _and_empresa(conn, db_path)
-        conn.execute(
-            f"DELETE FROM importaciones WHERE id = ?{and_emp}", (imp_id,) + p_emp
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 # ---------------------------------------------------------------------------
 # Procesos de banco — histórico persistente del módulo Bancos
 # ---------------------------------------------------------------------------
@@ -2173,24 +2169,27 @@ def registrar_proceso_banco(
     cuenta_banco: str = "",
     nit_banco: str = "",
     estado: str = "procesando",
+    archivo_ref: str = "",
     db_path: str = DB_PATH,
 ) -> int:
     """
     Crea el registro de un proceso del módulo Bancos y retorna su id.
 
     Se registra al previsualizar un extracto (estado 'procesando') y se marca
-    'completada' cuando el usuario genera el archivo SIIGO.
+    'completada' cuando el usuario genera el archivo SIIGO. `archivo_ref` guarda
+    el CSV original para poder descargarlo o retomar el proceso más tarde.
     """
     conn = get_connection(db_path)
     try:
-        params = (datetime.now().isoformat(), archivo_nombre, cuenta_banco,
-                  nit_banco, n_movimientos, estado)
+        params = (datetime.now().isoformat(), archivo_nombre, archivo_ref,
+                  cuenta_banco, nit_banco, n_movimientos, estado)
         if conn.is_sqlite:
             cur = conn.execute(
                 """
                 INSERT INTO procesos_banco
-                    (fecha, archivo_nombre, cuenta_banco, nit_banco, n_movimientos, estado)
-                VALUES (?,?,?,?,?,?)
+                    (fecha, archivo_nombre, archivo_ref, cuenta_banco, nit_banco,
+                     n_movimientos, estado)
+                VALUES (?,?,?,?,?,?,?)
                 """,
                 params,
             )
@@ -2200,9 +2199,9 @@ def registrar_proceso_banco(
             conn.execute(
                 """
                 INSERT INTO procesos_banco
-                    (empresa_id, fecha, archivo_nombre, cuenta_banco, nit_banco,
-                     n_movimientos, estado)
-                VALUES (?,?,?,?,?,?,?)
+                    (empresa_id, fecha, archivo_nombre, archivo_ref, cuenta_banco,
+                     nit_banco, n_movimientos, estado)
+                VALUES (?,?,?,?,?,?,?,?)
                 """,
                 (emp_id,) + params,
             )
@@ -2218,35 +2217,95 @@ def actualizar_proceso_banco(
     estado: str,
     n_movimientos: Optional[int] = None,
     error: Optional[str] = None,
+    snapshot_json: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> None:
-    """Actualiza el estado (y opcionalmente el conteo) de un proceso de banco."""
+    """Actualiza el estado (y opcionalmente el conteo/snapshot) de un proceso de banco.
+
+    `snapshot_json` (estado editable durable) solo se sobrescribe cuando se pasa
+    (COALESCE), igual que el modelo de importaciones.
+    """
     conn = get_connection(db_path)
     try:
         and_emp, p_emp = _and_empresa(conn, db_path)
         conn.execute(
             f"""
             UPDATE procesos_banco
-            SET estado = ?, n_movimientos = COALESCE(?, n_movimientos), error = ?
+            SET estado = ?, n_movimientos = COALESCE(?, n_movimientos),
+                snapshot_json = COALESCE(?, snapshot_json), error = ?
             WHERE id = ?{and_emp}
             """,
-            (estado, n_movimientos, error, proceso_id) + p_emp,
+            (estado, n_movimientos, snapshot_json, error, proceso_id) + p_emp,
         )
         conn.commit()
     finally:
         conn.close()
 
 
+# Columnas livianas del proceso de banco para los listados (sin el snapshot JSON,
+# que puede ser grande). `tiene_snapshot` indica si hay estado guardado.
+_PROCESO_BANCO_COLS_LISTA = (
+    "id, fecha, archivo_nombre, archivo_ref, cuenta_banco, nit_banco, "
+    "n_movimientos, estado, error, "
+    "CASE WHEN snapshot_json IS NOT NULL THEN 1 ELSE 0 END AS tiene_snapshot"
+)
+
+
 def listar_procesos_banco(db_path: str = DB_PATH, limite: int = 50) -> list[dict]:
-    """Retorna los procesos de banco más recientes (descendente por fecha)."""
+    """Retorna los procesos de banco más recientes (descendente por fecha).
+
+    No incluye el snapshot JSON (puede ser grande); expone `tiene_snapshot`.
+    """
     conn = get_connection(db_path)
     try:
         where_emp, p_emp = _where_empresa(conn, db_path)
         rows = conn.execute(
-            f"SELECT * FROM procesos_banco{where_emp} ORDER BY id DESC", p_emp
+            f"SELECT {_PROCESO_BANCO_COLS_LISTA} FROM procesos_banco{where_emp} "
+            f"ORDER BY id DESC",
+            p_emp,
         ).fetchall()
         # Límite en Python para evitar diferencias TOP vs LIMIT entre backends
         return [dict(r) for r in rows[:limite]]
+    finally:
+        conn.close()
+
+
+def obtener_proceso_banco(proceso_id: int, db_path: str = DB_PATH) -> Optional[dict]:
+    """Retorna un proceso de banco por id, o None si no existe."""
+    conn = get_connection(db_path)
+    try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
+        row = conn.execute(
+            f"SELECT * FROM procesos_banco WHERE id = ?{and_emp}",
+            (proceso_id,) + p_emp,
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def obtener_snapshot_proceso_banco(
+    proceso_id: int, db_path: str = DB_PATH
+) -> Optional[dict]:
+    """Retorna el snapshot editable durable de un proceso de banco (o None).
+
+    Es el mismo dict que vive en la sesión de trabajo (movimientos, cuenta y NIT
+    del banco, y las asignaciones del usuario). Permite "retomar" o "corregir" un
+    proceso conservando lo trabajado, sin volver a parsear el CSV manualmente.
+    """
+    conn = get_connection(db_path)
+    try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
+        row = conn.execute(
+            f"SELECT snapshot_json FROM procesos_banco WHERE id = ?{and_emp}",
+            (proceso_id,) + p_emp,
+        ).fetchone()
+        if not row or not row["snapshot_json"]:
+            return None
+        try:
+            return json.loads(row["snapshot_json"])
+        except (ValueError, TypeError):
+            return None
     finally:
         conn.close()
 

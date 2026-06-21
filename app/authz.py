@@ -41,7 +41,7 @@ PERMISOS: dict[str, str] = {
     "banco.procesar":         "Cargar y previsualizar extractos bancarios",
     "banco.exportar":         "Generar el archivo SIIGO de Bancos",
     "importaciones.ver":      "Ver el listado de importaciones",
-    "importaciones.gestionar": "Retomar, regenerar, eliminar y descargar importaciones",
+    "importaciones.gestionar": "Retomar, corregir, anular y descargar importaciones",
     "analitica.ver":          "Ver analíticas y reportes",
     "ml.ver":                 "Ver el historial de aprendizaje (machine learning)",
     "empresas.ver":           "Ver y seleccionar empresas",
