@@ -1,110 +1,120 @@
 {% extends "base.html" %}
 
-{% block title %}Importaciones — contable-auto{% endblock %}
-{% block page_title %}Importaciones{% endblock %}
+{% block title %}Historial de Automatizaciones RADIAN — 1CONTIGO{% endblock %}
+{% block page_title %}📄 Historial de Automatizaciones RADIAN{% endblock %}
 
 {% block content %}
 
-<div class="section-header">
-  <h2>Historial de importaciones</h2>
-  <a href="{{ url_for('web.index') }}" class="btn btn-primary">⚡ Nueva importación</a>
-</div>
+<div class="panel">
+  <div class="panel-head">
+    <h2>Actividad del módulo</h2>
+    <a href="{{ url_for('web.radian') }}" class="link-more">← Volver al módulo</a>
+  </div>
 
-<p class="text-dim mb-4" style="font-size:0.85rem">
-  Cada vez que procesas un archivo RADIAN queda registrado aquí junto con su
-  estado de trabajo. Usa <strong>Abrir</strong> para retomar una importación
-  <em>conservando las correcciones</em> que ya hiciste (terceros, divisiones,
-  cuentas) y exportarla. <strong>Regenerar</strong> reprocesa el archivo original
-  desde cero (sin las correcciones manuales); útil sobre todo si falló.
-</p>
+  <p class="text-dim mb-4" style="font-size:0.85rem">
+    Cada vez que procesas un archivo RADIAN queda registrado aquí junto con su
+    estado de trabajo. Usa el menú <strong>⋮</strong> de cada registro para
+    <strong>Retomar</strong> una automatización <em>conservando las correcciones</em>
+    que ya hiciste (terceros, divisiones, cuentas), <strong>Regenerar</strong>la
+    desde cero a partir del archivo original, descargar los archivos o eliminarla.
+  </p>
 
-{% if importaciones %}
-<div class="table-wrapper">
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Fecha</th>
-        <th>Archivo</th>
-        <th>Estado</th>
-        <th class="text-right">Docs</th>
-        <th class="text-right">Excepciones</th>
-        <th>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for imp in importaciones %}
-      <tr{% if imp.anulada %} style="opacity:0.55"{% endif %}>
-        <td><strong>{{ imp.id }}</strong></td>
-        <td class="text-dim">{{ imp.fecha_fmt }}</td>
-        <td><code style="font-size:0.78rem">{{ imp.archivo_nombre or '—' }}</code></td>
-        <td>
-          <span class="{{ imp.estado_clase }}"
-                {% if imp.estado == 'error' %}title="{{ imp.error or '' }}"{% endif %}>
-            {{ imp.estado_label }}
-          </span>
-        </td>
-        <td class="text-right">{{ imp.n_docs }}</td>
-        <td class="text-right">{{ imp.n_excepciones }}</td>
-        <td>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-            {% if not imp.anulada %}
-              {% if imp.tiene_snapshot %}
-              <form method="POST"
-                    action="{{ url_for('web.importacion_abrir', imp_id=imp.id) }}"
-                    style="display:inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-sm btn-primary">📂 Abrir</button>
-              </form>
-              {% endif %}
-              {% if imp.archivo_disponible %}
-              <form method="POST"
-                    action="{{ url_for('web.importacion_reprocesar', imp_id=imp.id) }}"
-                    data-loading="true" style="display:inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit"
-                        class="btn btn-sm{% if not imp.tiene_snapshot %} btn-primary{% endif %}"
-                        title="Reprocesa el archivo original desde cero (sin las correcciones manuales)">
-                  {% if imp.estado == 'error' %}🔄 Retomar{% else %}🔄 Regenerar{% endif %}
-                </button>
-              </form>
-              {% elif not imp.tiene_snapshot %}
-              <span class="text-dim" style="font-size:0.75rem">Archivo no disponible</span>
-              {% endif %}
-              {% if imp.excel_disponible %}
-              <a href="{{ url_for('web.importacion_descargar', imp_id=imp.id) }}"
-                 class="btn btn-sm">⬇️ Excel</a>
-              {% endif %}
-              <form method="POST"
-                    action="{{ url_for('web.importacion_anular', imp_id=imp.id) }}"
-                    style="display:inline"
-                    onsubmit="return confirm('¿Anular la importación #{{ imp.id }}? Quedará marcada como descartada.');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-sm" style="color:var(--danger)">✕ Anular</button>
-              </form>
-            {% else %}
-              <span class="text-dim" style="font-size:0.75rem">Descartada</span>
+  {% if importaciones %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Fecha</th>
+          <th>Archivo</th>
+          <th>Estado</th>
+          <th class="text-right">Docs</th>
+          <th class="text-right">Excepciones</th>
+          <th class="text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for imp in importaciones %}
+        <tr{% if imp.anulada %} style="opacity:0.55"{% endif %}>
+          <td><strong>{{ imp.id }}</strong></td>
+          <td class="text-dim">{{ imp.fecha_fmt }}</td>
+          <td><code style="font-size:0.78rem">{{ imp.archivo_nombre or '—' }}</code></td>
+          <td>
+            <span class="{{ imp.estado_clase }}"
+                  {% if imp.estado == 'error' %}title="{{ imp.error or '' }}"{% endif %}>
+              {{ imp.estado_label }}
+            </span>
+          </td>
+          <td class="text-right">{{ imp.n_docs }}</td>
+          <td class="text-right">{{ imp.n_excepciones }}</td>
+          <td class="text-right">
+            <div class="row-actions">
+              <button type="button" class="row-menu" aria-label="Acciones" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+              </button>
+              <div class="row-menu-list" role="menu" hidden>
+                {% if imp.tiene_snapshot and not imp.anulada %}
+                <form method="POST" action="{{ url_for('web.importacion_abrir', imp_id=imp.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M10 18v-4l3 2-3 2Z"/></svg>
+                    Retomar
+                  </button>
+                </form>
+                {% endif %}
+                {% if imp.archivo_disponible and not imp.anulada %}
+                <form method="POST" action="{{ url_for('web.importacion_reprocesar', imp_id=imp.id) }}" data-loading="true">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" role="menuitem"
+                          title="Reprocesa el archivo original desde cero (sin las correcciones manuales)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                    Regenerar
+                  </button>
+                </form>
+                {% endif %}
+                {% if imp.archivo_disponible %}
+                <a href="{{ url_for('web.importacion_descargar_original', imp_id=imp.id) }}" role="menuitem">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Descargar archivo importado
+                </a>
+                {% endif %}
+                {% if imp.tiene_snapshot %}
+                <a href="{{ url_for('web.importacion_descargar_siigo', imp_id=imp.id) }}" role="menuitem">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M12 11v5"/><path d="m9.5 13.5 2.5 2.5 2.5-2.5"/></svg>
+                  Descargar archivo exportado a SIIGO
+                </a>
+                {% endif %}
+                <hr>
+                <form method="POST" action="{{ url_for('web.importacion_eliminar', imp_id=imp.id) }}"
+                      onsubmit="return confirm('¿Eliminar la automatización #{{ imp.id }}? Esta acción no se puede deshacer.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="menu-danger" role="menuitem">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                    Eliminar
+                  </button>
+                </form>
+              </div>
+            </div>
+            {% if imp.estado == 'error' and imp.error %}
+            <div class="text-dim" style="font-size:0.72rem; margin-top:4px; color:var(--danger)">
+              {{ imp.error }}
+            </div>
             {% endif %}
-          </div>
-          {% if imp.estado == 'error' and imp.error %}
-          <div class="text-dim" style="font-size:0.72rem; margin-top:4px; color:var(--danger)">
-            {{ imp.error }}
-          </div>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center; padding:60px; color:var(--text-dim)">
+    <div style="font-size:3rem; margin-bottom:12px">📥</div>
+    <p>Aún no hay automatizaciones registradas.</p>
+    <a href="{{ url_for('web.radian') }}" class="btn btn-primary" style="margin-top:20px">
+      ⚡ Procesar RADIAN
+    </a>
+  </div>
+  {% endif %}
 </div>
-{% else %}
-<div style="text-align:center; padding:60px; color:var(--text-dim)">
-  <div style="font-size:3rem; margin-bottom:12px">📥</div>
-  <p>Aún no hay importaciones registradas.</p>
-  <a href="{{ url_for('web.index') }}" class="btn btn-primary" style="margin-top:20px">
-    ⚡ Procesar RADIAN
-  </a>
-</div>
-{% endif %}
 
 {% endblock %}

@@ -2150,6 +2150,19 @@ def listar_importaciones(db_path: str = DB_PATH, limite: int = 50) -> list[dict]
         conn.close()
 
 
+def eliminar_importacion(imp_id: int, db_path: str = DB_PATH) -> None:
+    """Elimina definitivamente una importación del histórico (incluido su snapshot)."""
+    conn = get_connection(db_path)
+    try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
+        conn.execute(
+            f"DELETE FROM importaciones WHERE id = ?{and_emp}", (imp_id,) + p_emp
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Procesos de banco — histórico persistente del módulo Bancos
 # ---------------------------------------------------------------------------

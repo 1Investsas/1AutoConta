@@ -236,7 +236,7 @@ def test_anular_marca_estado(client, tmp_path):
     assert row["n_docs"] == 3
 
 
-def test_importaciones_render_muestra_abrir_y_estado(client, tmp_path):
+def test_importaciones_render_muestra_retomar_y_estado(client, tmp_path):
     p = _dbp(tmp_path)
     db.inicializar_db(p)
     imp_id = db.registrar_importacion("RAD.xlsx", "uploads/RAD", db_path=p)
@@ -249,5 +249,19 @@ def test_importaciones_render_muestra_abrir_y_estado(client, tmp_path):
     resp = client.get("/importaciones")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "Abrir" in body
+    # La acción «Abrir» se renombró a «Retomar» en el menú de 3 puntos.
+    assert "Retomar" in body
     assert "Corregida" in body
+
+
+def test_eliminar_importacion_borra_registro(client, tmp_path):
+    p = _dbp(tmp_path)
+    db.inicializar_db(p)
+    imp_id = db.registrar_importacion("RAD.xlsx", "uploads/RAD", db_path=p)
+    db.actualizar_importacion(imp_id, estado="procesada", n_docs=3, db_path=p)
+
+    resp = client.post(f"/importaciones/{imp_id}/eliminar")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/importaciones")
+    # El registro desaparece del histórico (eliminación definitiva).
+    assert db.listar_importaciones(p) == []
