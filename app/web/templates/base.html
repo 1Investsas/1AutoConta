@@ -343,6 +343,58 @@ document.getElementById('closeAutomatizar')?.addEventListener('click', closeModa
 document.getElementById('cancelAutomatizar')?.addEventListener('click', closeModal);
 modal?.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// --- Menús contextuales de fila (botón de 3 puntos) ---
+// Funciona para cualquier `.row-menu` que tenga una `.row-menu-list` asociada
+// dentro del mismo contenedor `.row-actions`. El desplegable usa
+// `position: fixed` para no quedar recortado por contenedores con overflow.
+function cerrarMenusFila(excepto) {
+  document.querySelectorAll('.row-menu-list:not([hidden])').forEach(list => {
+    if (list === excepto) return;
+    list.hidden = true;
+    const trigger = list.closest('.row-actions')?.querySelector('.row-menu');
+    trigger?.setAttribute('aria-expanded', 'false');
+  });
+}
+function posicionarMenuFila(boton, lista) {
+  const r = boton.getBoundingClientRect();
+  const ancho = lista.offsetWidth;
+  const alto = lista.offsetHeight;
+  const margen = 8;
+  let left = r.right - ancho;                       // alinea el borde derecho con el botón
+  left = Math.max(margen, Math.min(left, window.innerWidth - ancho - margen));
+  let top = r.bottom + 4;                           // por defecto, hacia abajo
+  if (top + alto > window.innerHeight - margen && r.top - alto - 4 > margen) {
+    top = r.top - alto - 4;                         // si no cabe abajo, hacia arriba
+  }
+  lista.style.left = Math.round(left) + 'px';
+  lista.style.top = Math.round(top) + 'px';
+}
+document.addEventListener('click', e => {
+  const boton = e.target.closest('.row-menu');
+  if (boton) {
+    const lista = boton.closest('.row-actions')?.querySelector('.row-menu-list');
+    if (!lista) return;                 // sin menú asociado: no hace nada
+    e.preventDefault();
+    e.stopPropagation();
+    const abrir = lista.hidden;
+    cerrarMenusFila(abrir ? lista : null);
+    if (abrir) {
+      lista.hidden = false;             // mostrar antes de medir para posicionar
+      posicionarMenuFila(boton, lista);
+    } else {
+      lista.hidden = true;
+    }
+    boton.setAttribute('aria-expanded', String(abrir));
+    return;
+  }
+  // Clic fuera de un menú abierto -> cerrar todos
+  if (!e.target.closest('.row-menu-list')) cerrarMenusFila(null);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarMenusFila(null); });
+// Al hacer scroll o redimensionar, el menú fijo quedaría desalineado: lo cerramos.
+window.addEventListener('scroll', () => cerrarMenusFila(null), true);
+window.addEventListener('resize', () => cerrarMenusFila(null));
 </script>
 
 {% block extra_scripts %}{% endblock %}
