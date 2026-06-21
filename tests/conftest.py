@@ -11,6 +11,20 @@ import pytest
 from app.config import NIT_EMPRESA
 
 
+@pytest.fixture(autouse=True)
+def _reset_cache_esquema():
+    """Limpia el caché de esquemas inicializados entre tests.
+
+    `inicializar_db` memoiza por ruta de BD para no reejecutar el DDL en cada
+    request en producción. Los tests recrean BDs (a veces en la misma ruta), así
+    que se limpia el caché antes de cada uno para que el esquema/migración corran.
+    """
+    from app import database as _db
+    _db.reset_inicializacion_db()
+    yield
+    _db.reset_inicializacion_db()
+
+
 # ---------------------------------------------------------------------------
 # NIT del emisor empresa y de un tercero genérico
 # ---------------------------------------------------------------------------
