@@ -333,13 +333,14 @@
 
           <!-- Cuenta contrapartida con autocomplete (subdividible) -->
           <td>
+            {% set subdividido = m.contrapartidas_guardadas %}
             <div class="contra-wrapper" id="contra-wrapper-{{ m.idx }}"
                  data-idx="{{ m.idx }}"
                  data-valor="{{ (m.valor | float) | abs }}"
                  data-desc="{{ m.descripcion }}"
                  data-nit="{{ m.nit_auto }}">
               <div class="contra-single" id="contra-single-{{ m.idx }}"
-                   style="display:flex; gap:6px; align-items:center">
+                   style="display:{% if subdividido %}none{% else %}flex{% endif %}; gap:6px; align-items:center">
                 <input type="text"
                        name="cuenta_{{ m.idx }}"
                        id="cuenta-{{ m.idx }}"
@@ -347,6 +348,7 @@
                        value="{{ m.cuenta_auto }}"
                        placeholder="ej. 51050501"
                        autocomplete="off"
+                       {% if subdividido %}disabled{% endif %}
                        {% if m.es_4x1000 and m.idx_padre is none %}
                          title="4x1000 huérfano — cuenta sugerida: {{ cuenta_4x1000 }}"
                        {% endif %}>
@@ -354,10 +356,30 @@
                         title="Subdividir la contrapartida en varias cuentas"
                         onclick="abrirSubdividir({{ m.idx }})">✂</button>
               </div>
-              <!-- Resumen cuando la contrapartida está subdividida (lo llena el JS) -->
-              <div class="contra-multi" id="contra-multi-{{ m.idx }}" style="display:none"></div>
-              <!-- Inputs ocultos de las partes (los llena el JS, viajan en el form) -->
-              <div class="contra-hidden" id="contra-hidden-{{ m.idx }}"></div>
+              <!-- Resumen de la contrapartida subdividida (servidor al retomar; JS al editar) -->
+              <div class="contra-multi" id="contra-multi-{{ m.idx }}"
+                   style="display:{% if subdividido %}block{% else %}none{% endif %}">
+                {% if subdividido %}
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap">
+                  <span class="pill" style="background:rgba(155,89,182,.18); color:#9b59b6; font-size:0.72rem">✂ {{ m.contrapartidas_guardadas | length }} cuentas</span>
+                  <button type="button" class="btn-subdividir" title="Editar subdivisión" onclick="abrirSubdividir({{ m.idx }})">✏️</button>
+                </div>
+                {% for parte in m.contrapartidas_guardadas %}
+                <div style="font-size:0.74rem; font-family:monospace; color:var(--text-dim)">↳ {{ parte.cuenta or '—' }} · ${{ "{:,.0f}".format(parte.monto | float) }}{% if parte.nit_tercero %} · NIT {{ parte.nit_tercero }}{% endif %}</div>
+                {% endfor %}
+                {% endif %}
+              </div>
+              <!-- Inputs ocultos de las partes (servidor al retomar; JS al editar) -->
+              <div class="contra-hidden" id="contra-hidden-{{ m.idx }}">
+                {% if subdividido %}
+                {% for parte in m.contrapartidas_guardadas %}
+                <input type="hidden" name="sub_{{ m.idx }}_cuenta"   value="{{ parte.cuenta }}">
+                <input type="hidden" name="sub_{{ m.idx }}_monto"    value="{{ parte.monto }}">
+                <input type="hidden" name="sub_{{ m.idx }}_nit"      value="{{ parte.nit_tercero }}">
+                <input type="hidden" name="sub_{{ m.idx }}_concepto" value="{{ parte.concepto }}">
+                {% endfor %}
+                {% endif %}
+              </div>
             </div>
           </td>
 
@@ -444,6 +466,9 @@
 </div>
 
 </form>
+
+<!-- Semilla de subdivisiones guardadas (al Retomar/Corregir un proceso) -->
+<script type="application/json" id="bancoSubdivSeed">{{ (subdivisiones_guardadas or {}) | tojson }}</script>
 
 <!-- Autocomplete dropdowns -->
 <ul id="banco-ac"></ul>
@@ -797,6 +822,16 @@ function actualizarPillTipo(select) {
 
   // Estado de subdivisiones por idx: { idx: [ {cuenta, monto, nit, concepto}, … ] }
   var estado = {};
+
+  // Semilla al Retomar/Corregir: el servidor ya pintó los inputs ocultos y el
+  // resumen; aquí poblamos `estado` para que la edición desde el modal funcione.
+  try {
+    var seedEl = document.getElementById('bancoSubdivSeed');
+    if (seedEl) {
+      var seed = JSON.parse(seedEl.textContent || '{}');
+      Object.keys(seed).forEach(function (idx) { estado[idx] = seed[idx]; });
+    }
+  } catch (e) { /* sin semilla */ }
 
   function fmt(n) { return '$' + (Math.round((n || 0) * 100) / 100).toLocaleString('es-CO'); }
   function escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
