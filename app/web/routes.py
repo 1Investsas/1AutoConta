@@ -23,6 +23,8 @@ from app.empresas import (
     listar_empresas, obtener_empresa, crear_empresa, actualizar_empresa,
     eliminar_empresa, FORMATO_BANCO_DEFAULT,
 )
+from app import authn, audit, tenancy
+from app.authz import require_permission
 from app.web import session_store
 
 logger = logging.getLogger(__name__)
@@ -35,24 +37,31 @@ ALLOWED_EXT_CSV = {"csv", "txt"}
 # viven server-side (ver app/web/session_store.py).
 KEY_RESULTADO = "resultado_ref"
 KEY_BANCO     = "banco_ref"
-KEY_EMPRESA   = "empresa_id"
+KEY_EMPRESA   = tenancy.KEY_EMPRESA
 
 
 def _empresa_actual():
-    """Retorna la Empresa seleccionada en la sesión (o la principal)."""
-    return obtener_empresa(session.get(KEY_EMPRESA))
+    """Retorna la Empresa activa, validada contra el acceso del usuario.
+
+    Delega en `tenancy.empresa_actual`, que comprueba que el usuario pueda
+    operar la empresa seleccionada (arreglo del bloqueante #1) y corrige la
+    sesión si la selección no es accesible.
+    """
+    return tenancy.empresa_actual()
 
 
 @bp.app_context_processor
 def _inyectar_empresas():
-    """Hace disponibles la empresa actual y la lista en todos los templates."""
+    """Hace disponibles la empresa actual, las accesibles y el usuario en los templates."""
+    usuario = authn.usuario_actual()
     emp = _empresa_actual()
     return {
         "empresa_actual": emp,
-        "empresas_disponibles": listar_empresas(),
-        "empresa": emp.nombre,
-        "empresa_sigla": emp.sigla_efectiva,
-        "nit": emp.nit,
+        "empresas_disponibles": tenancy.empresas_accesibles(usuario),
+        "empresa": emp.nombre if emp else "",
+        "empresa_sigla": emp.sigla_efectiva if emp else "",
+        "nit": emp.nit if emp else "",
+        "usuario_actual": usuario,
     }
 
 
@@ -72,15 +81,17 @@ def _project_root() -> str:
     )
 
 
-def _save_upload(file_bytes: bytes, filename: str) -> str:
+def _save_upload(file_bytes: bytes, filename: str, emp=None) -> str:
     """Guarda los bytes de un archivo subido y retorna la referencia.
 
     En modo cloud sube a Azure Blob Storage; en modo local guarda en disco.
     El nombre lleva un prefijo único para que dos usuarios concurrentes
-    no se sobreescriban los archivos entre sí.
+    no se sobreescriban los archivos entre sí. Si se pasa la empresa, el archivo
+    queda aislado por empresa (`empresas/<id>/uploads`).
     """
     fname = secure_filename(filename)
-    return store.save_file(file_bytes, "uploads", f"{uuid.uuid4().hex[:8]}_{fname}")
+    categoria = emp.upload_category if emp is not None else "uploads"
+    return store.save_file(file_bytes, categoria, f"{uuid.uuid4().hex[:8]}_{fname}")
 
 
 def _rutas_maestros_default(emp) -> tuple:
@@ -116,10 +127,75 @@ def _cargar_maestro_cacheado(loader, path: str):
 
 
 # ---------------------------------------------------------------------------
+# Autenticación — login / logout / health
+# ---------------------------------------------------------------------------
+
+@bp.route("/health")
+def health():
+    """Endpoint de salud (sin autenticación) para sondas/monitoreo."""
+    return {"status": "ok"}, 200
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    """Inicio de sesión.
+
+    En modo Entra (Fase 4) la identidad la provee App Service Authentication y
+    esta página solo redirige. En modo dev es un stub: permite elegir el usuario
+    para probar roles.
+    """
+    from app.config import AUTH_MODE
+    # Sanea `next` para evitar open-redirect: solo rutas internas (una sola '/').
+    raw_next = request.values.get("next") or ""
+    destino = raw_next if raw_next.startswith("/") and not raw_next.startswith("//") \
+        else url_for("web.index")
+
+    # Si ya hay sesión válida, no mostrar el login.
+    if authn.usuario_actual() is not None and request.method == "GET":
+        return redirect(destino)
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        usuario = authn.iniciar_sesion(email)
+        if usuario is None:
+            audit.registrar("login", detalle=f"email={email}", resultado="denegado")
+            flash("Usuario no encontrado o inactivo.", "error")
+            return redirect(url_for("web.login", next=destino))
+        audit.registrar("login", detalle=usuario["email"])
+        flash(f"Bienvenido, {usuario['nombre'] or usuario['email']}.", "success")
+        return redirect(destino)
+
+    usuarios = []
+    if AUTH_MODE != "entra":
+        from app.database import listar_usuarios
+        from app.config import SYSTEM_DB_PATH
+        # Asegura que el esquema/seed existan antes de listar.
+        authn._asegurar_auth()
+        usuarios = listar_usuarios(SYSTEM_DB_PATH)
+    return render_template(
+        "login.html", usuarios=usuarios, modo=AUTH_MODE, next=destino,
+    )
+
+
+@bp.route("/logout", methods=["GET", "POST"])
+def logout():
+    """Cierra la sesión del usuario."""
+    audit.registrar("logout")
+    authn.cerrar_sesion()
+    # Limpiar el contexto de trabajo de la sesión.
+    session.pop(KEY_EMPRESA, None)
+    session_store.eliminar(KEY_RESULTADO)
+    session_store.eliminar(KEY_BANCO)
+    flash("Sesión cerrada.", "success")
+    return redirect(url_for("web.login"))
+
+
+# ---------------------------------------------------------------------------
 # GET /  — Dashboard
 # ---------------------------------------------------------------------------
 
 @bp.route("/")
+@require_permission("dashboard.ver")
 def index():
     """Dashboard principal: estadísticas de la BD + formulario de upload."""
     from app.database import inicializar_db, obtener_resumen_dashboard
@@ -143,6 +219,7 @@ def index():
 # ---------------------------------------------------------------------------
 
 @bp.route("/radian")
+@require_permission("radian.ver")
 def radian():
     """Página inicial del módulo RADIAN (misma estructura visual que Bancos).
 
@@ -158,6 +235,7 @@ def radian():
 # ---------------------------------------------------------------------------
 
 @bp.route("/procesar", methods=["POST"])
+@require_permission("radian.procesar")
 def procesar():
     """Recibe archivos, corre el pipeline y guarda el resultado server-side."""
     # Validar archivo RADIAN obligatorio
@@ -170,13 +248,15 @@ def procesar():
         flash("El archivo RADIAN debe ser .xlsx o .xls", "error")
         return redirect(url_for("web.index"))
 
+    # Empresa activa (validada): aísla uploads, maestros y BD por empresa.
+    emp = _empresa_actual()
+
     # Leer bytes en memoria para evitar problemas de ruta en Windows
     radian_bytes = radian_file.read()
-    radian_ref = _save_upload(radian_bytes, radian_file.filename)
+    radian_ref = _save_upload(radian_bytes, radian_file.filename, emp)
     radian_path = store.load_file(radian_ref)  # ruta local para el pipeline
 
     # Archivos maestros opcionales (propios de la empresa seleccionada)
-    emp = _empresa_actual()
     terceros_path = cuentas_path = comprobantes_path = None
     for key, default_name in [
         ("terceros",     "Listado_de_Terceros.xlsx"),
@@ -223,6 +303,11 @@ def procesar():
         # Persistir el snapshot durable (estado 'procesada'): permite retomar la
         # importación más tarde conservando lo trabajado, sin reprocesar.
         _persistir_importacion(emp, resultado, "procesada")
+        audit.registrar(
+            "radian.procesar", empresa_id=emp.id,
+            detalle=f"importacion={imp_id} docs={resultado['n_docs']} "
+                    f"excepciones={resultado['n_excepciones']}",
+        )
         flash(f"✓ Procesados {resultado['n_docs']} documentos. "
               f"{resultado['n_excepciones']} con excepciones.", "success")
         return redirect(url_for("web.resultado"))
@@ -398,6 +483,7 @@ def _ejecutar_pipeline(
 # ---------------------------------------------------------------------------
 
 @bp.route("/resultado")
+@require_permission("radian.ver")
 def resultado():
     """Muestra los preasientos y excepciones del último proceso."""
     datos = session_store.cargar(KEY_RESULTADO)
@@ -413,6 +499,7 @@ def resultado():
 # ---------------------------------------------------------------------------
 
 @bp.route("/confirmar", methods=["POST"])
+@require_permission("radian.editar")
 def confirmar():
     """Registra una cuenta en el historial del motor de sugerencias."""
     from app.sugerencias import registrar_confirmacion
@@ -481,6 +568,7 @@ def _resolver_tercero(emp, nit: str, nombre_form: str) -> tuple[str, bool]:
 
 
 @bp.route("/corregir-tercero", methods=["POST"])
+@require_permission("radian.editar")
 def corregir_tercero():
     """Corrige el tercero de un preasiento y aprende la corrección.
 
@@ -540,6 +628,10 @@ def corregir_tercero():
             db_path=emp.db_path,
         )
 
+    audit.registrar(
+        "radian.corregir_tercero", empresa_id=emp.id,
+        detalle=f"cufe={cufe_full} {nit_original or '?'}→{nit_nuevo}",
+    )
     flash(f"✓ Tercero actualizado a {nombre_nuevo or nit_nuevo} (NIT {nit_nuevo}).", "success")
     return redirect(url_for("web.resultado"))
 
@@ -571,6 +663,7 @@ def _recalcular_preasiento(p: dict) -> None:
 
 
 @bp.route("/dividir-linea", methods=["POST"])
+@require_permission("radian.editar")
 def dividir_linea():
     """Divide una línea de un preasiento en varias partes (cuentas distintas).
 
@@ -678,8 +771,13 @@ def dividir_linea():
 
     _recalcular_preasiento(preasiento)
     session_store.guardar(KEY_RESULTADO, datos)
-    _persistir_importacion(_empresa_actual(), datos, "corregida")
+    emp = _empresa_actual()
+    _persistir_importacion(emp, datos, "corregida")
 
+    audit.registrar(
+        "radian.dividir_linea", empresa_id=emp.id if emp else None,
+        detalle=f"cufe={cufe_full} linea={num} partes={len(partes)}",
+    )
     flash(f"✓ Línea dividida en {len(partes)} cuentas.", "success")
     return redirect(url_for("web.resultado"))
 
@@ -689,6 +787,7 @@ def dividir_linea():
 # ---------------------------------------------------------------------------
 
 @bp.route("/historial")
+@require_permission("ml.ver")
 def historial():
     """Muestra las cuentas aprendidas por el motor de sugerencias."""
     from app.database import inicializar_db, listar_historial_cuentas
@@ -705,6 +804,7 @@ def historial():
 # ---------------------------------------------------------------------------
 
 @bp.route("/descargar")
+@require_permission("radian.exportar")
 def descargar():
     """Envía el archivo Excel generado como descarga."""
     datos = session_store.cargar(KEY_RESULTADO)
@@ -770,6 +870,7 @@ _ESTADOS_IMPORTACION = {
 
 
 @bp.route("/importaciones")
+@require_permission("importaciones.ver")
 def importaciones():
     """Lista las importaciones realizadas con su estado y acciones disponibles."""
     from app.database import inicializar_db, listar_importaciones
@@ -798,6 +899,7 @@ def importaciones():
 
 
 @bp.route("/importaciones/<int:imp_id>/abrir", methods=["POST"])
+@require_permission("importaciones.gestionar")
 def importacion_abrir(imp_id):
     """Abre una importación cargando su snapshot durable en la sesión de trabajo.
 
@@ -819,12 +921,14 @@ def importacion_abrir(imp_id):
 
     snap["importacion_id"] = imp_id
     session_store.guardar(KEY_RESULTADO, snap)
+    audit.registrar("importacion.abrir", empresa_id=emp.id, detalle=f"importacion={imp_id}")
     flash(f"✓ Importación #{imp_id} abierta. Puedes seguir editándola y exportar.",
           "success")
     return redirect(url_for("web.resultado"))
 
 
 @bp.route("/importaciones/<int:imp_id>/anular", methods=["POST"])
+@require_permission("importaciones.gestionar")
 def importacion_anular(imp_id):
     """Marca una importación como anulada (descartada). No borra el histórico."""
     from app.database import (
@@ -846,11 +950,13 @@ def importacion_anular(imp_id):
         n_excepciones=int(imp.get("n_excepciones", 0) or 0),
         db_path=db,
     )
+    audit.registrar("importacion.anular", empresa_id=emp.id, detalle=f"importacion={imp_id}")
     flash(f"Importación #{imp_id} anulada.", "info")
     return redirect(url_for("web.importaciones"))
 
 
 @bp.route("/importaciones/<int:imp_id>/reprocesar", methods=["POST"])
+@require_permission("importaciones.gestionar")
 def importacion_reprocesar(imp_id):
     """Retoma una importación: re-ejecuta el pipeline con el RADIAN original.
 
@@ -889,6 +995,8 @@ def importacion_reprocesar(imp_id):
         resultado["importacion_id"] = imp_id
         session_store.guardar(KEY_RESULTADO, resultado)
         _persistir_importacion(emp, resultado, "procesada")
+        audit.registrar("importacion.reprocesar", empresa_id=emp.id,
+                        detalle=f"importacion={imp_id} docs={resultado['n_docs']}")
         flash(f"✓ Importación #{imp_id} retomada: {resultado['n_docs']} documentos, "
               f"{resultado['n_excepciones']} con excepciones. Archivo regenerado.",
               "success")
@@ -902,6 +1010,7 @@ def importacion_reprocesar(imp_id):
 
 
 @bp.route("/importaciones/<int:imp_id>/descargar")
+@require_permission("importaciones.ver")
 def importacion_descargar(imp_id):
     """Descarga el Excel generado de una importación previa."""
     from app.database import inicializar_db, obtener_importacion
@@ -949,6 +1058,7 @@ def _responder_descarga(resp):
 
 
 @bp.route("/exportar-siigo", methods=["POST"])
+@require_permission("radian.exportar")
 def exportar_siigo():
     """Genera el Excel en formato SIIGO y lo envía como descarga (o ZIP si hay varios)."""
     import zipfile
@@ -985,7 +1095,12 @@ def exportar_siigo():
         return redirect(url_for("web.resultado"))
 
     # Marcar la importación como exportada (trazabilidad del ciclo de vida).
-    _persistir_importacion(_empresa_actual(), datos, "exportada")
+    emp_exp = _empresa_actual()
+    _persistir_importacion(emp_exp, datos, "exportada")
+    audit.registrar(
+        "radian.exportar_siigo", empresa_id=emp_exp.id if emp_exp else None,
+        detalle=f"archivos={len(rutas)} pendientes={'si' if incluir_pendientes else 'no'}",
+    )
 
     if len(rutas) == 1:
         return _responder_descarga(send_file(
@@ -1014,6 +1129,7 @@ def exportar_siigo():
 # ---------------------------------------------------------------------------
 
 @bp.route("/analytics")
+@require_permission("analitica.ver")
 def analytics():
     """Dashboard de reportería y analytics contable."""
     from app.database import (
@@ -1073,6 +1189,7 @@ def analytics():
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/cuentas")
+@require_permission("radian.ver")
 def api_cuentas():
     """Retorna cuentas que coincidan con el query por código o nombre. Máx 15."""
     from flask import jsonify
@@ -1121,6 +1238,7 @@ def api_cuentas():
 
 
 @bp.route("/api/terceros")
+@require_permission("radian.ver")
 def api_terceros():
     """Retorna terceros que coincidan con el query por NIT o nombre. Máx 15."""
     from flask import jsonify
@@ -1167,6 +1285,7 @@ def api_terceros():
 # ---------------------------------------------------------------------------
 
 @bp.route("/test-procesar")
+@require_permission("radian.procesar")
 def test_procesar():
     """Procesa el archivo RADIAN de input/ sin necesidad de subida. Solo para pruebas."""
     import flask
@@ -1284,6 +1403,7 @@ def _deserializar_preasientos(preasientos_data: list[dict]):
 # ---------------------------------------------------------------------------
 
 @bp.route("/banco")
+@require_permission("banco.ver")
 def banco():
     """Formulario para subir el CSV del banco."""
     from app.config import SIIGO_COMP_BANCO_INGRESO, SIIGO_COMP_BANCO_EGRESO, SIIGO_COMP_BANCO_TRASLADO
@@ -1390,6 +1510,7 @@ def _estado_actividad(estado: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 @bp.route("/banco/previsualizar", methods=["POST"])
+@require_permission("banco.procesar")
 def banco_previsualizar():
     """Recibe el CSV, lo parsea, agrupa 4x1000 y guarda en sesión."""
     from app.banco.importador_banco import leer_csv_banco, a_dict
@@ -1410,7 +1531,7 @@ def banco_previsualizar():
 
     nit_banco = request.form.get("nit_banco", "").strip() or emp.nit_banco
 
-    csv_path = _save_upload(csv_file.read(), csv_file.filename)
+    csv_path = _save_upload(csv_file.read(), csv_file.filename, emp)
     csv_local_path = store.load_file(csv_path)
 
     try:
@@ -1495,6 +1616,7 @@ def banco_previsualizar():
 # ---------------------------------------------------------------------------
 
 @bp.route("/banco/exportar", methods=["POST"])
+@require_permission("banco.exportar")
 def banco_exportar():
     """Recibe las asignaciones, genera el Excel SIIGO y lo envía como descarga."""
     import zipfile
@@ -1552,6 +1674,9 @@ def banco_exportar():
         actualizar_proceso_banco(proceso_id, estado="completada",
                                  n_movimientos=len(movimientos), db_path=emp.db_path)
 
+    audit.registrar("banco.exportar_siigo", empresa_id=emp.id,
+                    detalle=f"proceso={proceso_id} archivos={len(rutas)}")
+
     if len(rutas) == 1:
         return _responder_descarga(send_file(
             rutas[0],
@@ -1574,6 +1699,7 @@ def banco_exportar():
 # ---------------------------------------------------------------------------
 
 @bp.route("/banco/historial")
+@require_permission("banco.ver")
 def banco_historial():
     """Lista todos los procesos del módulo Bancos de la empresa actual."""
     emp = _empresa_actual()
@@ -1586,6 +1712,7 @@ def banco_historial():
 # ---------------------------------------------------------------------------
 
 @bp.route("/empresas")
+@require_permission("empresas.ver")
 def empresas():
     """Página de administración de empresas."""
     return render_template(
@@ -1595,16 +1722,23 @@ def empresas():
 
 
 @bp.route("/empresas/seleccionar", methods=["POST"])
+@require_permission("empresas.ver")
 def empresas_seleccionar():
-    """Cambia la empresa activa de la sesión."""
+    """Cambia la empresa activa de la sesión (solo a empresas accesibles)."""
     empresa_id = request.form.get("empresa_id", "").strip()
-    emp = obtener_empresa(empresa_id)
-    session[KEY_EMPRESA] = emp.id
+    emp = tenancy.seleccionar_empresa(empresa_id)
+    if emp is None:
+        # Selección de una empresa a la que el usuario no tiene acceso.
+        audit.registrar("empresa.seleccionar", empresa_id=empresa_id,
+                        detalle="acceso no autorizado", resultado="denegado")
+        flash("No tienes acceso a esa empresa.", "error")
+        return redirect(request.referrer or url_for("web.index"))
 
     # Los resultados en sesión pertenecen a la empresa anterior: descartarlos
     session_store.eliminar(KEY_RESULTADO)
     session_store.eliminar(KEY_BANCO)
 
+    audit.registrar("empresa.seleccionar", empresa_id=emp.id)
     flash(f"Empresa activa: {emp.nombre} (NIT {emp.nit}).", "success")
     return redirect(request.referrer or url_for("web.index"))
 
@@ -1689,6 +1823,7 @@ def _parse_empresa_form() -> dict:
 
 
 @bp.route("/empresas/crear", methods=["POST"])
+@require_permission("empresas.gestionar")
 def empresas_crear():
     """Crea una empresa nueva con su configuración propia."""
     try:
@@ -1699,6 +1834,8 @@ def empresas_crear():
 
     emp = crear_empresa(**campos)
 
+    audit.registrar("empresa.crear", empresa_id=emp.id,
+                    detalle=f"{emp.nombre} NIT={emp.nit}")
     flash(f"✓ Empresa '{emp.nombre}' ({emp.sigla_efectiva}) creada. "
           f"Sube sus archivos maestros en data/{emp.id}/ "
           f"o desde el formulario de procesamiento.", "success")
@@ -1706,6 +1843,7 @@ def empresas_crear():
 
 
 @bp.route("/empresas/<empresa_id>/editar")
+@require_permission("empresas.gestionar")
 def empresas_editar(empresa_id):
     """Muestra el formulario de edición pre-rellenado con la empresa indicada."""
     emp = obtener_empresa(empresa_id)
@@ -1717,6 +1855,7 @@ def empresas_editar(empresa_id):
 
 
 @bp.route("/empresas/<empresa_id>/actualizar", methods=["POST"])
+@require_permission("empresas.gestionar")
 def empresas_actualizar(empresa_id):
     """Guarda los cambios de datos y configuración de una empresa existente."""
     try:
@@ -1726,11 +1865,13 @@ def empresas_actualizar(empresa_id):
         return redirect(url_for("web.empresas_editar", empresa_id=empresa_id))
 
     emp = actualizar_empresa(empresa_id, **campos)
+    audit.registrar("empresa.actualizar", empresa_id=emp.id, detalle=emp.nombre)
     flash(f"✓ Empresa '{emp.nombre}' ({emp.sigla_efectiva}) actualizada.", "success")
     return redirect(url_for("web.empresas"))
 
 
 @bp.route("/empresas/<empresa_id>/eliminar", methods=["POST"])
+@require_permission("empresas.gestionar")
 def empresas_eliminar(empresa_id):
     """Elimina una empresa del registro (la principal no se puede eliminar)."""
     try:
@@ -1739,6 +1880,7 @@ def empresas_eliminar(empresa_id):
             session.pop(KEY_EMPRESA, None)
             session_store.eliminar(KEY_RESULTADO)
             session_store.eliminar(KEY_BANCO)
+        audit.registrar("empresa.eliminar", empresa_id=empresa_id)
         flash("Empresa eliminada.", "success")
     except ValueError as exc:
         flash(str(exc), "error")
@@ -1746,6 +1888,7 @@ def empresas_eliminar(empresa_id):
 
 
 @bp.route("/empresas/maestros", methods=["POST"])
+@require_permission("empresas.gestionar")
 def empresas_maestros():
     """Sube/reemplaza los archivos maestros de la empresa indicada."""
     emp = obtener_empresa(request.form.get("empresa_id", "").strip())
@@ -1761,7 +1904,149 @@ def empresas_maestros():
             subidos.append(default_name)
 
     if subidos:
+        audit.registrar("empresa.maestros", empresa_id=emp.id,
+                        detalle=", ".join(subidos))
         flash(f"✓ Maestros actualizados para {emp.nombre}: {', '.join(subidos)}", "success")
     else:
         flash("No se subió ningún archivo maestro.", "info")
     return redirect(url_for("web.empresas"))
+
+
+# ---------------------------------------------------------------------------
+# Usuarios y roles — administración (RBAC · Fase 3)
+# ---------------------------------------------------------------------------
+
+def _sysdb() -> str:
+    """Ruta (dinámica) de la BD de sistema; respeta overrides de tests."""
+    from app import config as _cfg
+    return _cfg.SYSTEM_DB_PATH
+
+
+@bp.route("/usuarios")
+@require_permission("usuarios.gestionar")
+def usuarios():
+    """Administración de usuarios: lista, roles asignados y formularios."""
+    from app.database import listar_usuarios, roles_de_usuario
+    from app.authz import ROLES
+
+    authn._asegurar_auth()
+    sysdb = _sysdb()
+    filas = []
+    for u in listar_usuarios(sysdb):
+        filas.append({**u, "roles": roles_de_usuario(u["id"], db_path=sysdb)})
+
+    return render_template(
+        "usuarios.html",
+        usuarios=filas,
+        roles=list(ROLES.keys()),
+        empresas=listar_empresas(),
+    )
+
+
+@bp.route("/usuarios/crear", methods=["POST"])
+@require_permission("usuarios.gestionar")
+def usuarios_crear():
+    """Crea un usuario nuevo (sin roles; se asignan después)."""
+    from app.database import obtener_usuario_por_email, crear_usuario
+
+    email = request.form.get("email", "").strip().lower()
+    nombre = request.form.get("nombre", "").strip()
+    if not email:
+        flash("El correo es obligatorio.", "error")
+        return redirect(url_for("web.usuarios"))
+
+    sysdb = _sysdb()
+    if obtener_usuario_por_email(email, db_path=sysdb):
+        flash("Ya existe un usuario con ese correo.", "error")
+        return redirect(url_for("web.usuarios"))
+
+    crear_usuario(email, nombre=nombre, db_path=sysdb)
+    audit.registrar("usuario.crear", detalle=email)
+    flash(f"✓ Usuario {email} creado. Asígnale uno o más roles.", "success")
+    return redirect(url_for("web.usuarios"))
+
+
+@bp.route("/usuarios/<int:usuario_id>/asignar", methods=["POST"])
+@require_permission("usuarios.gestionar")
+def usuarios_asignar(usuario_id):
+    """Asigna un rol al usuario (global o acotado a una empresa)."""
+    from app.database import (
+        obtener_o_crear_rol, asignar_rol_global, asignar_rol_empresa,
+    )
+    from app.authz import ROLES
+
+    rol = request.form.get("rol", "").strip()
+    ambito = request.form.get("ambito", "").strip()          # 'global' | 'empresa'
+    empresa_id = request.form.get("empresa_id", "").strip()
+
+    if rol not in ROLES:
+        flash("Rol desconocido.", "error")
+        return redirect(url_for("web.usuarios"))
+
+    sysdb = _sysdb()
+    rid = obtener_o_crear_rol(rol, db_path=sysdb)
+    if ambito == "global":
+        asignar_rol_global(usuario_id, rid, db_path=sysdb)
+        audit.registrar("usuario.rol_global", detalle=f"uid={usuario_id} rol={rol}")
+        flash(f"✓ Rol global '{rol}' asignado.", "success")
+    elif ambito == "empresa" and empresa_id:
+        asignar_rol_empresa(usuario_id, empresa_id, rid, db_path=sysdb)
+        audit.registrar("usuario.rol_empresa", empresa_id=empresa_id,
+                        detalle=f"uid={usuario_id} rol={rol}")
+        flash(f"✓ Rol '{rol}' asignado en la empresa {empresa_id}.", "success")
+    else:
+        flash("Indica el ámbito (global o una empresa).", "error")
+    return redirect(url_for("web.usuarios"))
+
+
+@bp.route("/usuarios/<int:usuario_id>/revocar", methods=["POST"])
+@require_permission("usuarios.gestionar")
+def usuarios_revocar(usuario_id):
+    """Revoca un rol del usuario (global o de empresa)."""
+    from app.database import (
+        obtener_o_crear_rol, revocar_rol_global, revocar_rol_empresa,
+    )
+
+    rol = request.form.get("rol", "").strip()
+    ambito = request.form.get("ambito", "").strip()
+    empresa_id = request.form.get("empresa_id", "").strip()
+
+    sysdb = _sysdb()
+    rid = obtener_o_crear_rol(rol, db_path=sysdb)
+    if ambito == "global":
+        revocar_rol_global(usuario_id, rid, db_path=sysdb)
+    elif ambito == "empresa" and empresa_id:
+        revocar_rol_empresa(usuario_id, empresa_id, rid, db_path=sysdb)
+    audit.registrar("usuario.revocar",
+                    empresa_id=(empresa_id or None),
+                    detalle=f"uid={usuario_id} rol={rol} ambito={ambito}")
+    flash("Rol revocado.", "success")
+    return redirect(url_for("web.usuarios"))
+
+
+@bp.route("/usuarios/<int:usuario_id>/estado", methods=["POST"])
+@require_permission("usuarios.gestionar")
+def usuarios_estado(usuario_id):
+    """Activa o desactiva un usuario."""
+    from app.database import actualizar_usuario
+
+    activo = request.form.get("activo") == "1"
+    actualizar_usuario(usuario_id, activo=activo, db_path=_sysdb())
+    audit.registrar("usuario.estado",
+                    detalle=f"uid={usuario_id} activo={activo}")
+    flash("Estado del usuario actualizado.", "success")
+    return redirect(url_for("web.usuarios"))
+
+
+# ---------------------------------------------------------------------------
+# GET /auditoria — Bitácora de acciones
+# ---------------------------------------------------------------------------
+
+@bp.route("/auditoria")
+@require_permission("auditoria.ver")
+def auditoria():
+    """Muestra los eventos de auditoría más recientes."""
+    eventos = audit.listar(limite=300)
+    for e in eventos:
+        e["fecha_fmt"] = (e.get("timestamp") or "")[:19].replace("T", " ")
+    return render_template("auditoria.html", eventos=eventos)

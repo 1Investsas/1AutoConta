@@ -3,7 +3,7 @@
 > **Cómo usar este archivo:** súbelo (o pégalo) al iniciar un chat nuevo. Es autocontenido: explica el proyecto, el plan por fases, **lo que ya se hizo**, **el siguiente paso**, y la orientación mínima del código para que una IA pueda continuar sin re-explorar todo.
 >
 > **Prompt sugerido para el chat nuevo:**
-> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/brave-meitner-cehpv0`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
+> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/charming-lovelace-myhcez`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
 
 ---
 
@@ -69,8 +69,13 @@ Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de
 - ✅ **Modelo durable de importaciones + retomar conservando correcciones**: cada importación guarda un **snapshot editable durable** en BD (`importaciones.preasientos_json`) con ciclo de **estados** (`procesando → procesada → corregida → exportada`, + `error`/`anulada`). Nuevo endpoint **«Abrir»** carga el estado guardado (con las correcciones) sin reprocesar; **«Regenerar»** sigue reprocesando desde cero. **HECHO** (ver §4).
 - ✅ **`empresa_id` + índices tenant-aware**: confirmado que toda tabla compartida lleva `empresa_id` y que las consultas filtran por él; añadidos índices en Azure SQL para listados/analítica por empresa (`ix_importaciones_empresa`, `ix_procesos_banco_empresa`, `ix_documentos_empresa_clasif`). **HECHO** (ver §4). El aislamiento ya funcionaba: por archivo en SQLite y por `empresa_id` en Azure SQL.
 
-### Fase 3 — RBAC + autorización en la app (con stub de auth dev)
-Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log`. Módulos nuevos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission` en rutas. Validar selección de empresa. Aislamiento de blobs por empresa (`empresas/{empresa_id}/...`). Auditoría de acciones clave.
+### Fase 3 — RBAC + autorización en la app (con stub de auth dev)  ← **CERRADA**
+- ✅ Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log`. **HECHO** (ver §4).
+- ✅ Módulos nuevos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. **HECHO**.
+- ✅ Decorador `require_permission` en todas las rutas de datos. **HECHO**.
+- ✅ Validar selección de empresa (arreglo del bloqueante #1). **HECHO**.
+- ✅ Aislamiento de uploads por empresa (`empresas/{empresa_id}/uploads`). **HECHO** (output/web_sessions blob quedan como follow-up; ver §9).
+- ✅ Auditoría de acciones clave + intentos denegados, con UI de bitácora. **HECHO**.
 
 ### ★ MIGRACIÓN a cuentas oficiales (punto híbrido) ★
 Ejecutar el **Checklist de migración** (§2).
@@ -94,7 +99,19 @@ Rediseño gráfico, dashboard ejecutivo/operativo, analítica de errores, audito
 
 ## 4. Lo que YA se hizo (estado actual)
 
-> **Rama de trabajo actual: `claude/brave-meitner-cehpv0`.** Parte de `main` (que ya incluye la Fase 1 vía PRs #21/#22). **No hay PR abierta** por ahora (los commits van a la rama; abrir PR solo si el usuario lo pide).
+> **Rama de trabajo actual: `claude/charming-lovelace-myhcez`.** Parte de `main` (que ya incluye Fases 1–2 vía PRs #21–#24). **No hay PR abierta** por ahora (los commits van a la rama; abrir PR solo si el usuario lo pide).
+
+### ✅ Fase 3 — RBAC + autorización + multi-tenencia (con stub de auth dev)
+El bloqueante #1 (cualquiera podía fijar `session["empresa_id"]` y ver otra empresa) queda resuelto: ahora hay identidad, permisos por rol y validación de acceso a empresa.
+- **BD de sistema (`app/database.py`)**: nuevas tablas RBAC (`usuarios`, `roles`, `permisos`, `role_permissions`, `usuario_global_roles`, `usuario_empresa_roles`, `audit_log`) con DDL SQLite + T-SQL e idempotencia. CRUD: usuarios (`crear_usuario`/`obtener_usuario_por_email`/`actualizar_usuario`/`registrar_acceso_usuario`/`listar_usuarios`), roles/permisos (`obtener_o_crear_rol`/`obtener_o_crear_permiso`/`vincular_rol_permiso`), asignaciones (`asignar_rol_global`/`asignar_rol_empresa`/`revocar_*`), consultas de autorización (`permisos_usuario` = unión de roles globales + de empresa, `empresas_de_usuario`, `tiene_rol_global`, `roles_de_usuario`), auditoría (`registrar_evento_auditoria`/`listar_auditoria`). Estas tablas NO se filtran por `empresa_id`: son el control de acceso transversal.
+- **`app/authz.py`**: catálogo de **permisos** (`dashboard.ver`, `radian.*`, `banco.*`, `importaciones.*`, `analitica.ver`, `ml.ver`, `empresas.*`, `usuarios.gestionar`, `auditoria.ver`) y **roles** alineados al menú (`admin`, `contador`, `auxiliar`=Digitación, `consulta`=Visualización). `seed_rbac()` idempotente, `tiene_permiso()` y el decorador **`require_permission(permiso)`** (resuelve usuario+empresa activa, deniega con 403 y audita).
+- **`app/authn.py`**: stub de dev (`AUTH_MODE=dev`): autologin de un admin local (`DEV_AUTH_EMAIL`, autoprovisiona rol admin global) y página de login para cambiar de usuario y probar roles; `cerrar_sesion()` suprime el autologin. Listo para **Entra** (`AUTH_MODE=entra`): lee la cabecera `X-MS-CLIENT-PRINCIPAL-NAME` de App Service Authentication y autoprovisiona el usuario (+ `BOOTSTRAP_ADMIN_EMAIL` opcional). Compuerta `gate()` (before_request) exige sesión salvo en `/login`, `/logout`, `/health`, estáticos.
+- **`app/tenancy.py`**: `empresa_actual()` resuelve y **valida** la empresa de la sesión (si no es accesible, cae a la primera accesible y corrige la sesión); `puede_acceder_empresa()`, `empresas_accesibles()`, `seleccionar_empresa()`.
+- **`app/audit.py`**: `registrar(accion, …)` best-effort con usuario/IP del contexto.
+- **`app/web/routes.py`**: `require_permission` en las ~28 rutas; `_empresa_actual()` delega en tenancy; el context processor solo expone **empresas accesibles** + el usuario; `/empresas/seleccionar` valida acceso (audita denegados). Rutas nuevas: `/login`, `/logout`, `/health`, **`/usuarios`** (+ crear/asignar/revocar/estado) y **`/auditoria`**. Auditoría en procesar/exportar/dividir/corregir/abrir/anular/reprocesar/empresa.*. Uploads aislados por empresa (`Empresa.upload_category`).
+- **UI**: `login.html` (autónomo), `usuarios.html` (gestión de roles), `auditoria.html` (bitácora); `base.html` muestra el usuario real + logout y enlaza Usuarios/Auditoría.
+- **Config**: `AUTH_MODE`, `DEV_AUTH_EMAIL`, `DEV_AUTH_NOMBRE`, `BOOTSTRAP_ADMIN_EMAIL` en `app/config.py`.
+- **Tests**: `tests/test_rbac.py` (17 casos: seed, CRUD usuarios, unión de permisos, rol global, tenancy, gate/login/logout, 403 + auditoría, aislamiento de empresa ajena).
 
 ### ✅ Bug "Generando archivo SIIGO" (módulo bancos) — en `main` (PR #18)
 La descarga no navega de página → el overlay *"Generando archivo SIIGO…"* nunca se ocultaba. Solución con **cookie de descarga**: `_responder_descarga(resp)` en `app/web/routes.py` adjunta cookie `descargaSiigo=<token>`; `app/web/templates/base.html` expone `window.descargaConOverlay(form, mensaje)` que muestra el overlay y lo oculta al detectar la cookie (timeout de 120 s). Usado en `banco_resultado.html`.
@@ -150,18 +167,20 @@ Antes, los preasientos vivían **solo en la sesión** (server-side, efímeros) y
 - **`app/database.py`**: helper idempotente `_asegurar_indices_mssql` (invocado desde `inicializar_db` solo en Azure SQL) que crea índices `IF NOT EXISTS` (chequeo por `name` + `object_id`): `ix_importaciones_empresa(empresa_id,id)`, `ix_procesos_banco_empresa(empresa_id,id)`, `ix_documentos_empresa_clasif(empresa_id,clasificacion)`. Las tablas con `UNIQUE(empresa_id,…)` (documentos/historial/correcciones) ya tenían índice que cubre el filtro; `bitacora` solo se escribe, así que no se indexa.
 - **Tests**: `TestTenantAwareAzure` en `tests/test_aislamiento_empresa.py` (4 casos: DDL con `empresa_id` en las 6 tablas, índices idempotentes y por `empresa_id`, que `inicializar_db` los emite en Azure y NO en SQLite).
 
-**Verificación global:** `pytest` → **236/236 OK**.
+**Verificación global:** `pytest` → **253/253 OK** (236 previos + 17 de RBAC).
 
 ---
 
 ## 5. Siguiente paso
 
-**Fase 2 CERRADA.** Hechas las 3 piezas: parte 1 (Empresas → SQL), parte 2 (modelo durable de importaciones + «Abrir» conservando correcciones) y el cierre (`empresa_id` + índices tenant-aware) — ver §4.
+**Fase 3 CERRADA.** RBAC + autorización + multi-tenencia con stub de auth dev (el **bloqueante #1** queda resuelto) — ver §4. `pytest` 253/253.
 
-Siguiente fase grande: **Fase 3 — RBAC + autorización en la app** (con stub de auth dev). Tablas/seeds `usuarios/roles/permisos/role_permissions/usuario_empresa_roles/usuario_global_roles/audit_log` (reutilizan la **BD de sistema** ya creada en la parte 1). Módulos `app/authn.py`, `app/authz.py`, `app/tenancy.py`, `app/audit.py`. Decorador `require_permission`. Validar selección de empresa. Aislamiento de blobs por empresa. Es el **bloqueante #1** para habilitar el equipo administrativo (ver §0).
+Siguiente hito: **★ MIGRACIÓN a cuentas oficiales (punto híbrido) ★** y luego **Fase 4 — Autenticación real con Entra + endurecimiento Azure**. El código ya está listo para Entra: poner `AUTH_MODE=entra` y configurar App Service Authentication (la identidad llega en `X-MS-CLIENT-PRINCIPAL-NAME`); `BOOTSTRAP_ADMIN_EMAIL` da el primer admin. Ejecutar el **Checklist de migración** (§2): parametrizar `azure-setup.sh`, crear recursos oficiales, OIDC, App Settings, Key Vault, RLS.
 
 Opciones rápidas si el usuario lo pide:
-- **Abrir PR** de esta rama (`claude/brave-meitner-cehpv0`) para revisar la Fase 2 completa antes de arrancar la Fase 3.
+- **Abrir PR** de esta rama (`claude/charming-lovelace-myhcez`) para revisar la Fase 3 completa.
+- **Granularidad/roles**: ajustar el catálogo de permisos o los roles seed (`app/authz.py`) si el equipo administrativo necesita otra separación de funciones.
+- **Aislamiento de blobs** de `output` y `web_sessions` por empresa (hoy solo `uploads` está aislado; §9).
 - **Llevar la división y el modelo durable a Bancos** (hoy el durable es solo RADIAN; Bancos usa su propio `procesos_banco` sin snapshot editable).
 - **Vista de trazabilidad** de `listar_correcciones_tercero()` (aún sin UI, §9).
 
@@ -169,18 +188,19 @@ Opciones rápidas si el usuario lo pide:
 
 ## 6. Orientación del código (para no re-explorar)
 
-**Stack:** Python 3.11 + Flask, Gunicorn en Azure App Service Linux. SQLite (local/dev: un archivo por empresa `contable_<id>.db`) **o** Azure SQL vía `pyodbc` (`USE_SQLITE=false`, tablas con columna `empresa_id`). Storage local **o** Azure Blob. Sin librerías de auth aún.
+**Stack:** Python 3.11 + Flask, Gunicorn en Azure App Service Linux. SQLite (local/dev: un archivo por empresa `contable_<id>.db`) **o** Azure SQL vía `pyodbc` (`USE_SQLITE=false`, tablas con columna `empresa_id`). Storage local **o** Azure Blob. **Auth/RBAC propios** (sin librería externa): stub de dev + Entra-ready vía App Service Authentication (ver §4).
 
 **Archivos clave:**
 - **Web/rutas:** `app/web/routes.py` (~28 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, `_recalcular_preasiento()`, `_persistir_importacion()` (snapshot durable), `_actividad_radian()`/`_actividad_banco()`, endpoints `/radian`, `/confirmar`, `/corregir-tercero`, `/dividir-linea`, `/exportar-siigo`, `/importaciones/<id>/{abrir,reprocesar,anular,descargar}`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (copia de trabajo server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`; la copia **durable** del resultado vive en `importaciones.preasientos_json`).
 - **Plantillas:** `app/web/templates/{base,index,radian_upload,resultado,banco_resultado,banco_upload,banco_historial,importaciones,empresas,analytics,historial}.html` + partial `_actividad_items.html`. UI en HTML + CSS propio (`static/style.css`), JS vanilla, sin framework. **Modelo visual único:** páginas de edición siguen `resultado.html` (autocomplete de **cuentas**/**terceros**, edición inline `toggleEditCuenta`/`toggleEditTercero`, división ✂ por línea); páginas iniciales de módulo siguen `banco_upload.html` (¿qué hace? · carga · guía · actividad).
-- **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; migración aditiva de columnas vía `_asegurar_columna`; tablas por-empresa: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones` —con **`preasientos_json`** (snapshot durable) y estados; `procesos_banco`, **`correcciones_tercero`**; **tabla de sistema `empresas`** —registro central, sin filtro `empresa_id`— con `inicializar_db_sistema`/`*_empresa_registro`; snapshot vía `obtener_snapshot_importacion`/`actualizar_importacion(preasientos_json=…)`), `app/empresas.py` (dataclass `Empresa`; persiste en la tabla SQL `empresas` vía BD de sistema `config.SYSTEM_DB_PATH`; migra `empresas.json` legado la 1ª vez), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}`, pero uploads/output/db **no**).
+- **Datos/multiempresa:** `app/database.py` (conexión dual, esquema SQLite/T-SQL, filtros `empresa_id` vía `_and_empresa`/`_where_empresa`; migración aditiva de columnas vía `_asegurar_columna`; tablas por-empresa: `documentos_importados`, `bitacora`, `historial_cuentas`, `importaciones` —con **`preasientos_json`** (snapshot durable) y estados; `procesos_banco`, **`correcciones_tercero`**; **tabla de sistema `empresas`** —registro central, sin filtro `empresa_id`— con `inicializar_db_sistema`/`*_empresa_registro`; snapshot vía `obtener_snapshot_importacion`/`actualizar_importacion(preasientos_json=…)`), `app/empresas.py` (dataclass `Empresa`; persiste en la tabla SQL `empresas` vía BD de sistema `config.SYSTEM_DB_PATH`; migra `empresas.json` legado la 1ª vez), `app/storage.py` (local/Blob; maestros aislados en `data/{empresa_id}` y **uploads** en `empresas/{empresa_id}/uploads`; output/web_sessions/db aún no — §9).
 - **Dominio:** `app/importador.py` (RADIAN), `app/clasificador.py`, `app/terceros.py` (`identificar_tercero`, `cruzar_tercero`, `procesar_terceros_lote`, **`aplicar_correcciones_lote`**), `app/preasiento.py` (genera `LineaContable`/`PreasientoContable`), `app/models.py` (`PreasientoContable` con `tercero_nit_original`/`tercero_corregido`, `LineaContable`, `MovimientoBanco`), `app/sugerencias.py` (motor de cuentas por historial), `app/validaciones.py`.
 - **SIIGO:** `app/siigo/mapeador.py` (27 columnas; **Descripción=referencia del doc, Observaciones vacía**), `app/siigo/exportador_siigo.py`, `app/siigo/api_client.py`.
 - **Banco:** `app/banco/{importador_banco,mapeador_banco,exportador_banco}.py` (consolida intereses, enlaza 4x1000; su `Descripción`/`Observaciones` siguen su propia convención).
-- **Infra/deploy:** `application.py`, `startup.sh` (instala ODBC 18 si `USE_SQLITE=false`; gunicorn), `azure-setup.sh`, `.github/workflows/main_contable-auto.yml` (CI test + deploy OIDC), `app/config.py`, `.env.example`. Docs: `CONTEXTO_IA.md`, `docs/arquitectura.md`.
+- **Auth/RBAC (Fase 3):** `app/authn.py` (identidad: stub dev + Entra-ready; `gate()` before_request), `app/authz.py` (catálogo permisos/roles, `seed_rbac`, `require_permission`), `app/tenancy.py` (acceso a empresas: `empresa_actual` validada, `puede_acceder_empresa`), `app/audit.py` (`registrar`). Tablas RBAC en la BD de sistema (`app/database.py`). Plantillas `login.html`/`usuarios.html`/`auditoria.html`.
+- **Infra/deploy:** `application.py`, `startup.sh` (instala ODBC 18 si `USE_SQLITE=false`; gunicorn), `azure-setup.sh`, `.github/workflows/main_contable-auto.yml` (CI test + deploy OIDC), `app/config.py` (incluye `AUTH_MODE`/`DEV_AUTH_*`/`BOOTSTRAP_ADMIN_EMAIL`), `.env.example`. Docs: `CONTEXTO_IA.md`, `docs/arquitectura.md`.
 
-**Rutas que aceptan IDs de objeto (revisar ownership en Fase 3):** `/importaciones/<imp_id>/{abrir,reprocesar,anular,descargar}`, `/empresas/<empresa_id>/...`. (Hoy se aíslan por empresa vía `db_path`/`empresa_id`; falta validar que el usuario tenga acceso a esa empresa.)
+**Rutas que aceptan IDs de objeto:** `/importaciones/<imp_id>/{abrir,reprocesar,anular,descargar}` se aíslan por la BD de la empresa activa (un id de otra empresa no aparece en la BD activa). `/empresas/<empresa_id>/...` exige `empresas.gestionar` (hoy solo el admin global). La empresa activa siempre se valida en `tenancy.empresa_actual`.
 
 ---
 
@@ -189,7 +209,9 @@ Opciones rápidas si el usuario lo pide:
 ```bash
 pip install --ignore-installed blinker -r requirements.txt   # deps (el flag evita conflicto con blinker del sistema)
 pip install pytest                                           # si no está
-python -m pytest tests/ -q                                   # 204 tests
+python -m pytest tests/ -q                                   # 253 tests
+# Auth: por defecto AUTH_MODE=dev → autologin de un admin local (DEV_AUTH_EMAIL).
+# Para probar roles: /logout y luego /login eligiendo otro usuario en /usuarios.
 # Smoke: arrancar app y render del índice
 USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; c=create_app().test_client(); print(c.get('/').status_code)"
 ```
@@ -198,7 +220,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 
 ## 8. Notas de entorno y git
 
-- **Rama de trabajo:** `claude/brave-meitner-cehpv0` (parte de `main`, que ya incluye la Fase 1 vía PRs #21/#22). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Último incremento: **Empresas → SQL** (Fase 2, parte 1).
+- **Rama de trabajo:** `claude/charming-lovelace-myhcez` (parte de `main`, que ya incluye Fases 1–2 vía PRs #21–#24). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Último incremento: **Fase 3 — RBAC + autorización**.
 - **Cuentas actuales: de PRUEBA** (GitHub `JuanCamiloVergara/contable-auto` + Azure de prueba). La migración a cuentas oficiales se hace en el punto híbrido (§2).
 - **Entorno remoto efímero:** todo lo que valga la pena debe quedar **commiteado y pusheado**. Este handoff vive en el repo como `HANDOFF.md`.
 
@@ -209,5 +231,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 - **Bancos — Descripción/Observaciones:** ¿aplicar también al export de Bancos la regla de "Observaciones vacía"? Hoy Bancos mantiene su convención propia (Descripción = texto real del movimiento; Observaciones = metadatos `Banco … | Cód… | …`). Pendiente de decisión del usuario.
 - **Agregar/dividir movimientos:** implementado en **RADIAN** (`/dividir-linea`). Pendiente (opcional) llevarlo a **Bancos** sobre `MovimientoBanco` si el usuario lo pide; el template de edición ya está unificado.
 - **El modelo durable de importaciones** (Fase 2, parte 2) se resolvió con un **snapshot por importación** (`importaciones.preasientos_json`) en vez de tablas normalizadas de líneas/versiones — pragmático y de bajo riesgo. Si en el futuro se requieren versiones/diffs finos o consultas por línea, habría que normalizar; por ahora el snapshot cubre «retomar conservando correcciones» y la trazabilidad por estado.
-- La auth Entra exige que el equipo administrativo tenga identidades en el **tenant oficial** (asumido por la decisión tomada).
+- La auth Entra exige que el equipo administrativo tenga identidades en el **tenant oficial** (asumido por la decisión tomada). El código ya soporta `AUTH_MODE=entra`; falta cablear App Service Authentication en el entorno oficial (Fase 4).
+- **Aislamiento de blobs (Fase 3):** se aislaron los **uploads** por empresa (`empresas/{id}/uploads`). Los `output` (Excel generados) y `web_sessions` (JSON de resultados en sesión) siguen en categorías planas; en modo Azure Blob convendría aislarlos también (follow-up de bajo riesgo: la referencia vive server-side en la sesión del usuario).
+- **Roles/permisos seed (Fase 3):** taxonomía elegida `admin/contador/auxiliar/consulta` con permisos por módulo (`app/authz.py`). Es una decisión reversible vía seed; ajustar si el equipo administrativo necesita otra separación de funciones (p. ej. que el auxiliar también exporte a SIIGO).
 - `listar_correcciones_tercero()` existe pero **no tiene UI**; opcional: una vista de trazabilidad de correcciones de tercero.

@@ -111,6 +111,15 @@ class Empresa:
             return "data"
         return f"data/{self.id}"
 
+    @property
+    def upload_category(self) -> str:
+        """Categoría aislada por empresa para los archivos subidos (RADIAN/CSV).
+
+        Aísla los uploads por empresa también en Azure Blob (`empresas/<id>/...`),
+        donde de otro modo compartirían un prefijo plano `uploads/`.
+        """
+        return f"empresas/{self.id}/uploads"
+
     def cuentas_contraparte_efectivas(self) -> dict:
         return {**config.CUENTAS_CONTRAPARTE, **(self.cuentas_contraparte or {})}
 
