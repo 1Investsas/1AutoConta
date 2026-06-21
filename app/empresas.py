@@ -36,6 +36,9 @@ EMPRESA_PRINCIPAL_ID = "principal"
 
 _lock = threading.Lock()
 
+# Clave en flask.g donde se cachea el registro de empresas durante la petición.
+_G_REGISTRO = "empresas_registro_cache"
+
 
 # ---------------------------------------------------------------------------
 # Formato del extracto bancario
@@ -272,9 +275,30 @@ def _migrar_json_legacy(path: str) -> None:
 
 
 def _leer_registro() -> dict:
-    """Retorna el registro completo {id: {campos}} desde la BD de sistema."""
+    """Retorna el registro completo {id: {campos}} desde la BD de sistema.
+
+    Se cachea durante la petición actual (flask.g): en una sola página el
+    registro se consulta varias veces (obtener_empresa, listar_empresas,
+    _empresa_principal) y reabrir la BD de sistema cada vez es costoso sobre un
+    FS de red. Las escrituras (guardar/eliminar) invalidan el caché. Fuera de un
+    contexto de petición (CLI/tests) no se cachea: comportamiento idéntico al
+    original.
+    """
     _asegurar_sistema()
-    return _db.listar_empresas_registro(_system_db_path())
+    from flask import g, has_request_context
+    if has_request_context() and _G_REGISTRO in g:
+        return g.get(_G_REGISTRO)
+    registro = _db.listar_empresas_registro(_system_db_path())
+    if has_request_context():
+        setattr(g, _G_REGISTRO, registro)
+    return registro
+
+
+def _invalidar_cache_registro() -> None:
+    """Descarta el registro cacheado en la petición (tras crear/editar/eliminar)."""
+    from flask import g, has_request_context
+    if has_request_context():
+        g.pop(_G_REGISTRO, None)
 
 
 def _desde_dict(d: dict) -> Empresa:
@@ -333,6 +357,7 @@ def guardar_empresa(empresa: Empresa) -> Empresa:
     with _lock:
         _asegurar_sistema()
         _db.guardar_empresa_registro(asdict(empresa), _system_db_path())
+    _invalidar_cache_registro()
     logger.info("Empresa guardada: %s (%s)", empresa.nombre, empresa.id)
     return empresa
 
@@ -399,3 +424,4 @@ def eliminar_empresa(empresa_id: str) -> None:
         _asegurar_sistema()
         _db.eliminar_empresa_registro(empresa_id, _system_db_path())
         logger.info("Empresa eliminada: %s", empresa_id)
+    _invalidar_cache_registro()

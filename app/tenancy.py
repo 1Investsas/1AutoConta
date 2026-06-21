@@ -28,20 +28,45 @@ logger = logging.getLogger(__name__)
 # Clave de sesión con la empresa activa (compartida con las rutas web).
 KEY_EMPRESA = "empresa_id"
 _G_CACHE = "tenancy_empresa_actual"
+# Cachés por-petición de las consultas de rol (se repiten entre la compuerta de
+# permisos, la resolución de empresa y el listado de empresas accesibles).
+_G_ROL_GLOBAL = "tenancy_rol_global"
+_G_EMPRESAS_USUARIO = "tenancy_empresas_usuario"
 
 
 def _system_db_path() -> str:
     return config.SYSTEM_DB_PATH
 
 
+def _tiene_rol_global(uid: int) -> bool:
+    """`_db.tiene_rol_global` cacheado durante la petición (por usuario)."""
+    path = _system_db_path()
+    if not has_request_context():
+        return _db.tiene_rol_global(uid, db_path=path)
+    cache = g.setdefault(_G_ROL_GLOBAL, {})
+    if uid not in cache:
+        cache[uid] = _db.tiene_rol_global(uid, db_path=path)
+    return cache[uid]
+
+
+def _empresas_de_usuario(uid: int) -> set:
+    """`_db.empresas_de_usuario` cacheado durante la petición (por usuario)."""
+    path = _system_db_path()
+    if not has_request_context():
+        return _db.empresas_de_usuario(uid, db_path=path)
+    cache = g.setdefault(_G_EMPRESAS_USUARIO, {})
+    if uid not in cache:
+        cache[uid] = _db.empresas_de_usuario(uid, db_path=path)
+    return cache[uid]
+
+
 def puede_acceder_empresa(usuario: dict | None, empresa_id: str | None) -> bool:
     """True si el usuario puede operar la empresa indicada."""
     if not usuario or not empresa_id:
         return False
-    path = _system_db_path()
-    if _db.tiene_rol_global(usuario["id"], db_path=path):
+    if _tiene_rol_global(usuario["id"]):
         return True
-    return empresa_id in _db.empresas_de_usuario(usuario["id"], db_path=path)
+    return empresa_id in _empresas_de_usuario(usuario["id"])
 
 
 def empresas_accesibles(usuario: dict | None) -> list:
@@ -49,10 +74,9 @@ def empresas_accesibles(usuario: dict | None) -> list:
     todas = _empresas.listar_empresas()
     if usuario is None:
         return todas
-    path = _system_db_path()
-    if _db.tiene_rol_global(usuario["id"], db_path=path):
+    if _tiene_rol_global(usuario["id"]):
         return todas
-    ids = _db.empresas_de_usuario(usuario["id"], db_path=path)
+    ids = _empresas_de_usuario(usuario["id"])
     return [e for e in todas if e.id in ids]
 
 

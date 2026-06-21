@@ -52,6 +52,16 @@ _sync_lock = threading.Lock()
 _db_restauradas: set[str] = set()
 _db_timers: dict[str, "threading.Timer"] = {}
 
+# Esquemas ya asegurados en este proceso. `inicializar_db` ejecuta DDL idempotente
+# (CREATE TABLE IF NOT EXISTS + migraciones aditivas) que no cambia durante la
+# vida del proceso, así que basta correrlo una vez por ruta de BD. Sin esto el
+# DDL se reejecutaba en CADA request (dashboard, banco, radian, …): sobre un
+# sistema de archivos de red (Azure /home es SMB) cada sentencia es una ida y
+# vuelta lenta, y en modo nube el commit agendaba además una subida completa de
+# la BD a Blob por visita. Mismo patrón que _db_restauradas / authn._auth_listo.
+_init_lock = threading.Lock()
+_db_inicializadas: set[str] = set()
+
 
 def _db_respaldable(db_path: str) -> bool:
     """True si la BD SQLite debe respaldarse en Blob Storage."""
@@ -338,25 +348,42 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
 
     Tablas: documentos_importados, bitacora, historial_cuentas, importaciones,
     procesos_banco.
+
+    El esquema se asegura una sola vez por proceso y por ruta de BD: el DDL es
+    idempotente y estático, de modo que reejecutarlo en cada request solo añade
+    latencia (relevante con SQLite sobre un FS de red). Para reinicializar —p. ej.
+    en tests que recrean la BD— usar `reset_inicializacion_db()`.
     """
-    conn = get_connection(db_path)
-    try:
-        if conn.is_sqlite:
-            _create_tables_sqlite(conn)
-        else:
-            _create_tables_mssql(conn)
-        # Migraciones aditivas para BD ya existentes (las tablas nuevas ya
-        # incluyen la columna; este ALTER cubre instalaciones previas).
-        _asegurar_columna(conn, "importaciones", "preasientos_json",
-                          "TEXT", "NVARCHAR(MAX)")
-        # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
-        # cada empresa tiene su propio archivo y no hay columna empresa_id.
-        if not conn.is_sqlite:
-            _asegurar_indices_mssql(conn)
-        conn.commit()
-        logger.info("Base de datos inicializada correctamente.")
-    finally:
-        conn.close()
+    if db_path in _db_inicializadas:
+        return
+    with _init_lock:
+        if db_path in _db_inicializadas:
+            return
+        conn = get_connection(db_path)
+        try:
+            if conn.is_sqlite:
+                _create_tables_sqlite(conn)
+            else:
+                _create_tables_mssql(conn)
+            # Migraciones aditivas para BD ya existentes (las tablas nuevas ya
+            # incluyen la columna; este ALTER cubre instalaciones previas).
+            _asegurar_columna(conn, "importaciones", "preasientos_json",
+                              "TEXT", "NVARCHAR(MAX)")
+            # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
+            # cada empresa tiene su propio archivo y no hay columna empresa_id.
+            if not conn.is_sqlite:
+                _asegurar_indices_mssql(conn)
+            conn.commit()
+            logger.info("Base de datos inicializada correctamente.")
+        finally:
+            conn.close()
+        _db_inicializadas.add(db_path)
+
+
+def reset_inicializacion_db() -> None:
+    """Olvida qué esquemas se aseguraron (para aislar tests que recrean la BD)."""
+    with _init_lock:
+        _db_inicializadas.clear()
 
 
 def _columna_existe(conn: "DbConnection", tabla: str, columna: str) -> bool:
