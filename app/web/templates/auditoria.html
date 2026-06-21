@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Auditoría — 1CONTIGO{% endblock %}
+{% block page_title %}Bitácora de auditoría{% endblock %}
+
+{% block content %}
+
+<div class="section-header">
+  <h2>Eventos recientes</h2>
+  <span class="pill pill-ok">{{ eventos|length }} evento(s)</span>
+</div>
+
+<p class="text-dim mb-4" style="font-size:0.85rem">
+  Registro de acciones clave (procesos, exportaciones, cambios de empresa,
+  gestión de usuarios) e <strong>intentos de acceso denegados</strong>.
+</p>
+
+{% if eventos %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Usuario</th>
+        <th>Empresa</th>
+        <th>Acción</th>
+        <th>Detalle</th>
+        <th>Resultado</th>
+        <th>IP</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in eventos %}
+      <tr>
+        <td class="text-dim" style="white-space:nowrap">{{ e.fecha_fmt }}</td>
+        <td><code style="font-size:0.78rem">{{ e.usuario_email or '—' }}</code></td>
+        <td>{{ e.empresa_id or '—' }}</td>
+        <td><strong>{{ e.accion }}</strong></td>
+        <td class="text-dim" style="font-size:0.8rem">{{ e.detalle }}</td>
+        <td>
+          <span class="pill {{ 'pill-pendiente' if e.resultado == 'denegado' else 'pill-ok' }}"
+                style="font-size:0.68rem">{{ e.resultado }}</span>
+        </td>
+        <td class="text-dim" style="font-size:0.78rem">{{ e.ip }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div style="text-align:center; padding:60px; color:var(--text-dim)">
+  <div style="font-size:3rem; margin-bottom:12px">🗂️</div>
+  <p>No hay eventos de auditoría todavía.</p>
+</div>
+{% endif %}
+
+{% endblock %}

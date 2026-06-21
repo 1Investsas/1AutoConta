@@ -74,20 +74,25 @@
       <a href="{{ url_for('web.historial') }}" class="nav-sub {% if request.endpoint == 'web.historial' %}active{% endif %}">Machine learning</a>
 
       <div class="nav-subgroup">Usuarios</div>
-      <a href="#" class="nav-sub">Digitación</a>
-      <a href="#" class="nav-sub">Tributario y fiscal</a>
-      <a href="#" class="nav-sub">Visualización</a>
+      <a href="{{ url_for('web.usuarios') }}" class="nav-sub {% if request.endpoint == 'web.usuarios' %}active{% endif %}">Usuarios y roles</a>
+      <a href="{{ url_for('web.auditoria') }}" class="nav-sub {% if request.endpoint == 'web.auditoria' %}active{% endif %}">Auditoría</a>
     </div>
   </nav>
 
   <div class="sidebar-footer">
     <div class="profile">
-      <div class="avatar">AD</div>
-      <div class="profile-info">
-        <strong>Administrador</strong>
-        <span>admin@1contigo.com</span>
+      <div class="avatar">
+        {% if usuario_actual and usuario_actual.nombre %}{{ usuario_actual.nombre[:2]|upper }}
+        {%- elif usuario_actual %}{{ usuario_actual.email[:2]|upper }}
+        {%- else %}··{% endif %}
       </div>
-      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+      <div class="profile-info">
+        <strong>{{ (usuario_actual.nombre if usuario_actual else '') or (usuario_actual.email if usuario_actual else 'Sin sesión') }}</strong>
+        <span>{{ usuario_actual.email if usuario_actual else '' }}</span>
+      </div>
+      <a href="{{ url_for('web.logout') }}" class="chev" title="Cerrar sesión" aria-label="Cerrar sesión">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </a>
     </div>
   </div>
 </aside>

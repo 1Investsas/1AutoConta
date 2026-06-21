@@ -90,6 +90,12 @@ def create_app() -> Flask:
     from app.web.routes import bp
     app.register_blueprint(bp)
 
+    # Compuerta de autenticación (Fase 3): exige sesión iniciada en todas las
+    # rutas salvo login/logout y estáticos. Se registra después del blueprint
+    # para que los endpoints existan al resolver los exentos.
+    from app import authn
+    authn.registrar(app)
+
     _registrar_manejadores_error(app)
 
     return app
@@ -110,6 +116,14 @@ def _registrar_manejadores_error(app: Flask) -> None:
     @app.errorhandler(404)
     def _not_found(e):
         return _render("Página no encontrada", 404)
+
+    @app.errorhandler(403)
+    def _forbidden(e):
+        return _render(
+            "No tienes permiso para realizar esta acción con la empresa activa. "
+            "Si crees que es un error, contacta al administrador.",
+            403,
+        )
 
     @app.errorhandler(413)
     def _too_large(e):

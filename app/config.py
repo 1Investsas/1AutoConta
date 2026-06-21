@@ -90,6 +90,26 @@ AZURE_STORAGE_CONNECTION_STRING: str = os.getenv("AZURE_STORAGE_CONNECTION_STRIN
 AZURE_STORAGE_CONTAINER: str = os.getenv("AZURE_STORAGE_CONTAINER", "contable-auto")
 
 # ---------------------------------------------------------------------------
+# Autenticación y autorización (Fase 3 / Fase 4)
+# ---------------------------------------------------------------------------
+# AUTH_MODE controla cómo se identifica al usuario:
+#   - "dev"   (por defecto): stub de desarrollo. Sin login real; se resuelve un
+#             usuario administrador local y la UI permite cambiar de usuario para
+#             probar roles. NO usar en producción.
+#   - "entra": App Service Authentication con Microsoft Entra ID. La identidad
+#             llega en la cabecera X-MS-CLIENT-PRINCIPAL-NAME (Fase 4).
+AUTH_MODE: str = os.getenv("AUTH_MODE", "dev").lower()
+
+# Usuario administrador del stub de desarrollo (solo aplica con AUTH_MODE=dev).
+# Se autoprovisiona con rol de administrador global la primera vez.
+DEV_AUTH_EMAIL: str = os.getenv("DEV_AUTH_EMAIL", "admin@local").strip().lower()
+DEV_AUTH_NOMBRE: str = os.getenv("DEV_AUTH_NOMBRE", "Administrador (dev)")
+
+# Email que siempre recibe rol de administrador global al iniciar sesión
+# (bootstrap del primer admin real en Entra). Vacío = desactivado.
+BOOTSTRAP_ADMIN_EMAIL: str = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
+
+# ---------------------------------------------------------------------------
 # Clasificaciones de documento
 # ---------------------------------------------------------------------------
 CLASIFICACIONES = (

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iniciar sesión — 1CONTIGO</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .login-card { width: 100%; max-width: 420px; background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb);
+                  border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,.08); }
+    .login-card h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .login-card .muted { color: var(--text-dim, #6b7280); font-size: .9rem; margin-bottom: 22px; }
+    .login-card label { display:block; font-size:.85rem; margin-bottom:6px; font-weight:600; }
+    .login-card input[type=email], .login-card select { width:100%; padding:10px 12px; border:1px solid var(--border,#d1d5db);
+                  border-radius:10px; margin-bottom:16px; font-size:.95rem; }
+    .login-brand { text-align:center; margin-bottom:20px; font-weight:800; font-size:1.6rem; letter-spacing:.5px; }
+    .login-brand .b-1 { color: var(--gold, #c8a24a); }
+    .dev-note { margin-top:18px; font-size:.78rem; color:var(--text-dim,#6b7280); border-top:1px solid var(--border,#eee); padding-top:14px; }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-brand"><span class="b-1">1</span>CONTIGO</div>
+      <h1>Iniciar sesión</h1>
+      <p class="muted">Accede para gestionar la contabilidad de tus empresas.</p>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+        <div class="flash {{ cat }}" style="margin-bottom:14px">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+      {% endwith %}
+
+      {% if modo == 'entra' %}
+      <p class="muted">
+        La autenticación se gestiona con tu cuenta corporativa (Microsoft Entra ID).
+        Si ves esta página, vuelve a <a href="{{ url_for('web.index') }}">la aplicación</a>.
+      </p>
+      {% else %}
+      <form method="POST" action="{{ url_for('web.login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next }}">
+
+        {% if usuarios %}
+        <label for="usuario_sel">Usuario</label>
+        <select id="usuario_sel" onchange="document.getElementById('email').value = this.value">
+          <option value="">— Elige un usuario —</option>
+          {% for u in usuarios %}
+          <option value="{{ u.email }}">{{ u.nombre or u.email }} ({{ u.email }})</option>
+          {% endfor %}
+        </select>
+        {% endif %}
+
+        <label for="email">Correo</label>
+        <input type="email" id="email" name="email" placeholder="tucorreo@empresa.com" required autofocus>
+
+        <button type="submit" class="btn btn-gold" style="width:100%; justify-content:center;">Entrar</button>
+      </form>
+
+      <div class="dev-note">
+        <strong>Modo desarrollo.</strong> Autenticación simulada para probar roles.
+        En producción se reemplaza por Microsoft Entra ID (App Service Authentication).
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>
