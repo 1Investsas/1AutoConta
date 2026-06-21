@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import (
-    Blueprint, flash, redirect, render_template,
+    Blueprint, abort, flash, redirect, render_template,
     request, send_file, session, url_for,
 )
 from werkzeug.utils import secure_filename
@@ -26,6 +26,7 @@ from app.empresas import (
 from app import authn, audit, tenancy
 from app.authz import require_permission
 from app.web import session_store
+from app.web.navegacion import CATEGORIAS
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("web", __name__)
@@ -212,6 +213,25 @@ def index():
     }
 
     return render_template("index.html", stats=stats)
+
+
+# ---------------------------------------------------------------------------
+# GET /modulos/<slug> — Página de categoría (submenú del sidebar)
+# ---------------------------------------------------------------------------
+
+@bp.route("/modulos/<slug>")
+@require_permission("dashboard.ver")
+def categoria(slug):
+    """Página de una categoría: muestra como botones los módulos del submenú.
+
+    El menú lateral llega solo hasta la categoría (Flujos directos, Empresas, …);
+    esta página agrupa los módulos que la componen (Bancos, Caja general, …) y
+    enlaza a cada uno. Cada módulo aplica su propio permiso al entrar.
+    """
+    cat = CATEGORIAS.get(slug)
+    if not cat:
+        abort(404)
+    return render_template("categoria.html", categoria=cat)
 
 
 # ---------------------------------------------------------------------------

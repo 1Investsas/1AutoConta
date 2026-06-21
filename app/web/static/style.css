@@ -586,6 +586,11 @@ button { font-family: inherit; }
 .qa-desc { font-size: 0.78rem; color: var(--text-dim); margin-top: 3px; line-height: 1.35; }
 .qa-chev { color: var(--text-dim); flex-shrink: 0; margin-top: 2px; }
 .qa-chev svg { width: 18px; height: 18px; }
+/* Módulo aún no disponible: tarjeta atenuada, sin interacción */
+.qa-card-soon { opacity: 0.62; cursor: default; }
+.qa-card-soon:hover { box-shadow: var(--shadow-sm); transform: none; border-color: var(--border); }
+.qa-card-soon .qa-icon { color: var(--text-dim); background: var(--surface-2, rgba(148,163,184,0.14)); }
+.qa-card-soon .badge { align-self: flex-start; flex-shrink: 0; }
 
 /* ============================================================
    DASHBOARD — AUTOMATIZACIONES DESTACADAS

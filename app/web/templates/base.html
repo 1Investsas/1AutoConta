@@ -41,23 +41,10 @@
       <span class="nav-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
     </button>
     <div class="nav-children" data-group-body="auto">
-      <div class="nav-subgroup">Flujos indirectos de efectivo</div>
-      <a href="#" class="nav-sub">Nómina</a>
-      <a href="{{ url_for('web.radian') }}" class="nav-sub {% if request.endpoint == 'web.radian' %}active{% endif %}">RADIAN</a>
-
-      <div class="nav-subgroup">Flujos directos de efectivo</div>
-      <a href="{{ url_for('web.banco') }}" class="nav-sub {% if request.endpoint in ('web.banco','web.banco_previsualizar') %}active{% endif %}">Bancos</a>
-      <a href="#" class="nav-sub">Caja general</a>
-      <a href="#" class="nav-sub">Cruces de saldos</a>
-
-      <div class="nav-subgroup">Tributario y fiscal</div>
-      <a href="#" class="nav-sub">Impuestos</a>
-      <a href="#" class="nav-sub">Cierres</a>
-      <a href="#" class="nav-sub">Ajustes</a>
-      <a href="#" class="nav-sub">Reclasificaciones</a>
-
-      <div class="nav-subgroup">Finanzas</div>
-      <a href="#" class="nav-sub">Flujo de caja proyectado vs ejecutado</a>
+      <a href="{{ url_for('web.categoria', slug='flujos-indirectos') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'flujos-indirectos' %}active{% endif %}">Flujos indirectos de efectivo</a>
+      <a href="{{ url_for('web.categoria', slug='flujos-directos') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'flujos-directos' %}active{% endif %}">Flujos directos de efectivo</a>
+      <a href="{{ url_for('web.categoria', slug='tributario-fiscal') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'tributario-fiscal' %}active{% endif %}">Tributario y fiscal</a>
+      <a href="{{ url_for('web.categoria', slug='finanzas') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'finanzas' %}active{% endif %}">Finanzas</a>
     </div>
 
     <!-- ===== CONFIGURACIONES ===== -->
@@ -67,15 +54,8 @@
       <span class="nav-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
     </button>
     <div class="nav-children" data-group-body="config">
-      <div class="nav-subgroup">Empresas</div>
-      <a href="{{ url_for('web.empresas') }}" class="nav-sub {% if request.endpoint in ('web.empresas','web.empresas_editar') %}active{% endif %}">Creación / Edición</a>
-      <a href="{{ url_for('web.empresas') }}" class="nav-sub">Maestros</a>
-      <a href="{{ url_for('web.empresas') }}" class="nav-sub">Estructura archivo bancos</a>
-      <a href="{{ url_for('web.historial') }}" class="nav-sub {% if request.endpoint == 'web.historial' %}active{% endif %}">Machine learning</a>
-
-      <div class="nav-subgroup">Usuarios</div>
-      <a href="{{ url_for('web.usuarios') }}" class="nav-sub {% if request.endpoint == 'web.usuarios' %}active{% endif %}">Usuarios y roles</a>
-      <a href="{{ url_for('web.auditoria') }}" class="nav-sub {% if request.endpoint == 'web.auditoria' %}active{% endif %}">Auditoría</a>
+      <a href="{{ url_for('web.categoria', slug='empresas') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'empresas' %}active{% endif %}">Empresas</a>
+      <a href="{{ url_for('web.categoria', slug='usuarios') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'usuarios' %}active{% endif %}">Usuarios</a>
     </div>
   </nav>
 

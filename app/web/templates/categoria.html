@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}{{ categoria.titulo }} — 1CONTIGO{% endblock %}
+{% block page_title %}{{ categoria.titulo }}{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">{{ categoria.subtitulo }}</p>{% endblock %}
+
+{% block content %}
+
+<section class="qa-grid">
+  {% for m in categoria.modulos %}
+  {% if m.endpoint %}
+  <a class="qa-card" href="{{ url_for(m.endpoint) }}">
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{{ m.icono | safe }}</svg></span>
+    <div class="qa-body">
+      <div class="qa-title">{{ m.nombre }}</div>
+      <div class="qa-desc">{{ m.descripcion }}</div>
+    </div>
+    <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+  </a>
+  {% else %}
+  <div class="qa-card qa-card-soon" aria-disabled="true" title="Próximamente">
+    <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{{ m.icono | safe }}</svg></span>
+    <div class="qa-body">
+      <div class="qa-title">{{ m.nombre }}</div>
+      <div class="qa-desc">{{ m.descripcion }}</div>
+    </div>
+    <span class="badge badge-warning">Próximamente</span>
+  </div>
+  {% endif %}
+  {% endfor %}
+</section>
+
+{% endblock %}
