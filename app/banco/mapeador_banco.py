@@ -1,14 +1,20 @@
 """
 Mapeador de movimientos bancarios al formato SIIGO.
 
-Genera dos FilaSiigo por cada movimiento principal:
+Genera, por cada movimiento principal, una línea del banco por el valor total
+y una o varias líneas de contrapartida (el lado opuesto):
   - Ingreso (valor > 0):
       Línea 1: banco  → DÉBITO  abs(valor)
-      Línea 2: contra → CRÉDITO abs(valor)
+      Línea 2…N: contra → CRÉDITO (suman abs(valor))
 
   - Egreso (valor < 0):
       Línea 1: banco  → CRÉDITO abs(valor)
-      Línea 2: contra → DÉBITO  abs(valor)
+      Línea 2…N: contra → DÉBITO  (suman abs(valor))
+
+El movimiento bancario es SIEMPRE una sola línea por el valor total. La
+contrapartida puede subdividirse en varias cuentas con importes distintos
+(que deben sumar el valor del movimiento); si no se subdivide, hay una única
+línea de contrapartida por el valor total.
 
 Para los movimientos 4x1000 enlazados a un egreso padre se agregan
 dos líneas adicionales dentro del MISMO consecutivo:
@@ -34,6 +40,50 @@ from app.config import (
     SIIGO_COMP_BANCO_EGRESO,
 )
 from app.siigo.mapeador import FilaSiigo
+
+
+def _normalizar_contrapartidas(
+    asig: dict, abs_valor, cuenta_unica: str
+) -> list[dict]:
+    """Devuelve la lista de partes de la contrapartida de un movimiento.
+
+    Si la asignación trae `contrapartidas` (subdivisión hecha por el usuario),
+    se usa esa lista de partes — cada una con su cuenta, monto y, opcionalmente,
+    NIT y concepto propios. Si no, se devuelve una única parte con la cuenta
+    contrapartida tradicional por el valor total del movimiento.
+
+    Solo se conservan las partes que tienen cuenta o monto; si tras filtrar no
+    queda ninguna, se devuelve una parte pendiente (sin cuenta) por el valor
+    total para que el movimiento se marque como pendiente, igual que antes.
+    """
+    crudas = asig.get("contrapartidas") or []
+    partes: list[dict] = []
+    for c in crudas:
+        cuenta = (c.get("cuenta") or "").strip()
+        monto_raw = c.get("monto", 0)
+        try:
+            monto = round(float(monto_raw), 2)
+        except (TypeError, ValueError):
+            monto = 0.0
+        if not cuenta and monto <= 0:
+            continue
+        partes.append({
+            "cuenta":      cuenta,
+            "monto":       monto,
+            "nit_tercero": (c.get("nit_tercero") or "").strip(),
+            "concepto":    (c.get("concepto") or "").strip(),
+        })
+
+    if partes:
+        return partes
+
+    # Sin subdivisión: una sola contrapartida por el valor total.
+    return [{
+        "cuenta":      cuenta_unica,
+        "monto":       float(abs_valor),
+        "nit_tercero": "",
+        "concepto":    "",
+    }]
 
 
 def mapear_banco_a_siigo(
@@ -121,60 +171,58 @@ def mapear_banco_a_siigo(
         observaciones        = (
             f"Banco {m.cuenta_banco_num} | Cód.{m.codigo_banco} | {m.descripcion}"
         )
-        es_pendiente         = not cuenta_contrapartida
 
-        # ── Líneas del movimiento principal ──────────────────────────────
-        if m.valor > 0:
-            # Ingreso: débito banco / crédito contrapartida
+        # ── Contrapartida(s) ──────────────────────────────────────────────
+        # El movimiento bancario es SIEMPRE una sola línea por el valor total.
+        # La contrapartida, en cambio, puede subdividirse en varias cuentas con
+        # importes distintos (que deben sumar el valor del movimiento). Si no se
+        # subdivide, se usa la cuenta única `cuenta_contrapartida` (comportamiento
+        # histórico).
+        partes = _normalizar_contrapartidas(asig, abs_valor, cuenta_contrapartida)
+        es_pendiente = all(not p["cuenta"] for p in partes)
+
+        # Lado contable: ingreso → banco débito / contrapartida crédito;
+        # egreso → banco crédito / contrapartida débito.
+        banco_es_debito = m.valor > 0
+
+        # Línea del banco (una sola, por el valor total)
+        filas.append(FilaSiigo(
+            tipo_comprobante=tipo_comp,
+            consecutivo_comprobante=consecutivo,
+            fecha=fecha_str,
+            codigo_cuenta=cuenta_banco,
+            nit_tercero=nit_tercero,
+            descripcion=descripcion,
+            observaciones=observaciones,
+            debito=float(abs_valor) if banco_es_debito else 0.0,
+            credito=0.0 if banco_es_debito else float(abs_valor),
+            es_pendiente=es_pendiente,
+        ))
+
+        # Línea(s) de la contrapartida (lado opuesto al banco)
+        for parte in partes:
+            p_cuenta = parte["cuenta"]
+            p_monto  = float(parte["monto"])
+            # NIT por parte: los movimientos bancarios siempre van a nombre del
+            # banco; en el resto, la parte puede fijar su propio tercero y, si no,
+            # hereda el del movimiento.
+            if m.es_bancario and nit_banco:
+                p_nit = nit_banco
+            else:
+                p_nit = (parte.get("nit_tercero") or "").strip() or nit_tercero
+            p_desc = (parte.get("concepto") or "").strip() or descripcion
+
             filas.append(FilaSiigo(
                 tipo_comprobante=tipo_comp,
                 consecutivo_comprobante=consecutivo,
                 fecha=fecha_str,
-                codigo_cuenta=cuenta_banco,
-                nit_tercero=nit_tercero,
-                descripcion=descripcion,
+                codigo_cuenta=p_cuenta,
+                nit_tercero=p_nit,
+                descripcion=p_desc,
                 observaciones=observaciones,
-                debito=float(abs_valor),
-                credito=0.0,
-                es_pendiente=es_pendiente,
-            ))
-            filas.append(FilaSiigo(
-                tipo_comprobante=tipo_comp,
-                consecutivo_comprobante=consecutivo,
-                fecha=fecha_str,
-                codigo_cuenta=cuenta_contrapartida,
-                nit_tercero=nit_tercero,
-                descripcion=descripcion,
-                observaciones=observaciones,
-                debito=0.0,
-                credito=float(abs_valor),
-                es_pendiente=es_pendiente,
-            ))
-        else:
-            # Egreso: crédito banco / débito contrapartida
-            filas.append(FilaSiigo(
-                tipo_comprobante=tipo_comp,
-                consecutivo_comprobante=consecutivo,
-                fecha=fecha_str,
-                codigo_cuenta=cuenta_banco,
-                nit_tercero=nit_tercero,
-                descripcion=descripcion,
-                observaciones=observaciones,
-                debito=0.0,
-                credito=float(abs_valor),
-                es_pendiente=es_pendiente,
-            ))
-            filas.append(FilaSiigo(
-                tipo_comprobante=tipo_comp,
-                consecutivo_comprobante=consecutivo,
-                fecha=fecha_str,
-                codigo_cuenta=cuenta_contrapartida,
-                nit_tercero=nit_tercero,
-                descripcion=descripcion,
-                observaciones=observaciones,
-                debito=float(abs_valor),
-                credito=0.0,
-                es_pendiente=es_pendiente,
+                debito=0.0 if banco_es_debito else p_monto,
+                credito=p_monto if banco_es_debito else 0.0,
+                es_pendiente=not p_cuenta,
             ))
 
         # ── Líneas 4x1000 vinculadas al mismo consecutivo ───────────────────────────────

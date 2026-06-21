@@ -1617,6 +1617,40 @@ def banco_previsualizar():
 # POST /banco/exportar — Genera el Excel SIIGO con las asignaciones del usuario
 # ---------------------------------------------------------------------------
 
+def _recolectar_contrapartidas(idx: int) -> list[dict]:
+    """Lee del formulario las partes de la contrapartida subdividida de un movimiento.
+
+    Cada movimiento subdividido envía arreglos paralelos `sub_<idx>_cuenta`,
+    `sub_<idx>_monto`, `sub_<idx>_nit` y `sub_<idx>_concepto`. Se ignoran las
+    filas totalmente vacías (sin cuenta ni monto). Devuelve [] si el movimiento
+    no fue subdividido.
+    """
+    cuentas   = request.form.getlist(f"sub_{idx}_cuenta")
+    if not cuentas:
+        return []
+    montos    = request.form.getlist(f"sub_{idx}_monto")
+    nits      = request.form.getlist(f"sub_{idx}_nit")
+    conceptos = request.form.getlist(f"sub_{idx}_concepto")
+
+    partes: list[dict] = []
+    for i, cta in enumerate(cuentas):
+        cta = (cta or "").strip()
+        monto_raw = (montos[i] if i < len(montos) else "").strip()
+        if not cta and not monto_raw:
+            continue
+        try:
+            monto = round(float(monto_raw), 2)
+        except ValueError:
+            monto = 0.0
+        partes.append({
+            "cuenta":      cta,
+            "monto":       monto,
+            "nit_tercero": (nits[i].strip() if i < len(nits) else ""),
+            "concepto":    (conceptos[i].strip() if i < len(conceptos) else ""),
+        })
+    return partes
+
+
 @bp.route("/banco/exportar", methods=["POST"])
 @require_permission("banco.exportar")
 def banco_exportar():
@@ -1649,6 +1683,23 @@ def banco_exportar():
             "nit_tercero":         request.form.get(f"nit_{m.idx}", "").strip(),
             "tipo_comprobante":    request.form.get(f"tipo_comp_{m.idx}", "").strip(),
         }
+
+        # Subdivisión de la contrapartida (opcional): el movimiento bancario
+        # permanece por un solo valor, pero la contrapartida puede repartirse
+        # en varias cuentas por importes distintos que sumen el valor total.
+        contrapartidas = _recolectar_contrapartidas(m.idx)
+        if contrapartidas:
+            suma = round(sum(c["monto"] for c in contrapartidas), 2)
+            total = round(abs(float(m.valor)), 2)
+            if abs(suma - total) >= 0.01:
+                flash(
+                    f"La suma de la contrapartida subdividida (${suma:,.2f}) debe "
+                    f"igualar el valor del movimiento (${total:,.2f}).",
+                    "error",
+                )
+                return redirect(url_for("web.banco"))
+            asig["contrapartidas"] = contrapartidas
+
         asignaciones.append(asig)
 
     try:
