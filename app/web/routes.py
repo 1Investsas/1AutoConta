@@ -1160,17 +1160,19 @@ def analytics():
             "compras_count":  [r["compras_count"] for r in evolucion],
         },
         "distribucion": {
-            "labels": [r["clasificacion"].replace("_", " ") for r in distribucion],
+            # clasificacion es nullable: documentos sin clasificar caen en "Sin clasificar".
+            "labels": [(r["clasificacion"] or "Sin clasificar").replace("_", " ") for r in distribucion],
             "counts": [r["count"] for r in distribucion],
             "montos": [round(r["monto"], 2) for r in distribucion],
         },
         "top_proveed": {
-            "labels": [r["nombre"][:25] for r in top_proveed],
+            # nombre puede venir vacío aunque el NIT exista: usar el NIT como respaldo.
+            "labels": [(r["nombre"] or r["nit"] or "—")[:25] for r in top_proveed],
             "montos": [round(r["monto"], 2) for r in top_proveed],
             "counts": [r["count"] for r in top_proveed],
         },
         "top_clientes": {
-            "labels": [r["nombre"][:25] for r in top_clientes],
+            "labels": [(r["nombre"] or r["nit"] or "—")[:25] for r in top_clientes],
             "montos": [round(r["monto"], 2) for r in top_clientes],
             "counts": [r["count"] for r in top_clientes],
         },
