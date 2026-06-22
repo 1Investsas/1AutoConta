@@ -143,86 +143,73 @@ button { font-family: inherit; }
 .sidebar-nav::-webkit-scrollbar { width: 6px; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 3px; }
 
-/* Encabezado de grupo / ítem de primer nivel */
-.nav-top, .nav-group {
+/* Etiqueta de sección (ANALÍTICAS, AUTOMATIZACIONES, …) */
+.nav-section {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--side-muted);
+  padding: 16px 12px 6px;
+}
+
+/* Ítem de menú (icono + etiqueta) */
+.nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 12px;
-  border: none;
-  background: none;
-  color: var(--side-text);
-  font-size: 0.9rem;
-  font-weight: 600;
+  padding: 9px 12px;
+  margin: 2px 0;
   border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-align: left;
+  color: var(--side-text);
+  font-size: 0.86rem;
+  font-weight: 500;
   transition: background var(--transition), color var(--transition);
-  margin-top: 4px;
 }
-.nav-top:hover, .nav-group:hover { background: rgba(255,255,255,0.06); color: #fff; }
-.nav-top.active {
+.nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.nav-item.active {
   background: var(--blue-600);
   color: #fff;
-  box-shadow: 0 4px 14px rgba(37,99,235,0.45);
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(37,99,235,0.40);
 }
+/* Dashboard: ítem destacado con fondo sutil permanente */
+.nav-home { background: rgba(255,255,255,0.05); }
+.nav-home.active { background: var(--blue-600); }
+
 .nav-ico { width: 18px; height: 18px; flex-shrink: 0; display: inline-flex; }
 .nav-ico svg { width: 100%; height: 100%; }
-.nav-group .nav-chevron {
-  margin-left: auto;
-  width: 16px; height: 16px;
-  transition: transform var(--transition);
-  opacity: 0.7;
-}
-.nav-group[aria-expanded="false"] .nav-chevron { transform: rotate(-90deg); }
 
-/* Contenedor de hijos (con conector tipo árbol) */
-.nav-children {
-  position: relative;
-  margin: 2px 0 2px 21px;
-  padding-left: 2px;
-  border-left: 1px solid rgba(255,255,255,0.13);
-  overflow: hidden;
-  transition: max-height var(--transition);
-}
-.nav-children[hidden] { display: none; }
-
-.nav-subgroup {
-  font-size: 0.74rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--side-muted);
-  padding: 9px 10px 4px 14px;
-  position: relative;
-}
-
-/* Enlace de hoja */
-.nav-sub {
-  position: relative;
-  display: block;
-  padding: 7px 10px 7px 16px;
-  font-size: 0.84rem;
-  font-weight: 500;
-  color: var(--side-text);
-  border-radius: 8px;
-  margin: 1px 0;
-  transition: background var(--transition), color var(--transition);
-}
-.nav-sub::before {
-  content: '';
-  position: absolute;
-  left: -2px; top: 50%;
-  width: 10px; height: 1px;
-  background: rgba(255,255,255,0.18);
-}
-.nav-sub:hover { background: rgba(255,255,255,0.07); color: #fff; }
-.nav-sub.active {
-  background: var(--blue-600);
+/* Tarjeta promocional al pie del menú */
+.nav-promo {
+  margin: 14px 14px 4px;
+  padding: 18px 16px;
+  border-radius: var(--radius);
+  background: linear-gradient(155deg, var(--blue-600) 0%, var(--navy-800) 100%);
   color: #fff;
-  font-weight: 600;
+  position: relative;
+  overflow: hidden;
 }
-.nav-sub.active::before { background: var(--blue-500); }
+.nav-promo-ico {
+  width: 38px; height: 38px;
+  border-radius: 11px;
+  background: rgba(255,255,255,0.16);
+  display: grid; place-items: center;
+  margin-bottom: 12px;
+  color: #fff;
+}
+.nav-promo-ico svg { width: 20px; height: 20px; }
+.nav-promo h4 { font-size: 0.92rem; font-weight: 700; line-height: 1.25; margin-bottom: 6px; }
+.nav-promo p { font-size: 0.74rem; color: rgba(255,255,255,0.82); line-height: 1.4; margin-bottom: 14px; }
+.nav-promo .btn-promo {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #fff; color: var(--blue-600);
+  font-size: 0.78rem; font-weight: 700;
+  padding: 7px 16px; border-radius: var(--radius-btn);
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.nav-promo .btn-promo:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.25); }
 
 /* --- Perfil al pie --- */
 .sidebar-footer {
@@ -798,6 +785,196 @@ button { font-family: inherit; }
 }
 .btn-row-del { flex: 0 0 auto; color: var(--danger); }
 .btn-row-del:hover { border-color: var(--danger); background: var(--danger-bg); }
+
+/* ============================================================
+   MÓDULO EMPRESAS
+   ============================================================ */
+/* Cabecera de tarjeta: icono + títulos + acciones */
+.card-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.card-head-main { display: flex; gap: 14px; align-items: flex-start; min-width: 0; }
+.card-head-ico {
+  width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0;
+  display: grid; place-items: center;
+  color: var(--blue-600); background: var(--info-bg);
+}
+.card-head-ico svg { width: 22px; height: 22px; }
+.card-head-text h2 { font-size: 1.05rem; font-weight: 700; color: var(--text); line-height: 1.25; }
+.card-head-text p {
+  font-size: 0.84rem; color: var(--text-dim);
+  margin-top: 5px; max-width: 660px; line-height: 1.5;
+}
+.card-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Caja de búsqueda */
+.search-box { position: relative; display: inline-flex; align-items: center; }
+.search-box svg {
+  position: absolute; left: 12px; width: 16px; height: 16px;
+  color: var(--text-dim); pointer-events: none;
+}
+.search-box input {
+  padding: 9px 14px 9px 35px;
+  border: 1px solid var(--border); border-radius: var(--radius-btn);
+  font-family: var(--font); font-size: 0.85rem; color: var(--text);
+  background: var(--surface); min-width: 230px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.search-box input:focus {
+  outline: none; border-color: var(--blue-500);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+
+/* Tabla de empresas */
+.tbl-scroll { overflow-x: auto; }
+.empresa-sigla { font-weight: 700; color: var(--text); margin-right: 8px; }
+.empresa-row td { padding: 14px; }
+.empresa-activa td { background: rgba(37,99,235,0.05); }
+.empresa-activa td:first-child { box-shadow: inset 3px 0 0 var(--blue-600); }
+.cell-ico {
+  display: inline-flex; vertical-align: middle; margin-right: 7px;
+  color: var(--text-dim);
+}
+.cell-ico svg { width: 16px; height: 16px; }
+td code {
+  font-family: monospace; font-size: 0.78rem; color: var(--text-dim);
+  background: var(--panel2); padding: 2px 7px; border-radius: 6px;
+}
+td.mono { font-family: monospace; font-size: 0.82rem; }
+
+/* Botones de acción de fila */
+.tbl-actions { display: inline-flex; gap: 7px; align-items: center; justify-content: flex-end; }
+.tbl-action {
+  width: 34px; height: 34px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-dim); display: grid; place-items: center; cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.tbl-action:hover { border-color: var(--blue-500); color: var(--blue-600); background: var(--info-bg); }
+.tbl-action svg { width: 16px; height: 16px; display: block; }
+.tbl-action.danger:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+.row-menu-list button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Pie de tabla: conteo + paginador */
+.tbl-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-top: 16px;
+}
+.tbl-foot .muted { font-size: 0.82rem; }
+.pager { display: inline-flex; gap: 6px; align-items: center; }
+.pager button, .pager .page {
+  min-width: 32px; height: 32px; padding: 0 8px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-dim);
+  display: grid; place-items: center; cursor: pointer;
+  font-size: 0.82rem; font-weight: 600;
+}
+.pager button:disabled { opacity: 0.45; cursor: default; }
+.pager button:not(:disabled):hover { border-color: var(--blue-500); color: var(--blue-600); }
+.pager button svg { width: 15px; height: 15px; }
+.pager .page.active { background: var(--blue-600); color: #fff; border-color: var(--blue-600); }
+
+/* Grid inferior (subir maestros + tip · crear empresa) */
+.empresas-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 20px; align-items: start; margin-top: 20px;
+}
+.col-stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+/* Campos de formulario genéricos del módulo */
+.form-field { margin-bottom: 15px; }
+.form-field > label {
+  display: block; font-size: 0.82rem; font-weight: 600;
+  color: var(--text-dim); margin-bottom: 6px;
+}
+.form-field .req { color: var(--danger); }
+.form-field .hint { font-weight: 400; color: var(--text-dim); font-size: 0.74rem; }
+.form-field input[type="text"],
+.form-field input[type="number"],
+.form-field select,
+.form-field textarea {
+  width: 100%; font-family: var(--font); font-size: 0.85rem; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 11px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.form-field textarea { resize: vertical; font-family: monospace; }
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  outline: none; border-color: var(--blue-500);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+.form-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-subtitle { font-size: 0.92rem; font-weight: 700; color: var(--text); margin: 4px 0 14px; }
+
+/* Campo de archivo (label + input nativo "Elegir archivo") */
+.file-field {
+  display: grid; grid-template-columns: 210px 1fr; gap: 14px;
+  align-items: center; margin-bottom: 14px;
+}
+.file-field > label { font-size: 0.82rem; font-weight: 600; color: var(--text-dim); }
+.file-field input[type="file"] { font-size: 0.8rem; color: var(--text-dim); min-width: 0; }
+.file-field input[type="file"]::file-selector-button {
+  padding: 7px 14px; margin-right: 12px; border-radius: var(--radius-btn);
+  border: 1px solid var(--border); background: var(--panel2); color: var(--text);
+  font-family: var(--font); font-weight: 600; font-size: 0.8rem; cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.file-field input[type="file"]::file-selector-button:hover {
+  border-color: var(--blue-500); color: var(--blue-600);
+}
+
+/* Acordeón (secciones avanzadas de "Crear empresa") */
+.accordion {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  margin-bottom: 10px; overflow: hidden; background: var(--surface);
+}
+.accordion > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 13px; padding: 13px 15px;
+}
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary:hover { background: var(--panel2); }
+.accordion-ico {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center; color: var(--blue-600); background: var(--info-bg);
+}
+.accordion-ico svg { width: 19px; height: 19px; }
+.accordion-text { flex: 1; min-width: 0; }
+.accordion-text strong { display: block; font-size: 0.9rem; font-weight: 700; color: var(--text); }
+.accordion-text span { font-size: 0.78rem; color: var(--text-dim); }
+.accordion-chev { flex-shrink: 0; color: var(--text-dim); transition: transform var(--transition); }
+.accordion-chev svg { width: 18px; height: 18px; display: block; }
+.accordion[open] .accordion-chev { transform: rotate(90deg); }
+.accordion[open] > summary { border-bottom: 1px solid var(--border); background: var(--panel2); }
+.accordion-body { padding: 16px; }
+.accordion-body .muted { font-size: 0.8rem; line-height: 1.45; margin-bottom: 12px; }
+
+/* Tarjeta "¿Sabías que?" */
+.card-tip { display: flex; gap: 16px; align-items: center; }
+.card-tip-ico {
+  width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0;
+  display: grid; place-items: center; color: var(--gold); background: var(--warning-bg);
+}
+.card-tip-ico svg { width: 22px; height: 22px; }
+.card-tip h3 { font-size: 0.92rem; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+.card-tip p { font-size: 0.8rem; color: var(--text-dim); line-height: 1.5; }
+
+/* Acciones centradas (botones de envío) */
+.card-actions-center {
+  display: flex; justify-content: center; align-items: center;
+  gap: 10px; margin-top: 18px;
+}
+
+@media (max-width: 1100px) {
+  .empresas-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .form-cols { grid-template-columns: 1fr; }
+  .file-field { grid-template-columns: 1fr; gap: 6px; }
+}
 
 /* ============================================================
    PIE DE MÓDULO — GUÍA RÁPIDA (stepper) + ACTIVIDAD RECIENTE
