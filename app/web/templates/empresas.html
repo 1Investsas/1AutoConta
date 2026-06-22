@@ -1,6 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Empresas — contable-auto{% endblock %}
+{% block title %}Empresas — 1CONTIGO{% endblock %}
 {% block page_title %}Empresas{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Gestiona las empresas, cuentas contables y extractos bancarios.</p>{% endblock %}
 
 {% block content %}
 
@@ -8,238 +9,412 @@
 {% set editando = empresa_editar is defined and empresa_editar %}
 {% set f = (empresa_editar.formato_banco_efectivo() if editando else formato_default) %}
 
+<!-- ===================== EMPRESAS REGISTRADAS ===================== -->
 <div class="card">
-  <h2>Empresas registradas</h2>
-  <p class="muted">
-    La empresa activa determina la base de datos, los archivos maestros
-    (plan de cuentas, terceros, comprobantes), las cuentas contables por
-    defecto y el formato del extracto bancario que usa la aplicación.
-    La selección rápida en la barra lateral se hace por la <strong>sigla</strong>.
-  </p>
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Sigla</th><th>Nombre completo</th><th>NIT</th><th>Cuenta banco</th>
-        <th>Carpeta maestros</th><th>Base de datos</th><th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for e in empresas_disponibles %}
-      <tr {% if e.id == empresa_actual.id %}style="font-weight:bold"{% endif %}>
-        <td>{{ e.sigla_efectiva }}{% if e.id == empresa_actual.id %} ✓{% endif %}</td>
-        <td>{{ e.nombre }}</td>
-        <td>{{ e.nit }}</td>
-        <td>{{ e.cuentas_banco_efectivas() | map(attribute='cuenta') | join(', ') }}</td>
-        <td><code>{{ e.data_category }}/</code></td>
-        <td><code>{{ e.db_path }}</code></td>
-        <td style="white-space:nowrap">
-          <a href="{{ url_for('web.empresas_editar', empresa_id=e.id) }}" class="btn btn-sm">✏️ Editar</a>
-          {% if not e.es_principal %}
-          <form method="post" action="{{ url_for('web.empresas_eliminar', empresa_id=e.id) }}"
-                onsubmit="return confirm('¿Eliminar la empresa {{ e.nombre }}? Sus archivos y BD no se borran, solo el registro.');"
-                style="display:inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm">🗑️ Eliminar</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+  <div class="card-head">
+    <div class="card-head-main">
+      <span class="card-head-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg>
+      </span>
+      <div class="card-head-text">
+        <h2>Empresas registradas</h2>
+        <p>
+          La empresa activa determina la base de datos, los archivos maestros (plan de cuentas,
+          terceros, comprobantes), las cuentas contables por defecto y el formato del extracto
+          bancario que usa la aplicación.
+        </p>
+      </div>
+    </div>
+    <div class="card-head-actions">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="buscarEmpresa" placeholder="Buscar empresa…" autocomplete="off">
+      </div>
+      <a href="#form-empresa" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Nueva empresa
+      </a>
+    </div>
+  </div>
 
-<div class="card">
-  <h2>Subir archivos maestros de una empresa</h2>
-  <form method="post" action="{{ url_for('web.empresas_maestros') }}" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="form-row">
-      <label>Empresa</label>
-      <select name="empresa_id">
+  <div class="tbl-scroll">
+    <table id="tablaEmpresas">
+      <thead>
+        <tr>
+          <th>Sigla</th><th>Nombre completo</th><th>NIT</th><th>Cuenta banco</th>
+          <th>Carpeta maestros</th><th>Base de datos</th><th class="text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
         {% for e in empresas_disponibles %}
-        <option value="{{ e.id }}"
-                {% if e.id == (empresa_editar.id if editando else empresa_actual.id) %}selected{% endif %}>
-          {{ e.sigla_efectiva }} — {{ e.nombre }}
-        </option>
+        <tr class="empresa-row {% if e.id == empresa_actual.id %}empresa-activa{% endif %}" data-buscar="{{ (e.sigla_efectiva ~ ' ' ~ e.nombre ~ ' ' ~ e.nit)|lower }}">
+          <td>
+            <span class="empresa-sigla">{{ e.sigla_efectiva }}</span>
+            {% if e.id == empresa_actual.id %}<span class="pill pill-ok">Activa</span>{% endif %}
+          </td>
+          <td>{{ e.nombre }}</td>
+          <td class="mono">{{ e.nit }}</td>
+          <td class="mono">{{ e.cuentas_banco_efectivas() | map(attribute='cuenta') | join(', ') }}</td>
+          <td>
+            <span class="cell-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></span>
+            <code>{{ e.data_category }}/</code>
+          </td>
+          <td>
+            <span class="cell-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></span>
+            <code>{{ e.db_path }}</code>
+          </td>
+          <td>
+            <div class="tbl-actions">
+              <a href="{{ url_for('web.empresas_editar', empresa_id=e.id) }}" class="tbl-action" title="Editar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              </a>
+              {% if e.es_principal %}
+              <div class="row-actions">
+                <button type="button" class="tbl-action row-menu" aria-haspopup="true" aria-expanded="false" title="Más opciones">
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+                </button>
+                <div class="row-menu-list" hidden>
+                  <a href="{{ url_for('web.empresas_editar', empresa_id=e.id) }}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    Editar empresa
+                  </a>
+                  <hr>
+                  <button type="button" disabled title="La empresa principal no se puede eliminar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    Eliminar (principal)
+                  </button>
+                </div>
+              </div>
+              {% else %}
+              <form method="post" action="{{ url_for('web.empresas_eliminar', empresa_id=e.id) }}"
+                    onsubmit="return confirm('¿Eliminar la empresa {{ e.nombre }}? Sus archivos y BD no se borran, solo el registro.');"
+                    style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="tbl-action danger" title="Eliminar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
         {% endfor %}
-      </select>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tbl-foot">
+    <span class="muted">Mostrando 1 a {{ empresas_disponibles|length }} de {{ empresas_disponibles|length }} empresas</span>
+    <div class="pager">
+      <button type="button" title="Anterior" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+      <span class="page active">1</span>
+      <button type="button" title="Siguiente" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>
     </div>
-    <div class="form-row">
-      <label>Listado de Terceros (.xlsx)</label>
-      <input type="file" name="terceros" accept=".xlsx,.xls">
-    </div>
-    <div class="form-row">
-      <label>Listado de Cuentas Contables (.xlsx)</label>
-      <input type="file" name="cuentas" accept=".xlsx,.xls">
-    </div>
-    <div class="form-row">
-      <label>Tipos de comprobante contable (.xlsx)</label>
-      <input type="file" name="comprobantes" accept=".xlsx,.xls">
-    </div>
-    <button type="submit" class="btn btn-primary">Subir maestros</button>
-  </form>
+  </div>
 </div>
 
-<div class="card" id="form-empresa">
-  <h2>
-    {% if editando %}Editar empresa: {{ empresa_editar.sigla_efectiva }}{% else %}Crear empresa{% endif %}
-  </h2>
-  {% if editando and empresa_editar.es_principal %}
-  <p class="muted">
-    Estás editando la empresa principal. Los cambios se guardan y tienen
-    prioridad sobre las variables de entorno (.env). Su base de datos y su
-    carpeta de maestros no cambian.
-  </p>
-  {% endif %}
-  <form method="post"
-        action="{% if editando %}{{ url_for('web.empresas_actualizar', empresa_id=empresa_editar.id) }}{% else %}{{ url_for('web.empresas_crear') }}{% endif %}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<!-- ===================== GRID INFERIOR ===================== -->
+<div class="empresas-grid">
 
-    <h3>Identificación</h3>
-    <div class="form-row">
-      <label>Nombre completo *</label>
-      <input type="text" name="nombre" required placeholder="ACME SAS"
-             value="{{ empresa_editar.nombre if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Sigla * <small class="muted">(para seleccionar la empresa)</small></label>
-      <input type="text" name="sigla" required placeholder="ACME"
-             value="{{ empresa_editar.sigla if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>NIT *</label>
-      <input type="text" name="nit" required placeholder="900123456"
-             value="{{ empresa_editar.nit if editando else '' }}">
-    </div>
+  <!-- Columna izquierda -->
+  <div class="col-stack">
 
-    <h3>Cuentas contables de banco</h3>
-    <p class="muted">
-      La o las cuentas contables de los bancos de la empresa. Aplican a todos
-      los movimientos del extracto. Si configuras más de una, el módulo de
-      Bancos te dejará elegir cuál usar en cada extracto.
-    </p>
-    {% set cuentas_cfg = empresa_editar.cuentas_banco_efectivas() if editando else [] %}
-    <div id="cuentasBancoList" class="config-list">
-      {% for c in cuentas_cfg %}
-      <div class="config-row">
-        <input type="text" name="cuenta_banco_cuenta" class="cfg-cuenta-ac mono"
-               placeholder="11100501" value="{{ c.cuenta }}" autocomplete="off">
-        <input type="text" name="cuenta_banco_etiqueta"
-               placeholder="Etiqueta (opcional, ej. Bancolombia Ahorros)" value="{{ c.etiqueta }}">
-        <button type="button" class="btn btn-sm btn-row-del" title="Quitar">✕</button>
+    <!-- Subir archivos maestros -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-main">
+          <span class="card-head-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="m8 17 4-4 4 4"/><path d="M20 16.5A4.5 4.5 0 0 0 17 8.5h-1.3A7 7 0 1 0 4 15"/></svg>
+          </span>
+          <div class="card-head-text">
+            <h2>Subir archivos maestros de una empresa</h2>
+          </div>
+        </div>
       </div>
-      {% endfor %}
-    </div>
-    <button type="button" class="btn btn-sm" id="addCuentaBanco">+ Agregar cuenta</button>
 
-    <h3>Bancos</h3>
-    <p class="muted">
-      NIT(s) de los bancos de la empresa (terceros). Se usan en el 4x1000, los
-      intereses y los gastos bancarios. Si configuras más de uno, podrás elegir
-      cuál usar en cada extracto.
-    </p>
-    {% set bancos_cfg = empresa_editar.bancos_efectivos() if editando else [] %}
-    <div id="bancosList" class="config-list">
-      {% for b in bancos_cfg %}
-      <div class="config-row">
-        <input type="text" name="banco_nit" class="cfg-tercero-ac mono"
-               placeholder="NIT o nombre del banco" value="{{ b.nit }}" autocomplete="off">
-        <input type="text" name="banco_nombre"
-               placeholder="Nombre (opcional)" value="{{ b.nombre }}">
-        <button type="button" class="btn btn-sm btn-row-del" title="Quitar">✕</button>
+      <form method="post" action="{{ url_for('web.empresas_maestros') }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-field">
+          <label>Empresa</label>
+          <select name="empresa_id">
+            {% for e in empresas_disponibles %}
+            <option value="{{ e.id }}"
+                    {% if e.id == (empresa_editar.id if editando else empresa_actual.id) %}selected{% endif %}>
+              {{ e.sigla_efectiva }} — {{ e.nombre }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="file-field">
+          <label>Listado de Terceros (.xlsx)</label>
+          <input type="file" name="terceros" accept=".xlsx,.xls">
+        </div>
+        <div class="file-field">
+          <label>Listado de Cuentas Contables (.xlsx)</label>
+          <input type="file" name="cuentas" accept=".xlsx,.xls">
+        </div>
+        <div class="file-field">
+          <label>Tipos de comprobante contable (.xlsx)</label>
+          <input type="file" name="comprobantes" accept=".xlsx,.xls">
+        </div>
+        <div class="card-actions-center">
+          <button type="submit" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>
+            Subir archivos maestros
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ¿Sabías que? -->
+    <div class="card card-tip">
+      <span class="card-tip-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z"/></svg>
+      </span>
+      <div class="card-tip-body">
+        <h3>¿Sabías que?</h3>
+        <p>
+          Una correcta configuración de empresas y cuentas contables te permitirá obtener
+          reportes más precisos y automatizar procesos financieros de manera eficiente.
+        </p>
       </div>
-      {% endfor %}
-    </div>
-    <button type="button" class="btn btn-sm" id="addBanco">+ Agregar banco</button>
-
-    <h3>Formato del extracto bancario</h3>
-    <p class="muted">
-      {% if editando %}Valores actuales de la empresa.{% else %}Déjalos vacíos para usar el formato por defecto.{% endif %}
-      Las columnas se cuentan desde 0.
-    </p>
-    <div class="form-row">
-      <label>Delimitador (default "{{ formato_default['delimitador'] }}")</label>
-      <input type="text" name="banco_delimitador" maxlength="1" placeholder="{{ formato_default['delimitador'] }}"
-             value="{{ f['delimitador'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Filas de encabezado a saltar (default {{ formato_default['filas_encabezado'] }})</label>
-      <input type="number" name="banco_filas_encabezado" min="0" placeholder="{{ formato_default['filas_encabezado'] }}"
-             value="{{ f['filas_encabezado'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Columna nº de cuenta (default {{ formato_default['col_cuenta'] }})</label>
-      <input type="number" name="banco_col_cuenta" min="0" placeholder="{{ formato_default['col_cuenta'] }}"
-             value="{{ f['col_cuenta'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Columna código banco (default {{ formato_default['col_codigo_banco'] }})</label>
-      <input type="number" name="banco_col_codigo_banco" min="0" placeholder="{{ formato_default['col_codigo_banco'] }}"
-             value="{{ f['col_codigo_banco'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Columna fecha (default {{ formato_default['col_fecha'] }})</label>
-      <input type="number" name="banco_col_fecha" min="0" placeholder="{{ formato_default['col_fecha'] }}"
-             value="{{ f['col_fecha'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Columna valor (default {{ formato_default['col_valor'] }})</label>
-      <input type="number" name="banco_col_valor" min="0" placeholder="{{ formato_default['col_valor'] }}"
-             value="{{ f['col_valor'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Columna código detalle (default {{ formato_default['col_codigo_detalle'] }})</label>
-      <input type="number" name="banco_col_codigo_detalle" min="0" placeholder="{{ formato_default['col_codigo_detalle'] }}"
-             value="{{ f['col_codigo_detalle'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Columna descripción (default {{ formato_default['col_descripcion'] }})</label>
-      <input type="number" name="banco_col_descripcion" min="0" placeholder="{{ formato_default['col_descripcion'] }}"
-             value="{{ f['col_descripcion'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Formato de fecha (default {{ formato_default['formato_fecha'] }})</label>
-      <input type="text" name="banco_formato_fecha" placeholder="{{ formato_default['formato_fecha'] }}"
-             value="{{ f['formato_fecha'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Separador decimal (default "{{ formato_default['separador_decimal'] }}")</label>
-      <input type="text" name="banco_separador_decimal" maxlength="1" placeholder="{{ formato_default['separador_decimal'] }}"
-             value="{{ f['separador_decimal'] if editando else '' }}">
-    </div>
-    <div class="form-row">
-      <label>Separador de miles (default "{{ formato_default['separador_miles'] }}")</label>
-      <input type="text" name="banco_separador_miles" maxlength="1" placeholder="{{ formato_default['separador_miles'] }}"
-             value="{{ f['separador_miles'] if editando else '' }}">
     </div>
 
-    <h3>Cuentas contables (avanzado, opcional)</h3>
-    <p class="muted">
-      Overrides en JSON sobre los valores por defecto. Solo incluye lo que cambia.
-    </p>
-    <div class="form-row">
-      <label>Cuentas de contrapartida por clasificación</label>
-      <textarea name="cuentas_contraparte" rows="3"
-                placeholder='{"FACTURA_VENTA": "13050502", "FACTURA_COMPRA": "22050502"}'>{% if editando and empresa_editar.cuentas_contraparte %}{{ empresa_editar.cuentas_contraparte | tojson }}{% endif %}</textarea>
-    </div>
-    <div class="form-row">
-      <label>Cuentas de impuestos</label>
-      <textarea name="cuentas_impuestos" rows="3"
-                placeholder='{"IVA": {"compra": "24081002", "venta": "24080502"}}'>{% if editando and empresa_editar.cuentas_impuestos %}{{ empresa_editar.cuentas_impuestos | tojson }}{% endif %}</textarea>
+  </div>
+
+  <!-- Columna derecha: Crear / Editar empresa -->
+  <div class="card" id="form-empresa">
+    <div class="card-head">
+      <div class="card-head-main">
+        <span class="card-head-ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M16 8h3a2 2 0 0 1 2 2v11"/><path d="M8 7h3M8 11h3M8 15h3"/></svg>
+        </span>
+        <div class="card-head-text">
+          <h2>{% if editando %}Editar empresa: {{ empresa_editar.sigla_efectiva }}{% else %}Crear nueva empresa{% endif %}</h2>
+          {% if editando and empresa_editar.es_principal %}
+          <p>Estás editando la empresa principal. Los cambios se guardan y tienen prioridad sobre las variables de entorno. Su base de datos y carpeta de maestros no cambian.</p>
+          {% endif %}
+        </div>
+      </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">
-      {% if editando %}Guardar cambios{% else %}Crear empresa{% endif %}
-    </button>
-    {% if editando %}
-    <a href="{{ url_for('web.empresas') }}" class="btn">Cancelar</a>
-    {% endif %}
-  </form>
+    <form method="post"
+          action="{% if editando %}{{ url_for('web.empresas_actualizar', empresa_id=empresa_editar.id) }}{% else %}{{ url_for('web.empresas_crear') }}{% endif %}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <h3 class="form-subtitle">Identificación</h3>
+      <div class="form-cols">
+        <div class="form-field">
+          <label>Nombre completo <span class="req">*</span></label>
+          <input type="text" name="nombre" required placeholder="Ingrese el nombre completo"
+                 value="{{ empresa_editar.nombre if editando else '' }}">
+        </div>
+        <div class="form-field">
+          <label>Sigla <span class="req">*</span> <span class="hint">(para seleccionar la empresa)</span></label>
+          <input type="text" name="sigla" required placeholder="Ej: ACME"
+                 value="{{ empresa_editar.sigla if editando else '' }}">
+        </div>
+      </div>
+      <div class="form-field">
+        <label>NIT <span class="req">*</span></label>
+        <input type="text" name="nit" required placeholder="Ej: 900123456"
+               value="{{ empresa_editar.nit if editando else '' }}">
+      </div>
+
+      {% set cuentas_cfg = empresa_editar.cuentas_banco_efectivas() if editando else [] %}
+      {% set bancos_cfg = empresa_editar.bancos_efectivos() if editando else [] %}
+
+      <!-- Cuentas contables de banco -->
+      <details class="accordion" {% if editando %}open{% endif %}>
+        <summary>
+          <span class="accordion-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><circle cx="16.5" cy="14.5" r="1.4"/></svg></span>
+          <span class="accordion-text">
+            <strong>Cuentas contables de banco</strong>
+            <span>Configure las cuentas contables para los movimientos bancarios.</span>
+          </span>
+          <span class="accordion-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+        </summary>
+        <div class="accordion-body">
+          <p class="muted">
+            La o las cuentas contables de los bancos de la empresa. Aplican a todos los movimientos
+            del extracto. Si configuras más de una, el módulo de Bancos te dejará elegir cuál usar.
+          </p>
+          <div id="cuentasBancoList" class="config-list">
+            {% for c in cuentas_cfg %}
+            <div class="config-row">
+              <input type="text" name="cuenta_banco_cuenta" class="cfg-cuenta-ac mono"
+                     placeholder="11100501" value="{{ c.cuenta }}" autocomplete="off">
+              <input type="text" name="cuenta_banco_etiqueta"
+                     placeholder="Etiqueta (opcional, ej. Bancolombia Ahorros)" value="{{ c.etiqueta }}">
+              <button type="button" class="btn btn-sm btn-row-del" title="Quitar">✕</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="addCuentaBanco">+ Agregar cuenta</button>
+        </div>
+      </details>
+
+      <!-- Bancos -->
+      <details class="accordion" {% if editando %}open{% endif %}>
+        <summary>
+          <span class="accordion-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="5" y1="21" x2="5" y2="10"/><line x1="9" y1="21" x2="9" y2="10"/><line x1="15" y1="21" x2="15" y2="10"/><line x1="19" y1="21" x2="19" y2="10"/><path d="M12 3 21 8H3Z"/></svg></span>
+          <span class="accordion-text">
+            <strong>Bancos</strong>
+            <span>Defina los bancos y sus configuraciones de extracto.</span>
+          </span>
+          <span class="accordion-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+        </summary>
+        <div class="accordion-body">
+          <p class="muted">
+            NIT(s) de los bancos de la empresa (terceros). Se usan en el 4x1000, los intereses y
+            los gastos bancarios. Si configuras más de uno, podrás elegir cuál usar en cada extracto.
+          </p>
+          <div id="bancosList" class="config-list">
+            {% for b in bancos_cfg %}
+            <div class="config-row">
+              <input type="text" name="banco_nit" class="cfg-tercero-ac mono"
+                     placeholder="NIT o nombre del banco" value="{{ b.nit }}" autocomplete="off">
+              <input type="text" name="banco_nombre"
+                     placeholder="Nombre (opcional)" value="{{ b.nombre }}">
+              <button type="button" class="btn btn-sm btn-row-del" title="Quitar">✕</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="addBanco">+ Agregar banco</button>
+        </div>
+      </details>
+
+      <!-- Formato del extracto bancario -->
+      <details class="accordion" {% if editando %}open{% endif %}>
+        <summary>
+          <span class="accordion-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M8 13h8M8 17h6"/></svg></span>
+          <span class="accordion-text">
+            <strong>Formato del extracto bancario</strong>
+            <span>Personalice el formato y las columnas del extracto bancario.</span>
+          </span>
+          <span class="accordion-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+        </summary>
+        <div class="accordion-body">
+          <p class="muted">
+            {% if editando %}Valores actuales de la empresa.{% else %}Déjalos vacíos para usar el formato por defecto.{% endif %}
+            Las columnas se cuentan desde 0.
+          </p>
+          <div class="form-cols">
+            <div class="form-field">
+              <label>Delimitador <span class="hint">(default "{{ formato_default['delimitador'] }}")</span></label>
+              <input type="text" name="banco_delimitador" maxlength="1" placeholder="{{ formato_default['delimitador'] }}"
+                     value="{{ f['delimitador'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Filas de encabezado <span class="hint">(default {{ formato_default['filas_encabezado'] }})</span></label>
+              <input type="number" name="banco_filas_encabezado" min="0" placeholder="{{ formato_default['filas_encabezado'] }}"
+                     value="{{ f['filas_encabezado'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Columna nº de cuenta <span class="hint">(default {{ formato_default['col_cuenta'] }})</span></label>
+              <input type="number" name="banco_col_cuenta" min="0" placeholder="{{ formato_default['col_cuenta'] }}"
+                     value="{{ f['col_cuenta'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Columna código banco <span class="hint">(default {{ formato_default['col_codigo_banco'] }})</span></label>
+              <input type="number" name="banco_col_codigo_banco" min="0" placeholder="{{ formato_default['col_codigo_banco'] }}"
+                     value="{{ f['col_codigo_banco'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Columna fecha <span class="hint">(default {{ formato_default['col_fecha'] }})</span></label>
+              <input type="number" name="banco_col_fecha" min="0" placeholder="{{ formato_default['col_fecha'] }}"
+                     value="{{ f['col_fecha'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Columna valor <span class="hint">(default {{ formato_default['col_valor'] }})</span></label>
+              <input type="number" name="banco_col_valor" min="0" placeholder="{{ formato_default['col_valor'] }}"
+                     value="{{ f['col_valor'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Columna código detalle <span class="hint">(default {{ formato_default['col_codigo_detalle'] }})</span></label>
+              <input type="number" name="banco_col_codigo_detalle" min="0" placeholder="{{ formato_default['col_codigo_detalle'] }}"
+                     value="{{ f['col_codigo_detalle'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Columna descripción <span class="hint">(default {{ formato_default['col_descripcion'] }})</span></label>
+              <input type="number" name="banco_col_descripcion" min="0" placeholder="{{ formato_default['col_descripcion'] }}"
+                     value="{{ f['col_descripcion'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Formato de fecha <span class="hint">(default {{ formato_default['formato_fecha'] }})</span></label>
+              <input type="text" name="banco_formato_fecha" placeholder="{{ formato_default['formato_fecha'] }}"
+                     value="{{ f['formato_fecha'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Separador decimal <span class="hint">(default "{{ formato_default['separador_decimal'] }}")</span></label>
+              <input type="text" name="banco_separador_decimal" maxlength="1" placeholder="{{ formato_default['separador_decimal'] }}"
+                     value="{{ f['separador_decimal'] if editando else '' }}">
+            </div>
+            <div class="form-field">
+              <label>Separador de miles <span class="hint">(default "{{ formato_default['separador_miles'] }}")</span></label>
+              <input type="text" name="banco_separador_miles" maxlength="1" placeholder="{{ formato_default['separador_miles'] }}"
+                     value="{{ f['separador_miles'] if editando else '' }}">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Cuentas contables (avanzado) -->
+      <details class="accordion" {% if editando %}open{% endif %}>
+        <summary>
+          <span class="accordion-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg></span>
+          <span class="accordion-text">
+            <strong>Cuentas contables (avanzado, opcional)</strong>
+            <span>Configure cuentas contables por clasificación e impuestos.</span>
+          </span>
+          <span class="accordion-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+        </summary>
+        <div class="accordion-body">
+          <p class="muted">Overrides en JSON sobre los valores por defecto. Solo incluye lo que cambia.</p>
+          <div class="form-field">
+            <label>Cuentas de contrapartida por clasificación</label>
+            <textarea name="cuentas_contraparte" rows="3"
+                      placeholder='{"FACTURA_VENTA": "13050502", "FACTURA_COMPRA": "22050502"}'>{% if editando and empresa_editar.cuentas_contraparte %}{{ empresa_editar.cuentas_contraparte | tojson }}{% endif %}</textarea>
+          </div>
+          <div class="form-field">
+            <label>Cuentas de impuestos</label>
+            <textarea name="cuentas_impuestos" rows="3"
+                      placeholder='{"IVA": {"compra": "24081002", "venta": "24080502"}}'>{% if editando and empresa_editar.cuentas_impuestos %}{{ empresa_editar.cuentas_impuestos | tojson }}{% endif %}</textarea>
+          </div>
+        </div>
+      </details>
+
+      <div class="card-actions-center">
+        <button type="submit" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          {% if editando %}Guardar cambios{% else %}Crear empresa{% endif %}
+        </button>
+        {% if editando %}
+        <a href="{{ url_for('web.empresas') }}" class="btn btn-secondary">Cancelar</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
 </div>
 
 {% endblock %}
 
 {% block extra_scripts %}
+<script>
+// --- Filtro de búsqueda de empresas (cliente) ---
+(function () {
+  var input = document.getElementById('buscarEmpresa');
+  if (!input) return;
+  input.addEventListener('input', function () {
+    var q = input.value.trim().toLowerCase();
+    document.querySelectorAll('#tablaEmpresas .empresa-row').forEach(function (row) {
+      var hay = (row.getAttribute('data-buscar') || '');
+      row.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    });
+  });
+}());
+</script>
 <script>
 (function () {
   // Autocomplete reutilizable (cuentas o terceros) contra /api/*

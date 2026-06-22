@@ -24,40 +24,67 @@
 
     <!-- ===== DASHBOARD ===== -->
     <a href="{{ url_for('web.index') }}"
-       class="nav-top {% if request.endpoint == 'web.index' %}active{% endif %}">
+       class="nav-item nav-home {% if request.endpoint == 'web.index' %}active{% endif %}">
       <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5"/><path d="M5 10v10h14V10"/></svg></span>
       Dashboard
     </a>
-    <div class="nav-children">
-      <a href="{{ url_for('web.analytics') }}" class="nav-sub {% if request.endpoint == 'web.analytics' %}active{% endif %}">Analíticas</a>
-      <a href="#" class="nav-sub">Reportes / Informes</a>
-      <a href="#" class="nav-sub">Indicadores</a>
-    </div>
+
+    <!-- ===== ANALÍTICAS ===== -->
+    <div class="nav-section">Analíticas</div>
+    <a href="{{ url_for('web.analytics') }}"
+       class="nav-item {% if request.endpoint == 'web.analytics' %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M8 13h2v4H8zM13 11h2v6h-2z"/></svg></span>
+      Reportes / Informes
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 12l4-2.5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg></span>
+      Indicadores
+    </a>
 
     <!-- ===== AUTOMATIZACIONES ===== -->
-    <button type="button" class="nav-group" data-group="auto" aria-expanded="true">
-      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
-      Automatizaciones
-      <span class="nav-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-    </button>
-    <div class="nav-children" data-group-body="auto">
-      <a href="{{ url_for('web.categoria', slug='flujos-indirectos') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'flujos-indirectos' %}active{% endif %}">Flujos indirectos de efectivo</a>
-      <a href="{{ url_for('web.categoria', slug='flujos-directos') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'flujos-directos' %}active{% endif %}">Flujos directos de efectivo</a>
-      <a href="{{ url_for('web.categoria', slug='tributario-fiscal') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'tributario-fiscal' %}active{% endif %}">Tributario y fiscal</a>
-      <a href="{{ url_for('web.categoria', slug='finanzas') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'finanzas' %}active{% endif %}">Finanzas</a>
-    </div>
+    <div class="nav-section">Automatizaciones</div>
+    <a href="{{ url_for('web.categoria', slug='flujos-indirectos') }}"
+       class="nav-item {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'flujos-indirectos' %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg></span>
+      Flujos indirectos de efectivo
+    </a>
+    <a href="{{ url_for('web.categoria', slug='flujos-directos') }}"
+       class="nav-item {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'flujos-directos' %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3"/><path d="M21 17H8l3 3"/></svg></span>
+      Flujos directos de efectivo
+    </a>
+    <a href="{{ url_for('web.categoria', slug='tributario-fiscal') }}"
+       class="nav-item {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'tributario-fiscal' %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l3 3v17l-3-2-3 2-3-2-3 2V5Z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>
+      Tributario y fiscal
+    </a>
+    <a href="{{ url_for('web.categoria', slug='finanzas') }}"
+       class="nav-item {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'finanzas' %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="11"/></svg></span>
+      Finanzas
+    </a>
 
     <!-- ===== CONFIGURACIONES ===== -->
-    <button type="button" class="nav-group" data-group="config" aria-expanded="true">
-      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="18" r="2.2" fill="currentColor" stroke="none"/></svg></span>
-      Configuraciones
-      <span class="nav-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-    </button>
-    <div class="nav-children" data-group-body="config">
-      <a href="{{ url_for('web.categoria', slug='empresas') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'empresas' %}active{% endif %}">Empresas</a>
-      <a href="{{ url_for('web.categoria', slug='usuarios') }}" class="nav-sub {% if request.endpoint == 'web.categoria' and request.view_args.slug == 'usuarios' %}active{% endif %}">Usuarios</a>
-    </div>
+    <div class="nav-section">Configuraciones</div>
+    <a href="{{ url_for('web.empresas') }}"
+       class="nav-item {% if request.endpoint and request.endpoint.startswith('web.empresas') %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg></span>
+      Empresas
+    </a>
+    <a href="{{ url_for('web.usuarios') }}"
+       class="nav-item {% if request.endpoint and request.endpoint.startswith('web.usuarios') %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="3"/><path d="M3 21c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 3.5a3 3 0 0 1 0 6"/><path d="M21 21c0-2.5-1.4-4.5-3.5-5.5"/></svg></span>
+      Usuarios
+    </a>
   </nav>
+
+  <!-- ===== TARJETA PROMOCIONAL ===== -->
+  <div class="nav-promo">
+    <span class="nav-promo-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0Z"/><path d="M12 15 9 12a11 11 0 0 1 6-9c3 0 5 2 5 5a11 11 0 0 1-9 6Z"/><path d="M9 12H4s.5-2.8 2-4 4 0 4 0M12 15v5s2.8-.5 4-2 0-4 0-4"/></svg></span>
+    <h4>Optimiza tu gestión empresarial</h4>
+    <p>Automatiza procesos y toma decisiones con datos confiables.</p>
+    <a href="{{ url_for('web.index') }}" class="btn-promo">Conocer más</a>
+  </div>
 
   <div class="sidebar-footer">
     <div class="profile">
@@ -301,17 +328,6 @@ function toggleSidebar(open) {
 }
 document.getElementById('hamburger')?.addEventListener('click', () => toggleSidebar(!sidebar.classList.contains('open')));
 backdrop?.addEventListener('click', () => toggleSidebar(false));
-
-// --- Grupos colapsables del sidebar ---
-document.querySelectorAll('.nav-group').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const key = btn.dataset.group;
-    const body = document.querySelector(`[data-group-body="${key}"]`);
-    const expanded = btn.getAttribute('aria-expanded') === 'true';
-    btn.setAttribute('aria-expanded', String(!expanded));
-    if (body) body.hidden = expanded;
-  });
-});
 
 // --- Modal Automatizar proceso ---
 const modal = document.getElementById('automatizarModal');
