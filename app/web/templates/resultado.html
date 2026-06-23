@@ -36,11 +36,15 @@
 </div>
 
 <!-- Leyenda de colores -->
-<div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap">
+<div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center">
   <span class="pill pill-pendiente">🔴 Cuenta pendiente</span>
   <span class="pill pill-sugerida">🟠 Sugerida por el motor</span>
   <span class="pill pill-ok">🟢 Cuenta asignada</span>
   <span class="pill pill-warn">🟡 Sin tercero en maestro</span>
+  <button type="button" class="btn btn-secondary btn-sm" style="margin-left:auto"
+          onclick="abrirBuscadorCuentas()" title="Buscar una cuenta del plan contable">
+    🔍 Buscar cuenta
+  </button>
 </div>
 
 <!-- Tabs -->
@@ -405,6 +409,15 @@
 </style>
 
 <script>
+/* Abre el plan de cuentas en una ventana emergente para buscar el código. */
+function abrirBuscadorCuentas() {
+  var url = '{{ url_for("web.cuentas") }}?popup=1';
+  var win = window.open(url, 'buscadorCuentas',
+    'width=560,height=720,scrollbars=yes,resizable=yes');
+  if (win) win.focus();
+  else window.open(url, '_blank');
+}
+
 function toggleEditCuenta(id) {
   var display = document.getElementById('display_' + id);
   var edit    = document.getElementById('edit_' + id);

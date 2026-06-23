@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}1CONTIGO{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="popup-body">
+  <main class="page-content" style="padding:18px 20px 28px">
+    {% block content %}{% endblock %}
+  </main>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -130,6 +130,12 @@ CATEGORIAS: dict[str, dict] = {
                          '<path d="M8 13h8M8 17h6"/>',
             },
             {
+                "nombre": "Consultar cuentas",
+                "descripcion": "Busca cualquier cuenta del plan contable",
+                "endpoint": "web.cuentas",
+                "icono": '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+            },
+            {
                 "nombre": "Estructura archivo bancos",
                 "descripcion": "Formato del extracto bancario de la empresa",
                 "endpoint": "web.empresas",

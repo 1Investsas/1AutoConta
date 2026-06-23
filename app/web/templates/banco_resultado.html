@@ -208,6 +208,8 @@
     <div class="card-title">Acciones</div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
       <button type="submit" class="btn btn-primary btn-sm" id="btnExportar">⬇ Generar SIIGO</button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="abrirBuscadorCuentas()"
+              title="Buscar una cuenta del plan contable">🔍 Buscar cuenta</button>
       <a href="{{ url_for('web.banco') }}" class="btn btn-secondary btn-sm">← Volver</a>
     </div>
   </div>
@@ -513,6 +515,15 @@
 
 {% block extra_scripts %}
 <script>
+/* Abre el plan de cuentas en una ventana emergente para buscar el código. */
+function abrirBuscadorCuentas() {
+  var url = '{{ url_for("web.cuentas") }}?popup=1';
+  var win = window.open(url, 'buscadorCuentas',
+    'width=560,height=720,scrollbars=yes,resizable=yes');
+  if (win) win.focus();
+  else window.open(url, '_blank');
+}
+
 /* ── Autocomplete reutilizable ── */
 function makeAC(acEl, fetchUrl, getKey, getLabel, onPick) {
   var actInput = null;
