@@ -1,0 +1,186 @@
+{% extends "popup_base.html" if popup else "base.html" %}
+
+{% block title %}Plan de cuentas — 1CONTIGO{% endblock %}
+{% block page_title %}Plan de cuentas{% endblock %}
+
+{% block content %}
+
+<div class="cuentas-consulta">
+
+  {% if not popup %}
+  <p class="text-dim mb-4" style="font-size:0.88rem; max-width:680px">
+    Consulta todas las cuentas contables de la empresa. Escribe un código o parte
+    del nombre para filtrar y copia el código que necesitas digitar en la casilla.
+  </p>
+  {% endif %}
+
+  {% if error %}
+  <div class="flash error" style="margin-bottom:16px">{{ error }}</div>
+  {% endif %}
+
+  <div class="cuentas-toolbar">
+    <div class="cuentas-search">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input type="search" id="cuentaBuscar" autocomplete="off" autofocus
+             placeholder="Buscar por código o nombre… (ej. 5105 o «honorarios»)">
+    </div>
+    <span class="pill pill-ok" id="cuentaContador">{{ cuentas|length }} cuentas</span>
+  </div>
+
+  {% if cuentas %}
+  <div class="table-wrapper">
+    <table id="cuentasTabla">
+      <thead>
+        <tr>
+          <th style="width:160px">Código</th>
+          <th>Nombre de la cuenta</th>
+          <th style="width:96px" class="text-right">Copiar</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in cuentas %}
+        <tr data-buscar="{{ (c.codigo ~ ' ' ~ c.nombre)|lower }}">
+          <td><code class="cuenta-codigo" style="font-size:0.84rem; font-weight:600">{{ c.codigo }}</code></td>
+          <td>{{ c.nombre or '—' }}</td>
+          <td class="text-right">
+            <button type="button" class="btn btn-secondary btn-sm cuenta-copiar"
+                    data-codigo="{{ c.codigo }}" title="Copiar el código">⧉ Copiar</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="cuentasVacio" class="text-dim" style="display:none; text-align:center; padding:40px">
+    No hay cuentas que coincidan con la búsqueda.
+  </div>
+
+  {% elif not error %}
+  <div style="text-align:center; padding:60px; color:var(--text-dim)">
+    <div style="font-size:3rem; margin-bottom:12px">📒</div>
+    <p>No hay cuentas para mostrar.</p>
+    <p style="font-size:0.85rem; margin-top:8px">
+      Carga el plan de cuentas de la empresa en Empresas → Maestros.
+    </p>
+  </div>
+  {% endif %}
+
+</div>
+
+<div id="cuentaToast" class="cuenta-toast" role="status" aria-live="polite" hidden>
+  ✓ Código copiado
+</div>
+
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.cuentas-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.cuentas-search {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px); padding: 0 12px; color: var(--text-dim);
+}
+.cuentas-search:focus-within { border-color: var(--accent); }
+.cuentas-search input {
+  flex: 1; border: 0; outline: none; background: transparent;
+  padding: 11px 0; font-size: 0.9rem; color: var(--text);
+}
+#cuentasTabla tbody tr { cursor: default; }
+#cuentasTabla tbody tr.hl { background: var(--info-bg, #EFF6FF); }
+.cuenta-copiar { white-space: nowrap; }
+.cuenta-toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--success, #16A34A); color: #fff; font-size: 0.85rem;
+  font-weight: 600; padding: 9px 16px; border-radius: 999px; z-index: 99999;
+  box-shadow: 0 6px 20px rgba(0,0,0,.25); transition: opacity .25s;
+}
+.popup-body .cuentas-toolbar { position: sticky; top: 0; background: var(--bg); padding-top: 4px; z-index: 5; }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var input    = document.getElementById('cuentaBuscar');
+  var tabla    = document.getElementById('cuentasTabla');
+  var contador = document.getElementById('cuentaContador');
+  var vacio    = document.getElementById('cuentasVacio');
+  if (!tabla) return;
+
+  var filas = Array.prototype.slice.call(tabla.tBodies[0].rows);
+  var total = filas.length;
+
+  function filtrar() {
+    var q = (input.value || '').trim().toLowerCase();
+    var terminos = q.split(/\s+/).filter(Boolean);
+    var visibles = 0;
+    filas.forEach(function (tr) {
+      var hay = tr.getAttribute('data-buscar');
+      var ok = terminos.every(function (t) { return hay.indexOf(t) !== -1; });
+      tr.style.display = ok ? '' : 'none';
+      if (ok) visibles++;
+    });
+    contador.textContent = visibles + (visibles === 1 ? ' cuenta' : ' cuentas');
+    if (vacio) vacio.style.display = (visibles === 0 && total > 0) ? 'block' : 'none';
+  }
+
+  var t = null;
+  input.addEventListener('input', function () {
+    clearTimeout(t);
+    t = setTimeout(filtrar, 80);
+  });
+  // Enter copia el código de la primera coincidencia.
+  input.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var visible = filas.find(function (tr) { return tr.style.display !== 'none'; });
+    var btn = visible && visible.querySelector('.cuenta-copiar');
+    if (btn) btn.click();
+  });
+
+  var toast = document.getElementById('cuentaToast');
+  var toastTimer = null;
+  function mostrarToast(msg) {
+    if (!toast) return;
+    toast.textContent = '✓ ' + msg;
+    toast.hidden = false;
+    toast.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toast.style.opacity = '0';
+      setTimeout(function () { toast.hidden = true; }, 250);
+    }, 1400);
+  }
+
+  function copiar(texto) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(texto).catch(function () { fallback(texto); });
+    }
+    fallback(texto);
+    return Promise.resolve();
+  }
+  function fallback(texto) {
+    var ta = document.createElement('textarea');
+    ta.value = texto; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  tabla.addEventListener('click', function (e) {
+    var btn = e.target.closest('.cuenta-copiar');
+    if (!btn) return;
+    var codigo = btn.getAttribute('data-codigo') || '';
+    copiar(codigo);
+    mostrarToast('Código ' + codigo + ' copiado');
+  });
+})();
+</script>
+{% endblock %}

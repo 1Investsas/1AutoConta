@@ -1274,6 +1274,74 @@ def analytics():
 
 
 # ---------------------------------------------------------------------------
+# GET /cuentas — Consulta del plan de cuentas (buscador)
+# ---------------------------------------------------------------------------
+
+def _columnas_cuentas(df):
+    """Retorna (cod_col, nom_col) del plan de cuentas: las 2 primeras reales.
+
+    Replica el criterio de `/api/cuentas`: las primeras columnas no-'Unnamed'
+    son el código y el nombre de la cuenta.
+    """
+    valid_cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
+    cod_col = valid_cols[0] if valid_cols else df.columns[0]
+    nom_col = valid_cols[1] if len(valid_cols) > 1 else None
+    return cod_col, nom_col
+
+
+def _listar_cuentas(emp) -> list[dict]:
+    """Lista todas las cuentas transaccionales activas de la empresa.
+
+    Retorna una lista de ``{"codigo", "nombre"}`` ordenada por código, lista
+    para mostrarla en el buscador del plan de cuentas. Usa el maestro cacheado.
+    """
+    from app.importador import cargar_maestro_cuentas
+
+    cuentas_path = emp.ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
+    df = _cargar_maestro_cacheado(cargar_maestro_cuentas, cuentas_path)
+    cod_col, nom_col = _columnas_cuentas(df)
+
+    out = []
+    for _, row in df.iterrows():
+        codigo = str(row[cod_col]).strip()
+        if not codigo or codigo.lower() == "nan":
+            continue
+        nombre = str(row[nom_col]).strip() if nom_col else ""
+        if nombre.lower() == "nan":
+            nombre = ""
+        out.append({"codigo": codigo, "nombre": nombre})
+
+    out.sort(key=lambda c: c["codigo"])
+    return out
+
+
+@bp.route("/cuentas")
+@require_permission("radian.ver")
+def cuentas():
+    """Página/ventana para consultar y buscar en el plan de cuentas.
+
+    Sirve para encontrar fácilmente el código que se debe digitar en una casilla.
+    Con ``?popup=1`` se renderiza una versión compacta (sin menú lateral) pensada
+    para abrirse en una ventana emergente desde las pantallas de asignación.
+    """
+    emp = _empresa_actual()
+    error = None
+    try:
+        items = _listar_cuentas(emp)
+    except FileNotFoundError:
+        items = []
+        error = ("Esta empresa no tiene cargado el plan de cuentas "
+                 "(Listado_de_Cuentas_Contables.xlsx). Cárgalo en Empresas → Maestros.")
+    except Exception:
+        logger.exception("Error listando el plan de cuentas")
+        items = []
+        error = "No se pudo leer el plan de cuentas de la empresa."
+
+    popup = request.args.get("popup", "") in ("1", "true", "yes", "on")
+    return render_template("cuentas.html", cuentas=items, error=error, popup=popup)
+
+
+# ---------------------------------------------------------------------------
 # GET /api/cuentas — Autocompletar cuentas contables
 # ---------------------------------------------------------------------------
 
@@ -1295,9 +1363,7 @@ def api_cuentas():
         q_lower = q.lower()
 
         # Las primeras 2 columnas no-Unnamed son: código y nombre
-        valid_cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
-        cod_col = valid_cols[0] if valid_cols else df.columns[0]
-        nom_col = valid_cols[1] if len(valid_cols) > 1 else None
+        cod_col, nom_col = _columnas_cuentas(df)
 
         codigos = df[cod_col].astype(str).str.strip()
         mask = codigos.str.lower().str.startswith(q_lower)
