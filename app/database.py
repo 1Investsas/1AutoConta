@@ -658,7 +658,7 @@ def _create_tables_mssql(conn: DbConnection) -> None:
 # Columnas cuyo valor se persiste serializado como JSON.
 _EMPRESA_JSON_COLS = (
     "cuentas_contraparte", "cuentas_impuestos",
-    "cuentas_banco", "bancos", "formato_banco",
+    "cuentas_banco", "bancos", "formato_banco", "dian_config",
 )
 
 
@@ -696,7 +696,8 @@ def _fila_a_registro(row) -> dict:
 
 _EMPRESA_COLS_SELECT = (
     "id, nit, nombre, sigla, cuenta_banco_default, nit_banco, "
-    "cuentas_contraparte, cuentas_impuestos, cuentas_banco, bancos, formato_banco"
+    "cuentas_contraparte, cuentas_impuestos, cuentas_banco, bancos, formato_banco, "
+    "dian_config"
 )
 
 
@@ -718,6 +719,7 @@ def inicializar_db_sistema(db_path: str = SYSTEM_DB_PATH) -> None:
                     cuentas_banco        TEXT,
                     bancos               TEXT,
                     formato_banco        TEXT,
+                    dian_config          TEXT,
                     creada               TEXT,
                     actualizada          TEXT
                 )
@@ -737,10 +739,13 @@ def inicializar_db_sistema(db_path: str = SYSTEM_DB_PATH) -> None:
                     cuentas_banco        NVARCHAR(MAX),
                     bancos               NVARCHAR(MAX),
                     formato_banco        NVARCHAR(MAX),
+                    dian_config          NVARCHAR(MAX),
                     creada               NVARCHAR(50),
                     actualizada          NVARCHAR(50)
                 )
             """)
+        # Migración aditiva para registros de empresas ya existentes.
+        _asegurar_columna(conn, "empresas", "dian_config", "TEXT", "NVARCHAR(MAX)")
         conn.commit()
     finally:
         conn.close()
@@ -802,6 +807,7 @@ def guardar_empresa_registro(datos: dict, db_path: str = SYSTEM_DB_PATH) -> None
         _json_dump(datos.get("cuentas_banco")),
         _json_dump(datos.get("bancos")),
         _json_dump(datos.get("formato_banco")),
+        _json_dump(datos.get("dian_config")),
     )
     try:
         if conn.is_sqlite:
@@ -810,8 +816,8 @@ def guardar_empresa_registro(datos: dict, db_path: str = SYSTEM_DB_PATH) -> None
                 INSERT INTO empresas
                     (id, nit, nombre, sigla, cuenta_banco_default, nit_banco,
                      cuentas_contraparte, cuentas_impuestos, cuentas_banco,
-                     bancos, formato_banco, creada, actualizada)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     bancos, formato_banco, dian_config, creada, actualizada)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     nit                  = excluded.nit,
                     nombre               = excluded.nombre,
@@ -823,6 +829,7 @@ def guardar_empresa_registro(datos: dict, db_path: str = SYSTEM_DB_PATH) -> None
                     cuentas_banco        = excluded.cuentas_banco,
                     bancos               = excluded.bancos,
                     formato_banco        = excluded.formato_banco,
+                    dian_config          = excluded.dian_config,
                     actualizada          = excluded.actualizada
                 """,
                 (emp_id,) + vals + (ahora, ahora),
@@ -837,12 +844,12 @@ def guardar_empresa_registro(datos: dict, db_path: str = SYSTEM_DB_PATH) -> None
                     UPDATE SET nit=?, nombre=?, sigla=?, cuenta_banco_default=?,
                                nit_banco=?, cuentas_contraparte=?,
                                cuentas_impuestos=?, cuentas_banco=?, bancos=?,
-                               formato_banco=?, actualizada=?
+                               formato_banco=?, dian_config=?, actualizada=?
                 WHEN NOT MATCHED THEN
                     INSERT (id, nit, nombre, sigla, cuenta_banco_default, nit_banco,
                             cuentas_contraparte, cuentas_impuestos, cuentas_banco,
-                            bancos, formato_banco, creada, actualizada)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);
+                            bancos, formato_banco, dian_config, creada, actualizada)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?);
                 """,
                 (emp_id,) + vals + (ahora,) + (emp_id,) + vals + (ahora, ahora),
             )

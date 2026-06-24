@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}RADIAN automático — contable-auto{% endblock %}
+{% block page_title %}🔄 RADIAN automático{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Cada día se conecta al portal de la DIAN
+      (<code>catalogo-vpfe.dian.gov.co</code>), solicita el token de acceso, lo
+      lee del correo del representante legal, descarga el reporte RADIAN y lo
+      procesa con el mismo pipeline del módulo RADIAN. El resultado queda en
+      «Importaciones», listo para revisar y exportar a SIIGO.
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Estado</div>
+    <div class="card-value" style="font-size:1.4rem;
+         color:{{ 'var(--success)' if dcfg.habilitado else 'var(--text-dim)' }}">
+      {{ 'Activa' if dcfg.habilitado else 'Inactiva' }}
+    </div>
+    <div class="card-sub">
+      {% if dcfg.habilitado %}Corre todos los días a las {{ dcfg.hora_efectiva() }}
+      {% else %}Actívala y guarda para programarla{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Disparador</div>
+    <div class="card-value" style="font-size:1.1rem">
+      {% if scheduler_activo %}Programador interno
+      {% elif cron_activo %}Cron externo
+      {% else %}Manual{% endif %}
+    </div>
+    <div class="card-sub">
+      {% if scheduler_activo %}La app ejecuta la importación a la hora programada
+      {% elif cron_activo %}Un programador externo llama a /radian/auto/cron
+      {% else %}Usa «Ejecutar ahora» o configura un programador{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if faltantes %}
+<div class="flash error" style="margin-bottom:20px">
+  Faltan datos para poder importar automáticamente:
+  <strong>{{ faltantes | join(', ') }}</strong>.
+</div>
+{% endif %}
+
+<div class="form-section">
+  <h2>⚙ Configuración de acceso a la DIAN</h2>
+
+  <form method="POST" action="{{ url_for('web.radian_auto_guardar') }}" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label class="form-check" style="margin-bottom:18px">
+      <input type="checkbox" name="habilitado" {{ 'checked' if dcfg.habilitado }}>
+      Activar la importación automática diaria de esta empresa
+    </label>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="tipo_identificacion">Tipo de identificación (representante legal)</label>
+        <select id="tipo_identificacion" name="tipo_identificacion">
+          {% for cod, nombre in tipos_identificacion.items() %}
+            <option value="{{ cod }}" {{ 'selected' if dcfg.tipo_identificacion == cod }}>
+              {{ nombre }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="nit_representante">NIT / cédula del representante legal</label>
+        <input type="text" id="nit_representante" name="nit_representante"
+               value="{{ dcfg.nit_representante }}" placeholder="10910094" inputmode="numeric">
+      </div>
+      <div class="form-group">
+        <label for="nit_empresa">NIT de la empresa (opcional)</label>
+        <input type="text" id="nit_empresa" name="nit_empresa"
+               value="{{ dcfg.nit_empresa }}"
+               placeholder="{{ nit_empresa_efectivo }} (NIT de la empresa)" inputmode="numeric">
+      </div>
+    </div>
+
+    <h3 style="margin:22px 0 4px; font-size:0.95rem">📧 Correo donde llega el token</h3>
+    <p class="muted" style="font-size:0.8rem; margin-bottom:12px">
+      La DIAN envía el enlace de acceso al correo del representante legal
+      registrado en el RUT. Para Gmail usa una
+      <strong>contraseña de aplicación</strong> (no la contraseña normal).
+    </p>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="email_user">Correo (usuario IMAP)</label>
+        <input type="email" id="email_user" name="email_user"
+               value="{{ dcfg.email_user }}" placeholder="empresa@gmail.com">
+      </div>
+      <div class="form-group">
+        <label for="email_password">Contraseña de aplicación</label>
+        <input type="password" id="email_password" name="email_password"
+               placeholder="{{ '•••••••• (guardada)' if dcfg.email_password else 'pega aquí la contraseña' }}"
+               autocomplete="new-password">
+        <small class="muted">Déjalo vacío para conservar la actual.</small>
+      </div>
+      <div class="form-group">
+        <label for="imap_host">Servidor IMAP</label>
+        <input type="text" id="imap_host" name="imap_host"
+               value="{{ dcfg.imap_host }}" placeholder="imap.gmail.com">
+      </div>
+      <div class="form-group">
+        <label for="imap_port">Puerto IMAP</label>
+        <input type="number" id="imap_port" name="imap_port"
+               value="{{ dcfg.imap_port or '' }}" placeholder="993">
+      </div>
+      <div class="form-group">
+        <label for="email_carpeta">Carpeta</label>
+        <input type="text" id="email_carpeta" name="email_carpeta"
+               value="{{ dcfg.email_carpeta or 'INBOX' }}" placeholder="INBOX">
+      </div>
+    </div>
+
+    <h3 style="margin:22px 0 4px; font-size:0.95rem">🗓 Programación</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="hora">Hora diaria (24h)</label>
+        <input type="time" id="hora" name="hora" value="{{ dcfg.hora }}"
+               placeholder="{{ dcfg.hora_efectiva() }}">
+      </div>
+      <div class="form-group">
+        <label for="dias_atras">Días hacia atrás a descargar</label>
+        <input type="number" id="dias_atras" name="dias_atras" min="0"
+               value="{{ dcfg.dias_atras }}">
+      </div>
+    </div>
+
+    <details style="margin-top:18px">
+      <summary style="cursor:pointer; color:var(--text-dim); font-size:0.85rem; user-select:none;">
+        ▸ Opciones avanzadas del portal (solo si la DIAN cambia sus rutas)
+      </summary>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="form-group">
+          <label for="login_path">Ruta del formulario de ingreso</label>
+          <input type="text" id="login_path" name="login_path"
+                 value="{{ dcfg.login_path }}" placeholder="/">
+        </div>
+        <div class="form-group">
+          <label for="descarga_path">Ruta de descarga del reporte</label>
+          <input type="text" id="descarga_path" name="descarga_path"
+                 value="{{ dcfg.descarga_path }}" placeholder="/Document/DownloadZipFiles">
+        </div>
+      </div>
+    </details>
+
+    <div style="margin-top:24px; display:flex; gap:12px; flex-wrap:wrap">
+      <button type="submit" class="btn btn-primary"><span>💾</span> Guardar configuración</button>
+    </div>
+  </form>
+</div>
+
+<div class="form-section">
+  <h2>▶ Ejecutar ahora</h2>
+  <p class="muted" style="font-size:0.85rem; margin-bottom:14px">
+    Dispara una importación inmediata con la configuración guardada. La DIAN
+    enviará el token al correo; el proceso tarda unos minutos y el resultado
+    aparece en «Importaciones».
+  </p>
+  <form method="POST" action="{{ url_for('web.radian_auto_ejecutar') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary"
+            {{ 'disabled' if faltantes }}>
+      <span>⚡</span> Ejecutar importación ahora
+    </button>
+  </form>
+</div>
+
+<div class="modulo-bottom">
+  <div class="panel">
+    <div class="panel-head"><h2>Actividad reciente</h2>
+      <a href="{{ url_for('web.importaciones') }}" class="link-more">Ver todo
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </a>
+    </div>
+    <div class="act-list">
+      {% set actividad_historial_url = url_for('web.importaciones') %}
+      {% include "_actividad_items.html" %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

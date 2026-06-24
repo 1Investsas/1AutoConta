@@ -243,6 +243,49 @@ SIIGO_CODIGOS_COMPROBANTE: dict[str, int] = {
 }
 
 # ---------------------------------------------------------------------------
+# RADIAN automático — importación diaria desde el portal DIAN
+# ---------------------------------------------------------------------------
+# Portal de facturación electrónica / catálogo RADIAN de la DIAN. De aquí se
+# descarga el reporte que hoy se sube manualmente al módulo RADIAN.
+DIAN_PORTAL_URL: str = os.getenv("DIAN_PORTAL_URL", "https://catalogo-vpfe.dian.gov.co")
+
+# Datos del correo que envía la DIAN con el enlace de acceso (token temporal).
+# Se usan para localizar e identificar el correo en el buzón del representante
+# legal registrado en el RUT.
+DIAN_EMAIL_REMITENTE: str = os.getenv(
+    "DIAN_EMAIL_REMITENTE", "facturacionelectronica@dian.gov.co"
+)
+DIAN_EMAIL_ASUNTO: str = os.getenv("DIAN_EMAIL_ASUNTO", "Token Acceso DIAN")
+
+# Vigencia del token de la DIAN (minutos) y ventana de espera del correo.
+DIAN_TOKEN_VIGENCIA_MIN: int = int(os.getenv("DIAN_TOKEN_VIGENCIA_MIN", "60"))
+DIAN_EMAIL_ESPERA_SEG: int = int(os.getenv("DIAN_EMAIL_ESPERA_SEG", "300"))
+DIAN_EMAIL_INTERVALO_SEG: int = int(os.getenv("DIAN_EMAIL_INTERVALO_SEG", "15"))
+
+# Configuración IMAP por defecto para leer el correo del token (Gmail por
+# defecto, ya que la DIAN suele notificar a una cuenta de correo del cliente).
+# La contraseña NUNCA se define aquí; se toma de la configuración por empresa o
+# de la variable de entorno DIAN_EMAIL_PASSWORD (contraseña de aplicación).
+DIAN_IMAP_HOST: str = os.getenv("DIAN_IMAP_HOST", "imap.gmail.com")
+DIAN_IMAP_PORT: int = int(os.getenv("DIAN_IMAP_PORT", "993"))
+DIAN_EMAIL_USER: str = os.getenv("DIAN_EMAIL_USER", "")
+DIAN_EMAIL_PASSWORD: str = os.getenv("DIAN_EMAIL_PASSWORD", "")
+
+# Scheduler interno de importación diaria. Si está activo, la app web arranca un
+# hilo en segundo plano que ejecuta la importación una vez al día a la hora
+# programada de cada empresa. En despliegues con varias instancias conviene
+# desactivarlo y disparar la importación con un cron externo (ver más abajo).
+RADIAN_SCHEDULER_ENABLED: bool = (
+    os.getenv("RADIAN_SCHEDULER_ENABLED", "false").lower() == "true"
+)
+# Hora por defecto (HH:MM, 24h) a la que corre la importación automática.
+RADIAN_HORA_DEFAULT: str = os.getenv("RADIAN_HORA_DEFAULT", "06:00")
+# Token compartido que protege el endpoint POST /radian/auto/cron usado por un
+# programador externo (Azure Scheduler, cron, GitHub Action…). Vacío = endpoint
+# deshabilitado.
+RADIAN_CRON_TOKEN: str = os.getenv("RADIAN_CRON_TOKEN", "")
+
+# ---------------------------------------------------------------------------
 # Banco — procesamiento de extracto bancario CSV
 # ---------------------------------------------------------------------------
 BANCO_CUENTA_DEFAULT: str = os.getenv("BANCO_CUENTA_DEFAULT", "11100501")

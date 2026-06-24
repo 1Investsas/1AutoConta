@@ -38,7 +38,10 @@ SESSION_LOGOUT_KEY = "auth_logout"
 _HEADER_ENTRA_EMAIL = "X-MS-CLIENT-PRINCIPAL-NAME"
 
 # Endpoints accesibles sin sesión iniciada (además de los estáticos).
-_ENDPOINTS_PUBLICOS = {"web.login", "web.logout", "web.health", "static"}
+# `web.radian_auto_cron` se protege con su propio token compartido, no por sesión.
+_ENDPOINTS_PUBLICOS = {
+    "web.login", "web.logout", "web.health", "web.radian_auto_cron", "static",
+}
 
 _auth_lock = threading.Lock()
 _auth_listo: set[str] = set()

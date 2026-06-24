@@ -132,8 +132,9 @@ def test_guardar_mssql_merge_param_count(monkeypatch):
     }, "ignorado")
     sql, params = conn.calls[0]
     assert "MERGE empresas" in sql
-    # USING(1) + UPDATE(11) + INSERT(13) = 25 parámetros enlazados.
-    assert len(params) == 25
+    # USING(1) + UPDATE(12) + INSERT(14) = 27 parámetros enlazados.
+    # (12/14 incluyen la columna dian_config añadida para RADIAN automático.)
+    assert len(params) == 27
     assert params[0] == "acme"
 
 
