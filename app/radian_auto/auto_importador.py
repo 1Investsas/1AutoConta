@@ -190,6 +190,65 @@ def importar_empresa(
         )
 
 
+def solicitar_token(empresa, *, client: Optional[DianClient] = None) -> None:
+    """Pide a la DIAN que genere y envíe el token (correo al representante legal).
+
+    Pensado para el flujo manual: el usuario pulsa «Solicitar token», recibe el
+    correo y luego pega el enlace. Requiere los datos del representante legal.
+    """
+    dcfg = empresa.dian()
+    if not dcfg.nit_representante.strip():
+        raise DianError(
+            "Configura el tipo y el NIT del representante legal para solicitar el token."
+        )
+    cliente = client or DianClient(**dcfg.client_kwargs())
+    cliente.solicitar_token(
+        dcfg.tipo_identificacion,
+        dcfg.nit_representante,
+        dcfg.nit_empresa_efectivo(empresa),
+    )
+
+
+def descargar_con_enlace(
+    empresa,
+    auth_url: str,
+    *,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    client: Optional[DianClient] = None,
+) -> tuple[str, str, tuple[str, str]]:
+    """Activa la sesión con un enlace pegado y descarga el reporte RADIAN.
+
+    Flujo manual (mientras no haya buzón/certificado para leer el correo solo):
+    el usuario pega el enlace `AuthToken` recibido por correo y la app activa la
+    sesión, descarga el reporte y lo guarda.
+
+    Returns:
+        (archivo_ref, nombre_archivo, (fecha_desde, fecha_hasta))
+
+    Raises:
+        DianError: si el enlace no es válido o falla la descarga.
+    """
+    from app.radian_auto.dian_client import parsear_auth_url
+
+    if not parsear_auth_url(auth_url).get("token"):
+        raise DianError("El enlace pegado no es un enlace de acceso válido de la DIAN.")
+
+    dcfg = empresa.dian()
+    desde, hasta = (fecha_desde, fecha_hasta)
+    if not desde or not hasta:
+        desde, hasta = _rango_fechas(dcfg.dias_atras)
+
+    cliente = client or DianClient(**dcfg.client_kwargs())
+    cliente.activar_sesion(auth_url)
+    contenido = cliente.descargar_reporte(desde, hasta)
+
+    ext = _extension_archivo(cliente.ultimo_archivo)
+    nombre = f"RADIAN_{hasta}_{uuid.uuid4().hex[:8]}{ext}"
+    archivo_ref = store.save_file(contenido, empresa.upload_category, nombre)
+    return archivo_ref, nombre, (desde, hasta)
+
+
 def _persistir(imp_id: int, datos: dict, estado: str, db: str) -> None:
     """Guarda el snapshot durable de la importación (como hace la web)."""
     from app.database import actualizar_importacion

@@ -9,26 +9,27 @@
   <div class="card">
     <div class="card-title">¿Qué hace este módulo?</div>
     <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
-      Cada día se conecta al portal de la DIAN
-      (<code>catalogo-vpfe.dian.gov.co</code>), solicita el token de acceso, lo
-      lee del correo del representante legal, descarga el reporte RADIAN y lo
-      procesa con el mismo pipeline del módulo RADIAN. El resultado queda en
-      «Importaciones», listo para revisar y exportar a SIIGO.
+      Trae el reporte RADIAN desde el portal de la DIAN
+      (<code>catalogo-vpfe.dian.gov.co</code>) y lo procesa con el mismo pipeline
+      del módulo RADIAN, dejándolo en «Importaciones» listo para revisar y
+      exportar a SIIGO. Hoy funciona <strong>pegando el enlace</strong> del
+      correo; cuando tengas el certificado digital o un buzón dedicado, puedes
+      activar la importación 100% automática.
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Estado</div>
+    <div class="card-title">Modo automático</div>
     <div class="card-value" style="font-size:1.4rem;
          color:{{ 'var(--success)' if dcfg.habilitado else 'var(--text-dim)' }}">
-      {{ 'Activa' if dcfg.habilitado else 'Inactiva' }}
+      {{ 'Activo' if dcfg.habilitado else 'Inactivo' }}
     </div>
     <div class="card-sub">
-      {% if dcfg.habilitado %}Corre todos los días a las {{ dcfg.hora_efectiva() }}
-      {% else %}Actívala y guarda para programarla{% endif %}
+      {% if dcfg.habilitado %}Corre a diario a las {{ dcfg.hora_efectiva() }}
+      {% else %}Requiere buzón de correo (IMAP){% endif %}
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Disparador</div>
+    <div class="card-title">Disparador diario</div>
     <div class="card-value" style="font-size:1.1rem">
       {% if scheduler_activo %}Programador interno
       {% elif cron_activo %}Cron externo
@@ -37,37 +38,91 @@
     <div class="card-sub">
       {% if scheduler_activo %}La app ejecuta la importación a la hora programada
       {% elif cron_activo %}Un programador externo llama a /radian/auto/cron
-      {% else %}Usa «Ejecutar ahora» o configura un programador{% endif %}
+      {% else %}Pega el enlace cada día, o configura un programador{% endif %}
     </div>
   </div>
 </div>
 
-{% if faltantes %}
-<div class="flash error" style="margin-bottom:20px">
-  Faltan datos para poder importar automáticamente:
-  <strong>{{ faltantes | join(', ') }}</strong>.
-</div>
-{% endif %}
-
+{# ===================== Flujo manual (actual): pegar enlace ===================== #}
 <div class="form-section">
-  <h2>⚙ Configuración de acceso a la DIAN</h2>
+  <h2>📥 Importar pegando el enlace de la DIAN</h2>
+  <p class="muted" style="font-size:0.85rem; margin-bottom:16px">
+    Mientras se habilita la conexión 100% automática, importa así cada día:
+  </p>
+
+  <div class="guia-steps" style="margin-bottom:22px">
+    <div class="guia-step">
+      <div class="guia-circle guia-c-blue"><span class="guia-num">1</span></div>
+      <div class="guia-step-title guia-t-blue">Solicita el token</div>
+      <div class="guia-step-desc">La DIAN envía un enlace al correo del representante legal.</div>
+    </div>
+    <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+    <div class="guia-step">
+      <div class="guia-circle guia-c-green"><span class="guia-num">2</span></div>
+      <div class="guia-step-title guia-t-green">Pega el enlace</div>
+      <div class="guia-step-desc">Copia el botón «Ingrese aquí» del correo y pégalo abajo.</div>
+    </div>
+    <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+    <div class="guia-step">
+      <div class="guia-circle guia-c-orange"><span class="guia-num">3</span></div>
+      <div class="guia-step-title guia-t-orange">Descarga y procesa</div>
+      <div class="guia-step-desc">La app baja el reporte y genera los preasientos.</div>
+    </div>
+  </div>
+
+  {# Paso 1: solicitar el token (usa los datos guardados más abajo) #}
+  <form method="POST" action="{{ url_for('web.radian_auto_solicitar') }}"
+        style="margin-bottom:18px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary" {{ 'disabled' if not dcfg.puede_solicitar() }}>
+      <span>✉</span> Solicitar token a la DIAN
+    </button>
+    {% if not dcfg.puede_solicitar() %}
+      <span class="muted" style="margin-left:10px; font-size:0.8rem">
+        Guarda primero el NIT del representante legal (abajo).
+      </span>
+    {% else %}
+      <span class="muted" style="margin-left:10px; font-size:0.8rem">
+        O ingresa al portal de la DIAN y copia el enlace del correo.
+      </span>
+    {% endif %}
+  </form>
+
+  {# Paso 2-3: pegar el enlace y procesar #}
+  <form method="POST" action="{{ url_for('web.radian_auto_procesar_enlace') }}" data-loading="true">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label for="auth_url">Enlace de acceso del correo de la DIAN</label>
+      <input type="url" id="auth_url" name="auth_url"
+             placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=…&rk=…&token=…">
+      <small class="muted">Es el enlace del botón «Ingrese aquí». Válido 60 minutos.</small>
+    </div>
+    <label class="form-check" style="margin-top:14px">
+      <input type="checkbox" name="incluir_duplicados">
+      Incluir documentos ya procesados (duplicados)
+    </label>
+    <div style="margin-top:20px">
+      <button type="submit" class="btn btn-primary"><span>⬇</span> Descargar y procesar</button>
+    </div>
+  </form>
+</div>
+
+{# ===================== Datos de acceso a la DIAN ===================== #}
+<div class="form-section">
+  <h2>⚙ Datos de acceso a la DIAN</h2>
+  <p class="muted" style="font-size:0.82rem; margin-bottom:12px">
+    Se usan para «Solicitar token» y, si activas el modo automático, para entrar al portal.
+  </p>
 
   <form method="POST" action="{{ url_for('web.radian_auto_guardar') }}" autocomplete="off">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-    <label class="form-check" style="margin-bottom:18px">
-      <input type="checkbox" name="habilitado" {{ 'checked' if dcfg.habilitado }}>
-      Activar la importación automática diaria de esta empresa
-    </label>
 
     <div class="form-grid">
       <div class="form-group">
         <label for="tipo_identificacion">Tipo de identificación (representante legal)</label>
         <select id="tipo_identificacion" name="tipo_identificacion">
           {% for cod, nombre in tipos_identificacion.items() %}
-            <option value="{{ cod }}" {{ 'selected' if dcfg.tipo_identificacion == cod }}>
-              {{ nombre }}
-            </option>
+            <option value="{{ cod }}" {{ 'selected' if dcfg.tipo_identificacion == cod }}>{{ nombre }}</option>
           {% endfor %}
         </select>
       </div>
@@ -82,96 +137,101 @@
                value="{{ dcfg.nit_empresa }}"
                placeholder="{{ nit_empresa_efectivo }} (NIT de la empresa)" inputmode="numeric">
       </div>
-    </div>
-
-    <h3 style="margin:22px 0 4px; font-size:0.95rem">📧 Correo donde llega el token</h3>
-    <p class="muted" style="font-size:0.8rem; margin-bottom:12px">
-      La DIAN envía el enlace de acceso al correo del representante legal
-      registrado en el RUT. Para Gmail usa una
-      <strong>contraseña de aplicación</strong> (no la contraseña normal).
-    </p>
-    <div class="form-grid">
-      <div class="form-group">
-        <label for="email_user">Correo (usuario IMAP)</label>
-        <input type="email" id="email_user" name="email_user"
-               value="{{ dcfg.email_user }}" placeholder="empresa@gmail.com">
-      </div>
-      <div class="form-group">
-        <label for="email_password">Contraseña de aplicación</label>
-        <input type="password" id="email_password" name="email_password"
-               placeholder="{{ '•••••••• (guardada)' if dcfg.email_password else 'pega aquí la contraseña' }}"
-               autocomplete="new-password">
-        <small class="muted">Déjalo vacío para conservar la actual.</small>
-      </div>
-      <div class="form-group">
-        <label for="imap_host">Servidor IMAP</label>
-        <input type="text" id="imap_host" name="imap_host"
-               value="{{ dcfg.imap_host }}" placeholder="imap.gmail.com">
-      </div>
-      <div class="form-group">
-        <label for="imap_port">Puerto IMAP</label>
-        <input type="number" id="imap_port" name="imap_port"
-               value="{{ dcfg.imap_port or '' }}" placeholder="993">
-      </div>
-      <div class="form-group">
-        <label for="email_carpeta">Carpeta</label>
-        <input type="text" id="email_carpeta" name="email_carpeta"
-               value="{{ dcfg.email_carpeta or 'INBOX' }}" placeholder="INBOX">
-      </div>
-    </div>
-
-    <h3 style="margin:22px 0 4px; font-size:0.95rem">🗓 Programación</h3>
-    <div class="form-grid">
-      <div class="form-group">
-        <label for="hora">Hora diaria (24h)</label>
-        <input type="time" id="hora" name="hora" value="{{ dcfg.hora }}"
-               placeholder="{{ dcfg.hora_efectiva() }}">
-      </div>
       <div class="form-group">
         <label for="dias_atras">Días hacia atrás a descargar</label>
-        <input type="number" id="dias_atras" name="dias_atras" min="0"
-               value="{{ dcfg.dias_atras }}">
+        <input type="number" id="dias_atras" name="dias_atras" min="0" value="{{ dcfg.dias_atras }}">
       </div>
     </div>
 
-    <details style="margin-top:18px">
-      <summary style="cursor:pointer; color:var(--text-dim); font-size:0.85rem; user-select:none;">
-        ▸ Opciones avanzadas del portal (solo si la DIAN cambia sus rutas)
+    {# ===== Modo 100% automático (opcional / futuro) ===== #}
+    <details style="margin-top:18px" {{ 'open' if dcfg.habilitado }}>
+      <summary style="cursor:pointer; color:var(--text-dim); font-size:0.88rem; user-select:none;">
+        ▸ Modo 100% automático todos los días (requiere buzón de correo / IMAP)
       </summary>
-      <div class="form-grid" style="margin-top:14px">
+
+      <p class="muted" style="font-size:0.8rem; margin:12px 0">
+        Para que la app lea el token sin pegarlo a mano, necesita acceso por IMAP
+        al buzón donde llega el correo de la DIAN. En Gmail usa una
+        <strong>contraseña de aplicación</strong> (no la contraseña normal).
+      </p>
+
+      <label class="form-check" style="margin-bottom:14px">
+        <input type="checkbox" name="habilitado" {{ 'checked' if dcfg.habilitado }}>
+        Activar la importación automática diaria de esta empresa
+      </label>
+
+      <div class="form-grid">
         <div class="form-group">
-          <label for="login_path">Ruta del formulario de ingreso</label>
-          <input type="text" id="login_path" name="login_path"
-                 value="{{ dcfg.login_path }}" placeholder="/">
+          <label for="email_user">Correo (usuario IMAP)</label>
+          <input type="email" id="email_user" name="email_user"
+                 value="{{ dcfg.email_user }}" placeholder="empresa@gmail.com">
         </div>
         <div class="form-group">
-          <label for="descarga_path">Ruta de descarga del reporte</label>
-          <input type="text" id="descarga_path" name="descarga_path"
-                 value="{{ dcfg.descarga_path }}" placeholder="/Document/DownloadZipFiles">
+          <label for="email_password">Contraseña de aplicación</label>
+          <input type="password" id="email_password" name="email_password"
+                 placeholder="{{ '•••••••• (guardada)' if dcfg.email_password else 'pega aquí la contraseña' }}"
+                 autocomplete="new-password">
+          <small class="muted">Déjalo vacío para conservar la actual.</small>
+        </div>
+        <div class="form-group">
+          <label for="imap_host">Servidor IMAP</label>
+          <input type="text" id="imap_host" name="imap_host"
+                 value="{{ dcfg.imap_host }}" placeholder="imap.gmail.com">
+        </div>
+        <div class="form-group">
+          <label for="imap_port">Puerto IMAP</label>
+          <input type="number" id="imap_port" name="imap_port"
+                 value="{{ dcfg.imap_port or '' }}" placeholder="993">
+        </div>
+        <div class="form-group">
+          <label for="email_carpeta">Carpeta</label>
+          <input type="text" id="email_carpeta" name="email_carpeta"
+                 value="{{ dcfg.email_carpeta or 'INBOX' }}" placeholder="INBOX">
+        </div>
+        <div class="form-group">
+          <label for="hora">Hora diaria (24h)</label>
+          <input type="time" id="hora" name="hora" value="{{ dcfg.hora }}"
+                 placeholder="{{ dcfg.hora_efectiva() }}">
         </div>
       </div>
+
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer; color:var(--text-dim); font-size:0.82rem; user-select:none;">
+          ▸ Opciones avanzadas del portal (solo si la DIAN cambia sus rutas)
+        </summary>
+        <div class="form-grid" style="margin-top:14px">
+          <div class="form-group">
+            <label for="login_path">Ruta del formulario de ingreso</label>
+            <input type="text" id="login_path" name="login_path"
+                   value="{{ dcfg.login_path }}" placeholder="/">
+          </div>
+          <div class="form-group">
+            <label for="descarga_path">Ruta de descarga del reporte</label>
+            <input type="text" id="descarga_path" name="descarga_path"
+                   value="{{ dcfg.descarga_path }}" placeholder="/Document/DownloadZipFiles">
+          </div>
+        </div>
+      </details>
     </details>
 
-    <div style="margin-top:24px; display:flex; gap:12px; flex-wrap:wrap">
+    <div style="margin-top:24px; display:flex; gap:12px; flex-wrap:wrap; align-items:center">
       <button type="submit" class="btn btn-primary"><span>💾</span> Guardar configuración</button>
     </div>
   </form>
-</div>
 
-<div class="form-section">
-  <h2>▶ Ejecutar ahora</h2>
-  <p class="muted" style="font-size:0.85rem; margin-bottom:14px">
-    Dispara una importación inmediata con la configuración guardada. La DIAN
-    enviará el token al correo; el proceso tarda unos minutos y el resultado
-    aparece en «Importaciones».
-  </p>
-  <form method="POST" action="{{ url_for('web.radian_auto_ejecutar') }}">
+  {% if dcfg.habilitado and dcfg.configurado() %}
+  <form method="POST" action="{{ url_for('web.radian_auto_ejecutar') }}" style="margin-top:14px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-secondary"
-            {{ 'disabled' if faltantes }}>
-      <span>⚡</span> Ejecutar importación ahora
-    </button>
+    <button type="submit" class="btn btn-secondary"><span>⚡</span> Ejecutar ahora (automático)</button>
+    <span class="muted" style="margin-left:10px; font-size:0.8rem">
+      Lee el token del correo y procesa; el resultado aparece en «Importaciones».
+    </span>
   </form>
+  {% elif dcfg.habilitado and faltantes %}
+  <p class="flash error" style="margin-top:14px">
+    Para el modo automático faltan: <strong>{{ faltantes | join(', ') }}</strong>.
+  </p>
+  {% endif %}
 </div>
 
 <div class="modulo-bottom">

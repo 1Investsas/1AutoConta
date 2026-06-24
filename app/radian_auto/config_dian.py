@@ -108,8 +108,15 @@ class DianConfig:
             kwargs["descarga_path"] = self.descarga_path.strip()
         return kwargs
 
+    def puede_solicitar(self) -> bool:
+        """True si hay datos para solicitar el token (flujo manual con enlace).
+
+        No requiere correo: basta el representante legal. El enlace se pega a mano.
+        """
+        return bool(self.nit_representante.strip())
+
     def configurado(self) -> bool:
-        """True si hay datos mínimos para intentar una importación automática."""
+        """True si hay datos mínimos para una importación 100% automática (IMAP)."""
         return bool(
             self.nit_representante.strip()
             and self._email_user_efectivo()

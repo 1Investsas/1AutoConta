@@ -271,6 +271,84 @@ class TestScheduler:
 
 
 # ---------------------------------------------------------------------------
+# Flujo manual: solicitar token y procesar con enlace pegado
+# ---------------------------------------------------------------------------
+
+class _ClienteFake:
+    """Cliente DIAN simulado para el flujo manual (sin red)."""
+
+    def __init__(self, contenido=b"PK\x03\x04datos", nombre="RADIAN.xlsx"):
+        self.contenido = contenido
+        self.ultimo_archivo = nombre
+        self.activado = None
+        self.solicitado = None
+
+    def activar_sesion(self, url):
+        self.activado = url
+
+    def descargar_reporte(self, desde, hasta):
+        self.rango = (desde, hasta)
+        return self.contenido
+
+    def solicitar_token(self, tipo, rep, emp):
+        self.solicitado = (tipo, rep, emp)
+
+
+class _EmpManual:
+    id = "principal"
+    nit = "901331657"
+    upload_category = "empresas/principal/uploads"
+
+    def __init__(self, dcfg):
+        self._dcfg = dcfg
+
+    def dian(self):
+        return self._dcfg
+
+
+class TestFlujoManual:
+    def test_descargar_con_enlace_guarda_archivo(self, monkeypatch):
+        from app.radian_auto import auto_importador as ai
+        guardado = {}
+        monkeypatch.setattr(
+            ai.store, "save_file",
+            lambda data, cat, nombre: guardado.update(
+                data=data, cat=cat, nombre=nombre) or f"/tmp/{nombre}",
+        )
+        emp = _EmpManual(DianConfig(dias_atras=2))
+        cli = _ClienteFake()
+        url = "https://catalogo-vpfe.dian.gov.co/User/AuthToken?token=abc&pk=1%7C2&rk=3"
+        ref, nombre, (desde, hasta) = ai.descargar_con_enlace(emp, url, client=cli)
+
+        assert cli.activado == url            # se activó la sesión con el enlace
+        assert nombre.endswith(".xlsx")
+        assert ref.endswith(nombre)
+        assert guardado["cat"] == "empresas/principal/uploads"
+        assert guardado["data"] == b"PK\x03\x04datos"
+
+    def test_descargar_con_enlace_rechaza_enlace_invalido(self):
+        from app.radian_auto import auto_importador as ai
+        from app.radian_auto.dian_client import DianError
+        emp = _EmpManual(DianConfig())
+        with pytest.raises(DianError):
+            ai.descargar_con_enlace(emp, "https://x.com/sin/token", client=_ClienteFake())
+
+    def test_solicitar_token_requiere_representante(self):
+        from app.radian_auto import auto_importador as ai
+        from app.radian_auto.dian_client import DianError
+        emp = _EmpManual(DianConfig())  # sin nit_representante
+        with pytest.raises(DianError):
+            ai.solicitar_token(emp, client=_ClienteFake())
+
+    def test_solicitar_token_llama_cliente(self):
+        from app.radian_auto import auto_importador as ai
+        emp = _EmpManual(DianConfig(nit_representante="10910094", tipo_identificacion="13"))
+        cli = _ClienteFake()
+        ai.solicitar_token(emp, client=cli)
+        assert cli.solicitado == ("13", "10910094", "901331657")
+
+
+# ---------------------------------------------------------------------------
 # Endpoint de cron (con CSRF ACTIVO: verifica la exención y el token)
 # ---------------------------------------------------------------------------
 

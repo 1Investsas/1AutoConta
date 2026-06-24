@@ -147,20 +147,34 @@ El módulo **RADIAN automático** (menú lateral › *Flujos indirectos › RADI
 automático*, o ruta `/radian/auto`) descarga e importa el reporte RADIAN desde
 `https://catalogo-vpfe.dian.gov.co/` **todos los días**, sin intervención manual.
 
-### Cómo funciona
+La DIAN autentica el portal con un **token temporal enviado por correo**. Hay
+dos modos, ambos disponibles:
 
-La DIAN autentica el portal con un **token temporal enviado por correo**. El
-flujo automatizado replica exactamente los pasos de un usuario:
+#### Modo manual con enlace (activo hoy)
 
-1. **Solicita el token** enviando las credenciales (tipo de identificación y NIT
-   del representante legal + NIT de la empresa) al portal.
-2. **Lee el correo** que la DIAN envía (remitente `facturacionelectronica@dian.gov.co`,
-   asunto *«Token Acceso DIAN»*) por **IMAP** y extrae el enlace de acceso
-   `…/User/AuthToken?pk=…&rk=…&token=…`.
-3. **Activa la sesión** abriendo ese enlace (válido 60 minutos).
-4. **Descarga el reporte** del rango de fechas y lo procesa con el mismo pipeline
-   del módulo RADIAN. El resultado queda en **Importaciones**, listo para revisar
-   y exportar a SIIGO.
+Mientras se habilita un acceso de máquina (certificado digital ante la DIAN o un
+proveedor tecnológico), se importa así, sin descargar/subir el Excel a mano:
+
+1. **Solicita el token** (botón en `/radian/auto`, o entra tú al portal). La DIAN
+   envía un correo con el enlace `…/User/AuthToken?pk=…&rk=…&token=…`.
+2. **Pega el enlace** del correo en la app.
+3. La app **activa la sesión, descarga el reporte y lo procesa** con el pipeline
+   del módulo RADIAN, y abre la pantalla de resultados (editable y exportable).
+
+#### Modo 100% automático con IMAP (opcional)
+
+Cuando exista un buzón de correo dedicado al que llegue el token, la app puede
+hacerlo todo sola, a diario:
+
+1. **Solicita el token** con las credenciales del representante legal.
+2. **Lee el correo** (remitente `facturacionelectronica@dian.gov.co`, asunto
+   *«Token Acceso DIAN»*) por **IMAP** y extrae el enlace de acceso.
+3. **Activa la sesión** (válido 60 minutos) y **descarga el reporte**.
+4. Lo procesa y lo deja en **Importaciones**, listo para revisar y exportar a SIIGO.
+
+> El siguiente paso recomendado para la automatización total es un
+> **certificado digital** de factura electrónica (directo ante la DIAN o vía un
+> proveedor tecnológico como SIIGO).
 
 ### Configuración (por empresa)
 

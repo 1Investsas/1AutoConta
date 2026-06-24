@@ -323,6 +323,80 @@ def radian_auto_guardar():
     return redirect(url_for("web.radian_auto"))
 
 
+@bp.route("/radian/auto/solicitar", methods=["POST"])
+@require_permission("radian.auto")
+def radian_auto_solicitar():
+    """Pide a la DIAN que envíe el token al correo (flujo manual: paso 1)."""
+    from app.radian_auto.auto_importador import solicitar_token
+    from app.radian_auto.dian_client import DianError
+
+    emp = _empresa_actual()
+    try:
+        solicitar_token(emp)
+    except DianError as exc:
+        flash(f"No se pudo solicitar el token automáticamente: {exc} "
+              "Puedes ingresar al portal de la DIAN y traer tú el enlace.", "error")
+        return redirect(url_for("web.radian_auto"))
+
+    audit.registrar("radian.auto.solicitar", empresa_id=emp.id)
+    flash("✓ Token solicitado. Revisa el correo del representante legal y pega "
+          "abajo el enlace de acceso (es válido 60 minutos).", "info")
+    return redirect(url_for("web.radian_auto"))
+
+
+@bp.route("/radian/auto/procesar-enlace", methods=["POST"])
+@require_permission("radian.auto")
+def radian_auto_procesar_enlace():
+    """Descarga y procesa el reporte a partir del enlace de acceso pegado (paso 2).
+
+    Reutiliza el mismo pipeline que la carga manual: deja el resultado en la
+    sesión y abre la pantalla de resultados (editable y exportable a SIIGO).
+    """
+    from app.database import inicializar_db, registrar_importacion, actualizar_importacion
+    from app.radian_auto.auto_importador import descargar_con_enlace
+    from app.radian_auto.dian_client import DianError
+
+    emp = _empresa_actual()
+    auth_url = request.form.get("auth_url", "").strip()
+    incluir_dup = request.form.get("incluir_duplicados") == "on"
+    if not auth_url:
+        flash("Pega el enlace de acceso que la DIAN envió al correo.", "error")
+        return redirect(url_for("web.radian_auto"))
+
+    try:
+        archivo_ref, nombre, _ = descargar_con_enlace(emp, auth_url)
+    except DianError as exc:
+        flash(f"No se pudo descargar el reporte de la DIAN: {exc}", "error")
+        return redirect(url_for("web.radian_auto"))
+
+    db = emp.db_path
+    inicializar_db(db)
+    imp_id = registrar_importacion(archivo_nombre=nombre, archivo_ref=archivo_ref, db_path=db)
+    try:
+        radian_path = store.load_file(archivo_ref)
+        terceros, cuentas, comprobantes = _rutas_maestros_default(emp)
+        resultado = _ejecutar_pipeline(
+            radian_path, terceros, cuentas, comprobantes,
+            db, incluir_dup, empresa=emp,
+        )
+        resultado["importacion_id"] = imp_id
+        session_store.guardar(KEY_RESULTADO, resultado)
+        _persistir_importacion(emp, resultado, "procesada")
+        audit.registrar(
+            "radian.auto.enlace", empresa_id=emp.id,
+            detalle=f"importacion={imp_id} docs={resultado['n_docs']}",
+        )
+        flash(f"✓ Procesados {resultado['n_docs']} documentos. "
+              f"{resultado['n_excepciones']} con excepciones.", "success")
+        return redirect(url_for("web.resultado"))
+    except Exception as exc:
+        logger.exception("Error procesando el reporte RADIAN por enlace")
+        actualizar_importacion(imp_id, estado="error", error=str(exc), db_path=db)
+        flash(f"Error al procesar: {exc}. El archivo quedó guardado: puedes "
+              "retomar esta importación desde «Importaciones».", "error")
+        return redirect(url_for("web.importaciones"))
+
+
 @bp.route("/radian/auto/ejecutar", methods=["POST"])
 @require_permission("radian.auto")
 def radian_auto_ejecutar():
