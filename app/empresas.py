@@ -86,6 +86,9 @@ class Empresa:
     cuentas_banco: list = field(default_factory=list)
     bancos: list = field(default_factory=list)
     formato_banco: dict = field(default_factory=dict)
+    # Configuración de la importación automática de RADIAN desde la DIAN
+    # (credenciales del portal, buzón del token y horario). Ver app/radian_auto.
+    dian_config: dict = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Valores efectivos (defaults de config.py + overrides de la empresa)
@@ -188,6 +191,11 @@ class Empresa:
         """Ruta local a un archivo maestro de esta empresa."""
         return store.get_local_data_path(filename, category=self.data_category)
 
+    def dian(self):
+        """Retorna la `DianConfig` de la empresa (importación automática RADIAN)."""
+        from app.radian_auto.config_dian import DianConfig
+        return DianConfig.from_dict(self.dian_config)
+
 
 def _empresa_principal() -> Empresa:
     """
@@ -210,6 +218,7 @@ def _empresa_principal() -> Empresa:
         cuentas_banco=override.get("cuentas_banco", []) or [],
         bancos=override.get("bancos", []) or [],
         formato_banco=override.get("formato_banco", {}) or {},
+        dian_config=override.get("dian_config", {}) or {},
     )
 
 
@@ -314,6 +323,7 @@ def _desde_dict(d: dict) -> Empresa:
         cuentas_banco=d.get("cuentas_banco", []) or [],
         bancos=d.get("bancos", []) or [],
         formato_banco=d.get("formato_banco", {}) or {},
+        dian_config=d.get("dian_config", {}) or {},
     )
 
 
@@ -412,8 +422,18 @@ def actualizar_empresa(
         cuentas_banco=cuentas_banco or [],
         bancos=bancos or [],
         formato_banco=formato_banco or {},
+        # La configuración DIAN se gestiona en su propia pantalla; se preserva
+        # tal cual al editar los datos generales de la empresa.
+        dian_config=actual.dian_config or {},
     )
     return guardar_empresa(empresa)
+
+
+def guardar_dian_config(empresa_id: str, dian_config: dict) -> Empresa:
+    """Actualiza solo la configuración DIAN de una empresa, conservando el resto."""
+    actual = obtener_empresa(empresa_id)
+    actual.dian_config = dian_config or {}
+    return guardar_empresa(actual)
 
 
 def eliminar_empresa(empresa_id: str) -> None:

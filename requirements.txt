@@ -11,5 +11,6 @@ flask-wtf>=1.2
 waitress>=3.0
 gunicorn>=21.0
 python-dateutil>=2.8
+requests>=2.31
 azure-storage-blob>=12.0
 fsspec>=2023.0

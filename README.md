@@ -54,6 +54,9 @@ Descarga el reporte desde https://catalogo-vpfe.dian.gov.co/ en formato `.xlsx` 
 
 Columnas requeridas: `Tipo de documento`, `CUFE/CUDE`, `NIT Emisor`, `NIT Receptor`, `Total`, más las columnas de impuestos.
 
+> 💡 ¿Cansado de descargarlo a mano cada día? El módulo **RADIAN automático**
+> puede hacerlo solo. Ver [Importación automática de RADIAN](#importación-automática-de-radian-dian).
+
 ### Archivos maestros
 
 Coloca en la carpeta `data/`:
@@ -152,8 +155,90 @@ pytest tests/ -v
 |------|-------------|
 | **1 ✅** | CLI completo: importar, clasificar, cruzar terceros, generar preasientos, exportar Excel |
 | **2** | Motor de sugerencias de cuentas basado en historial + interfaz web |
-| **3** | Importación directa al sistema contable vía API |
+| **3** | Importación directa al sistema contable vía API · **Descarga automática diaria de RADIAN desde la DIAN ✅** |
 | **4** | Dashboard de reportería y analytics contable |
+
+---
+
+## Importación automática de RADIAN (DIAN)
+
+El módulo **RADIAN automático** (menú lateral › *Flujos indirectos › RADIAN
+automático*, o ruta `/radian/auto`) descarga e importa el reporte RADIAN desde
+`https://catalogo-vpfe.dian.gov.co/` **todos los días**, sin intervención manual.
+
+La DIAN autentica el portal con un **token temporal enviado por correo**. Hay
+dos modos, ambos disponibles:
+
+#### Modo manual con enlace (activo hoy)
+
+Mientras se habilita un acceso de máquina (certificado digital ante la DIAN o un
+proveedor tecnológico), se importa así, sin descargar/subir el Excel a mano:
+
+1. **Solicita el token** (botón en `/radian/auto`, o entra tú al portal). La DIAN
+   envía un correo con el enlace `…/User/AuthToken?pk=…&rk=…&token=…`.
+2. **Pega el enlace** del correo en la app.
+3. La app **activa la sesión, descarga el reporte y lo procesa** con el pipeline
+   del módulo RADIAN, y abre la pantalla de resultados (editable y exportable).
+
+#### Modo 100% automático con IMAP (opcional)
+
+Cuando exista un buzón de correo dedicado al que llegue el token, la app puede
+hacerlo todo sola, a diario:
+
+1. **Solicita el token** con las credenciales del representante legal.
+2. **Lee el correo** (remitente `facturacionelectronica@dian.gov.co`, asunto
+   *«Token Acceso DIAN»*) por **IMAP** y extrae el enlace de acceso.
+3. **Activa la sesión** (válido 60 minutos) y **descarga el reporte**.
+4. Lo procesa y lo deja en **Importaciones**, listo para revisar y exportar a SIIGO.
+
+> El siguiente paso recomendado para la automatización total es un
+> **certificado digital** de factura electrónica (directo ante la DIAN o vía un
+> proveedor tecnológico como SIIGO).
+
+### Configuración (por empresa)
+
+En `/radian/auto` se configura, para la empresa activa:
+
+| Campo | Descripción |
+|-------|-------------|
+| Tipo de identificación + NIT representante legal | Credenciales del portal DIAN |
+| NIT de la empresa | Opcional; por defecto el NIT de la empresa |
+| Correo / contraseña de aplicación + IMAP host/puerto | Buzón donde llega el token |
+| Hora diaria + días hacia atrás | Programación de la descarga |
+
+> 🔐 **Gmail:** usa una **contraseña de aplicación** (no la contraseña normal).
+> La contraseña puede definirse en la UI o, de forma más segura, en la variable
+> de entorno `DIAN_EMAIL_PASSWORD` (que tiene prioridad y no se guarda en la BD).
+
+### Cómo se dispara «todos los días»
+
+Hay tres formas (elige una):
+
+| Mecanismo | Cómo se activa | Recomendado para |
+|-----------|----------------|------------------|
+| **Programador interno** | `RADIAN_SCHEDULER_ENABLED=true` | Una sola instancia siempre encendida |
+| **Cron externo** | `POST /radian/auto/cron` con cabecera `X-Radian-Token: <RADIAN_CRON_TOKEN>` | Azure Scheduler, cron, GitHub Action (varias instancias) |
+| **CLI** | `python main.py radian-auto` | Tareas programadas del sistema operativo / WebJob |
+
+```bash
+# Una empresa concreta, rango por defecto:
+python main.py radian-auto --empresa principal
+# Todas las empresas habilitadas:
+python main.py radian-auto
+```
+
+También hay un botón **«Ejecutar ahora»** en la UI para una corrida inmediata.
+
+### Nota de calibración del portal
+
+El **algoritmo del dígito de verificación del NIT**, la **construcción/lectura del
+enlace `AuthToken`** y la **extracción del token desde el correo** están
+implementados y cubiertos por tests. En cambio, las rutas HTTP exactas del
+portal (el endpoint del formulario de ingreso y el de descarga del reporte) **no
+están publicadas por la DIAN** y pueden cambiar: por eso son **configurables**
+(*Opciones avanzadas del portal* en la UI, o `login_path`/`descarga_path`) en
+lugar de estar incrustadas, y deben confirmarse contra el portal real la primera
+vez. Si una corrida no devuelve un archivo, ajústalas ahí.
 
 ---
 

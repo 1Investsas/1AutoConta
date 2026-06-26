@@ -37,6 +37,13 @@ CATEGORIAS: dict[str, dict] = {
                 "icono": '<circle cx="12" cy="12" r="9"/>'
                          '<path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/>',
             },
+            {
+                "nombre": "RADIAN automático",
+                "descripcion": "Descarga e importa RADIAN de la DIAN todos los días",
+                "endpoint": "web.radian_auto",
+                "icono": '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/>'
+                         '<path d="M3.5 12a8.5 8.5 0 0 1 14.5-6"/><path d="M20.5 12a8.5 8.5 0 0 1-14.5 6"/>',
+            },
         ],
     },
     "flujos-directos": {

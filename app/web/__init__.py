@@ -87,6 +87,9 @@ def create_app() -> Flask:
     # Inicializar la BD una sola vez al arrancar (no en cada request)
     inicializar_db(DB_PATH)
 
+    # Scheduler interno de la importación automática de RADIAN (opt-in).
+    _iniciar_scheduler_radian()
+
     from app.web.routes import bp
     app.register_blueprint(bp)
 
@@ -99,6 +102,24 @@ def create_app() -> Flask:
     _registrar_manejadores_error(app)
 
     return app
+
+
+def _iniciar_scheduler_radian() -> None:
+    """Arranca el scheduler diario de RADIAN si está habilitado por configuración.
+
+    Solo corre cuando ``RADIAN_SCHEDULER_ENABLED=true``. En despliegues con varias
+    instancias conviene dejarlo desactivado y usar un cron externo contra
+    ``/radian/auto/cron`` para no duplicar la importación.
+    """
+    from app.config import RADIAN_SCHEDULER_ENABLED
+    if not RADIAN_SCHEDULER_ENABLED:
+        return
+    try:
+        from app.radian_auto.scheduler import iniciar_scheduler
+        if iniciar_scheduler():
+            logger.info("Scheduler de importación automática RADIAN activado.")
+    except Exception:
+        logger.exception("No se pudo iniciar el scheduler de RADIAN.")
 
 
 def _registrar_manejadores_error(app: Flask) -> None:

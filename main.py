@@ -416,5 +416,64 @@ def _imprimir_resumen_final(preasientos, excepciones, ruta_salida: str) -> None:
     ))
 
 
+@cli.command("radian-auto")
+@click.option(
+    "--empresa", "-e", default=None,
+    help="ID de la empresa a importar. Por defecto: todas las habilitadas.",
+)
+@click.option(
+    "--desde", default=None,
+    help="Fecha inicial YYYY-MM-DD (por defecto según la config de la empresa).",
+)
+@click.option(
+    "--hasta", default=None,
+    help="Fecha final YYYY-MM-DD (por defecto hoy).",
+)
+@click.option(
+    "--incluir-duplicados", is_flag=True, default=False,
+    help="Reprocesar documentos (CUFE) ya registrados.",
+)
+def radian_auto(empresa, desde, hasta, incluir_duplicados):
+    """
+    Descarga e importa el reporte RADIAN desde la DIAN de forma automática.
+
+    Pensado para ejecutarse desde un programador (cron / Tarea programada /
+    Azure WebJob) una vez al día. Solicita el token a la DIAN, lo lee del correo
+    configurado, descarga el reporte y lo procesa con el pipeline estándar.
+    """
+    _configurar_logging(LOG_LEVEL)
+    from app.empresas import obtener_empresa
+    from app.radian_auto.auto_importador import importar_empresa, importar_todas
+
+    if empresa:
+        emp = obtener_empresa(empresa)
+        console.print(f"[cyan]Importando RADIAN automático de {emp.nombre}…[/cyan]")
+        resultados = [
+            importar_empresa(
+                emp, fecha_desde=desde, fecha_hasta=hasta,
+                incluir_duplicados=incluir_duplicados,
+            )
+        ]
+    else:
+        console.print("[cyan]Importando RADIAN automático de las empresas habilitadas…[/cyan]")
+        resultados = importar_todas(incluir_duplicados=incluir_duplicados)
+
+    if not resultados:
+        console.print("[yellow]No hay empresas con importación automática "
+                      "habilitada y configurada.[/yellow]")
+        return
+
+    hubo_error = False
+    for r in resultados:
+        if r.ok:
+            console.print(f"  [green]✓[/green] {r.empresa_id}: {r.mensaje}")
+        else:
+            hubo_error = True
+            console.print(f"  [red]✗[/red] {r.empresa_id}: {r.mensaje}")
+
+    if hubo_error:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()

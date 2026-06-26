@@ -37,6 +37,7 @@ PERMISOS: dict[str, str] = {
     "radian.procesar":        "Cargar y procesar reportes RADIAN",
     "radian.editar":          "Editar preasientos RADIAN (tercero, dividir, confirmar)",
     "radian.exportar":        "Generar el archivo SIIGO de RADIAN",
+    "radian.auto":            "Configurar y ejecutar la importación automática de RADIAN",
     "banco.ver":              "Ver el módulo de Bancos y su historial",
     "banco.procesar":         "Cargar y previsualizar extractos bancarios",
     "banco.exportar":         "Generar el archivo SIIGO de Bancos",
@@ -70,7 +71,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
     "contador": (
         "Contador (tributario y fiscal) — opera, exporta y revisa",
         _VER + (
-            "radian.procesar", "radian.editar", "radian.exportar",
+            "radian.procesar", "radian.editar", "radian.exportar", "radian.auto",
             "banco.procesar", "banco.exportar",
             "importaciones.gestionar", "auditoria.ver",
             "terceros.gestionar",
@@ -79,7 +80,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
     "auxiliar": (
         "Auxiliar (digitación) — captura y edita, sin exportar a SIIGO",
         _VER + (
-            "radian.procesar", "radian.editar",
+            "radian.procesar", "radian.editar", "radian.auto",
             "banco.procesar",
             "importaciones.gestionar",
             "terceros.gestionar",
