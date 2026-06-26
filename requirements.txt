@@ -14,3 +14,7 @@ python-dateutil>=2.8
 requests>=2.31
 azure-storage-blob>=12.0
 fsspec>=2023.0
+# Solo se importa cuando USE_SQLITE=false (Azure SQL). Se incluye aquí para que
+# quede empaquetado en ./vendor durante el despliegue y no haya que descargarlo
+# en cada arranque del contenedor (ver startup.sh / application.py).
+pyodbc>=5.1
