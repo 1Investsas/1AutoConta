@@ -12,6 +12,7 @@ data/empresas.json
 data/*/
 .venv/
 venv/
+vendor/
 *.egg-info/
 dist/
 build/

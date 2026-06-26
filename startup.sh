@@ -1,6 +1,7 @@
 #!/bin/bash
 # Azure App Service startup script for contable-auto
-# Dependencies are pre-installed in the antenv virtual environment by GitHub Actions
+# Python dependencies are bundled into ./vendor during the GitHub Actions
+# deployment and added to sys.path in application.py (no server-side build).
 
 # Install ODBC Driver + pyodbc only if Azure SQL is configured
 if [ "$USE_SQLITE" = "false" ]; then

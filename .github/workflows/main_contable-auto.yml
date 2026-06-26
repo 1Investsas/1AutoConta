@@ -26,13 +26,21 @@ jobs:
           python-version: '3.11'
 
       # Verificación de dependencias y tests antes de desplegar.
-      # Azure App Service (Oryx) instala requirements.txt en el servidor,
-      # por lo que no hace falta empaquetar un venv ni subir artifacts.
       - name: Install dependencies and run tests
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt pytest
           python -m pytest tests/ -q
+
+      # Empaquetar las dependencias junto con el código. Azure/Oryx NO ejecuta
+      # 'pip install' en el servidor salvo que SCM_DO_BUILD_DURING_DEPLOYMENT
+      # esté activo; al desplegar el código tal cual, las dependencias faltaban
+      # y la app no arrancaba (ModuleNotFoundError). Instalándolas en ./vendor
+      # y añadiéndolas al sys.path (ver application.py) el despliegue es
+      # autocontenido y no depende de la build del servidor.
+      - name: Bundle dependencies for deployment
+        run: |
+          python -m pip install -r requirements.txt --target=vendor
 
       - name: Login to Azure
         uses: azure/login@v2
