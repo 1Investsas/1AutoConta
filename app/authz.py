@@ -46,6 +46,8 @@ PERMISOS: dict[str, str] = {
     "ml.ver":                 "Ver el historial de aprendizaje (machine learning)",
     "empresas.ver":           "Ver y seleccionar empresas",
     "empresas.gestionar":     "Crear, editar y eliminar empresas y sus maestros",
+    "terceros.ver":           "Ver el módulo de Terceros",
+    "terceros.gestionar":     "Actualizar el maestro de terceros importando el RUT",
     "usuarios.gestionar":     "Administrar usuarios y roles",
     "auditoria.ver":          "Ver la bitácora de auditoría",
 }
@@ -54,6 +56,7 @@ PERMISOS: dict[str, str] = {
 _VER = (
     "dashboard.ver", "radian.ver", "banco.ver",
     "importaciones.ver", "analitica.ver", "ml.ver", "empresas.ver",
+    "terceros.ver",
 )
 
 # ---------------------------------------------------------------------------
@@ -70,6 +73,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "radian.procesar", "radian.editar", "radian.exportar",
             "banco.procesar", "banco.exportar",
             "importaciones.gestionar", "auditoria.ver",
+            "terceros.gestionar",
         ),
     ),
     "auxiliar": (
@@ -78,6 +82,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "radian.procesar", "radian.editar",
             "banco.procesar",
             "importaciones.gestionar",
+            "terceros.gestionar",
         ),
     ),
     "consulta": (

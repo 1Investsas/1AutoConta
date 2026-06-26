@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Terceros — 1CONTIGO{% endblock %}
+{% block page_title %}👥 Terceros{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Actualiza el maestro de terceros importando el RUT de la DIAN</p>{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Lee el PDF del <strong>RUT de la DIAN</strong> (persona jurídica o natural)
+      y actualiza automáticamente el <strong>Listado de Terceros</strong>: agrega
+      los nuevos y actualiza los existentes (cruce por NIT/cédula).
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Maestro actual · {{ empresa_sigla }}</div>
+    {% if info.existe %}
+    <div class="card-value" style="color:var(--success); font-size:1.6rem">{{ info.total }}</div>
+    <div class="card-sub">terceros registrados</div>
+    {% else %}
+    <div class="card-value" style="color:var(--text-dim); font-size:1.2rem">Sin archivo</div>
+    <div class="card-sub">se creará al importar el primer RUT</div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="card-title">Tipos soportados</div>
+    <div class="card-value" style="color:var(--accent); font-size:1.3rem">PJ · PN</div>
+    <div class="card-sub">persona jurídica y persona natural</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Maestro de terceros</div>
+    {% if info.existe %}
+    <a href="{{ url_for('web.terceros_descargar') }}" class="btn btn-secondary" style="margin-top:10px">
+      <span>⬇</span> Descargar Excel
+    </a>
+    {% else %}
+    <div class="card-sub" style="margin-top:10px">Aún no disponible</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="form-section">
+  <h2>⬆ Importar RUT de la DIAN</h2>
+
+  <form method="POST" action="{{ url_for('web.terceros_importar') }}"
+        enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Drag & Drop RUT (admite varios PDF) -->
+    <div class="drop-zone" id="dropZoneRut">
+      <div class="drop-icon">📄</div>
+      <div class="drop-text">
+        Arrastra uno o varios <strong>RUT en PDF</strong> aquí<br>
+        o <strong><label for="rutFile">haz click para elegir</label></strong>
+      </div>
+      <input type="file" id="rutFile" name="rut" accept=".pdf" multiple required>
+      <div class="file-chosen" id="rutChosen"></div>
+    </div>
+
+    <p class="muted" style="margin-top:16px; font-size:0.82rem">
+      El maestro se guarda como <code>Listado_de_Terceros.xlsx</code> de la empresa
+      <code>{{ empresa_sigla }}</code> y queda disponible para el cruce de terceros del módulo RADIAN.
+    </p>
+
+    <div style="margin-top:20px">
+      <button type="submit" class="btn btn-primary" id="btnImportarRut">
+        <span>⚙</span> Actualizar terceros
+      </button>
+    </div>
+  </form>
+</div>
+
+{% if resultado %}
+<div class="form-section" style="margin-top:24px">
+  <h2>Resultado de la importación</h2>
+
+  <p class="muted" style="margin-bottom:14px">
+    <strong style="color:var(--success)">{{ resultado.resumen.agregados }}</strong> agregados ·
+    <strong style="color:var(--accent)">{{ resultado.resumen.actualizados }}</strong> actualizados
+    {% if resultado.resumen.creado %} · archivo creado{% endif %}
+  </p>
+
+  {% if resultado.leidos %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Archivo</th><th>Tipo</th><th>Identificación</th>
+          <th>Nombre / Razón social</th><th>Ciudad</th><th>Correo</th><th>Teléfono</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in resultado.leidos %}
+        <tr>
+          <td>{{ r.archivo }}</td>
+          <td>{% if r.tipo_persona == 'juridica' %}Jurídica{% else %}Natural{% endif %}
+              <span class="muted">({{ r.tipo_identificacion }})</span></td>
+          <td>{{ r.nit }}</td>
+          <td>{{ r.nombre }}</td>
+          <td>{{ r.ciudad }}</td>
+          <td>{{ r.correo }}</td>
+          <td>{{ r.telefono }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if resultado.errores %}
+  <div class="flash error" style="margin-top:16px">
+    <strong>Archivos con error:</strong>
+    <ul style="margin:8px 0 0 18px">
+      {% for e in resultado.errores %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:18px">
+    <a href="{{ url_for('web.terceros_descargar') }}" class="btn btn-secondary">
+      <span>⬇</span> Descargar maestro actualizado
+    </a>
+  </div>
+</div>
+{% endif %}
+
+<!-- Pie del módulo: Guía rápida + Actividad reciente -->
+<div class="modulo-bottom">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+        Guía rápida
+      </h2>
+    </div>
+    <p class="guia-sub">Pasos para actualizar el maestro de terceros</p>
+
+    <div class="guia-steps">
+      <div class="guia-step">
+        <div class="guia-circle guia-c-blue">
+          <span class="guia-num">1</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-blue">Descarga el RUT</div>
+        <div class="guia-step-desc">Obtén el PDF del RUT desde el portal de la DIAN (MUISCA).</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <div class="guia-step">
+        <div class="guia-circle guia-c-green">
+          <span class="guia-num">2</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-green">Súbelo aquí</div>
+        <div class="guia-step-desc">Arrastra uno o varios RUT en PDF (jurídica o natural).</div>
+      </div>
+      <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+
+      <div class="guia-step">
+        <div class="guia-circle guia-c-orange">
+          <span class="guia-num">3</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <div class="guia-step-title guia-t-orange">Listo</div>
+        <div class="guia-step-desc">El maestro se actualiza y queda listo para el cruce en RADIAN.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Actividad reciente</h2>
+    </div>
+    <div class="act-list">
+      {% for a in actividad %}
+      <div class="act-item">
+        <div class="act-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/></svg>
+          <span class="act-ext">RUT</span>
+        </div>
+        <div class="act-main">
+          <div class="act-name" title="{{ a.detalle }}">{{ a.detalle }}</div>
+          {% if a.usuario %}<span class="act-status proc">{{ a.usuario }}</span>{% endif %}
+        </div>
+        <div class="act-date">{{ a.fecha }}</div>
+      </div>
+      {% else %}
+      <div class="act-empty">Todavía no hay importaciones de RUT registradas.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Mostrar cuántos PDF se seleccionaron (el drop-zone base solo muestra el primero).
+(function () {
+  const input = document.getElementById('rutFile');
+  const label = document.getElementById('rutChosen');
+  if (!input || !label) return;
+  input.addEventListener('change', () => {
+    const n = input.files.length;
+    if (n === 0) { label.textContent = ''; }
+    else if (n === 1) { label.textContent = '📄 ' + input.files[0].name; }
+    else { label.textContent = '📄 ' + n + ' archivos seleccionados'; }
+  });
+})();
+</script>
+
+{% endblock %}

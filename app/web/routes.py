@@ -1436,6 +1436,187 @@ def api_terceros():
 
 
 # ---------------------------------------------------------------------------
+# Terceros — actualización del maestro importando el RUT de la DIAN
+# ---------------------------------------------------------------------------
+
+ALLOWED_EXT_PDF = {"pdf"}
+
+
+def _allowed_pdf(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT_PDF
+
+
+def _maestro_terceros_bytes(emp) -> bytes | None:
+    """Devuelve los bytes del maestro de terceros de la empresa, o None.
+
+    Resuelve la ruta local (descargándola del blob en modo cloud) y la lee. Si
+    el archivo aún no existe, retorna None para que se cree uno nuevo.
+    """
+    try:
+        path = emp.ruta_maestro("Listado_de_Terceros.xlsx")
+    except FileNotFoundError:
+        return None
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _info_maestro_terceros(emp) -> dict:
+    """Resumen del maestro de terceros actual (existencia y nº de registros)."""
+    from app.importador import cargar_maestro_terceros
+    try:
+        path = emp.ruta_maestro("Listado_de_Terceros.xlsx")
+        if not os.path.exists(path):
+            return {"existe": False, "total": 0}
+        df = _cargar_maestro_cacheado(cargar_maestro_terceros, path)
+        return {"existe": True, "total": int(len(df))}
+    except Exception:
+        return {"existe": False, "total": 0}
+
+
+def _actividad_terceros(emp, limite: int = 6) -> list[dict]:
+    """Últimas importaciones de RUT registradas en auditoría para la empresa."""
+    eventos = [
+        e for e in audit.listar(limite=200)
+        if e.get("accion") == "terceros.importar"
+        and (e.get("empresa_id") in (None, emp.id))
+    ]
+    out = []
+    for e in eventos[:limite]:
+        out.append({
+            "fecha": (e.get("timestamp") or "")[:19].replace("T", " "),
+            "detalle": e.get("detalle") or "",
+            "usuario": e.get("usuario_email") or "",
+        })
+    return out
+
+
+@bp.route("/terceros")
+@require_permission("terceros.ver")
+def terceros():
+    """Página del módulo Terceros: estado del maestro + importación de RUT."""
+    emp = _empresa_actual()
+    return render_template(
+        "terceros.html",
+        info=_info_maestro_terceros(emp),
+        actividad=_actividad_terceros(emp),
+        resultado=None,
+    )
+
+
+@bp.route("/terceros/importar", methods=["POST"])
+@require_permission("terceros.gestionar")
+def terceros_importar():
+    """Lee uno o varios PDF del RUT de la DIAN y actualiza el maestro de terceros."""
+    import tempfile
+    from app.rut import parsear_rut_pdf, RUTParseError
+    from app.terceros_rut import mapear_rut_a_tercero, actualizar_maestro_terceros
+
+    archivos = [f for f in request.files.getlist("rut") if f and f.filename]
+    if not archivos:
+        flash("Debes seleccionar al menos un PDF del RUT.", "error")
+        return redirect(url_for("web.terceros"))
+
+    emp = _empresa_actual()
+    parseados: list[dict] = []   # terceros canónicos para el upsert
+    leidos: list[dict] = []      # info legible para la vista de resultados
+    errores: list[str] = []
+
+    for f in archivos:
+        if not _allowed_pdf(f.filename):
+            errores.append(f"{f.filename}: el archivo debe ser un PDF.")
+            continue
+        tmp_path = None
+        try:
+            data = f.read()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+            rut = parsear_rut_pdf(tmp_path)
+            tercero = mapear_rut_a_tercero(rut)
+            parseados.append(tercero)
+            leidos.append({
+                "archivo": secure_filename(f.filename),
+                "nit": f"{rut.get('nit', '')}-{rut.get('dv', '')}",
+                "tipo_persona": rut.get("tipo_persona", ""),
+                "nombre": rut.get("nombre", ""),
+                "tipo_identificacion": rut.get("tipo_identificacion", ""),
+                "ciudad": rut.get("ciudad", ""),
+                "direccion": rut.get("direccion", ""),
+                "correo": rut.get("correo", ""),
+                "telefono": rut.get("telefono", ""),
+            })
+        except RUTParseError as exc:
+            errores.append(f"{f.filename}: {exc}")
+        except Exception:
+            logger.exception("Error inesperado leyendo el RUT %s", f.filename)
+            errores.append(f"{f.filename}: error inesperado al leer el RUT.")
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    if not parseados:
+        flash("No se pudo leer ningún RUT. " + " ".join(errores), "error")
+        return redirect(url_for("web.terceros"))
+
+    try:
+        contenido = _maestro_terceros_bytes(emp)
+        nuevos_bytes, resumen = actualizar_maestro_terceros(parseados, contenido)
+        store.save_file(nuevos_bytes, emp.data_category, "Listado_de_Terceros.xlsx")
+    except Exception as exc:
+        logger.exception("Error actualizando el maestro de terceros")
+        flash(f"Error al actualizar el maestro de terceros: {exc}", "error")
+        return redirect(url_for("web.terceros"))
+
+    audit.registrar(
+        "terceros.importar", empresa_id=emp.id,
+        detalle=f"archivos={len(archivos)} agregados={resumen['agregados']} "
+                f"actualizados={resumen['actualizados']}",
+    )
+
+    msg = (f"✓ Maestro de terceros actualizado: {resumen['agregados']} agregados, "
+           f"{resumen['actualizados']} actualizados.")
+    if resumen.get("creado"):
+        msg += " Se creó el archivo Listado_de_Terceros.xlsx."
+    if errores:
+        msg += f" {len(errores)} archivo(s) con error."
+    flash(msg, "success" if not errores else "info")
+
+    resultado = {
+        "leidos": leidos,
+        "errores": errores,
+        "resumen": resumen,
+    }
+    return render_template(
+        "terceros.html",
+        info=_info_maestro_terceros(emp),
+        actividad=_actividad_terceros(emp),
+        resultado=resultado,
+    )
+
+
+@bp.route("/terceros/descargar")
+@require_permission("terceros.ver")
+def terceros_descargar():
+    """Descarga el maestro de terceros actual de la empresa."""
+    emp = _empresa_actual()
+    contenido = _maestro_terceros_bytes(emp)
+    if contenido is None:
+        flash("Aún no hay un maestro de terceros. Importa un RUT para crearlo.", "error")
+        return redirect(url_for("web.terceros"))
+    return send_file(
+        io.BytesIO(contenido),
+        as_attachment=True,
+        download_name="Listado_de_Terceros.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /test-procesar — Prueba end-to-end sin file dialog (solo DEBUG)
 # ---------------------------------------------------------------------------
 

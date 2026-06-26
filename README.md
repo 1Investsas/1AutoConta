@@ -66,6 +66,23 @@ Coloca en la carpeta `data/`:
 
 ---
 
+## Módulo Terceros (web)
+
+En **Configuraciones › Terceros** puedes actualizar automáticamente el
+`Listado_de_Terceros.xlsx` importando el **RUT de la DIAN en PDF**:
+
+- Soporta **persona jurídica** y **persona natural**.
+- Lee NIT/DV, razón social o nombre completo, tipo de identificación, dirección,
+  ciudad, departamento, correo y teléfono de la primera hoja del RUT.
+- Hace *upsert* por NIT/cédula: agrega los terceros nuevos y actualiza los
+  existentes, conservando el formato del archivo (encabezados en la fila 7).
+- Si el maestro aún no existe, lo crea. El resultado queda listo para el cruce
+  de terceros del módulo RADIAN.
+
+Puedes subir varios RUT a la vez y descargar el maestro actualizado.
+
+---
+
 ## Estructura de carpetas
 
 ```
@@ -75,6 +92,8 @@ contable-auto/
 │   ├── importador.py     # Lectura de RADIAN y archivos maestros
 │   ├── clasificador.py   # Clasificación determinista de documentos
 │   ├── terceros.py       # Cruce con maestro de terceros
+│   ├── rut.py            # Lectura del RUT de la DIAN (PDF) → datos del tercero
+│   ├── terceros_rut.py   # Actualiza el maestro de terceros con el RUT importado
 │   ├── impuestos.py      # Separación de impuestos y base gravable
 │   ├── comprobantes.py   # Asignación de tipo de comprobante
 │   ├── preasiento.py     # Generación de líneas contables
