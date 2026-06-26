@@ -71,6 +71,11 @@
       <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg></span>
       Empresas
     </a>
+    <a href="{{ url_for('web.terceros') }}"
+       class="nav-item {% if request.endpoint and request.endpoint.startswith('web.terceros') %}active{% endif %}">
+      <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17" cy="8" r="2.5"/><path d="M16 15c3 0 5 2 5 5"/></svg></span>
+      Terceros
+    </a>
     <a href="{{ url_for('web.usuarios') }}"
        class="nav-item {% if request.endpoint and request.endpoint.startswith('web.usuarios') %}active{% endif %}">
       <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="3"/><path d="M3 21c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 3.5a3 3 0 0 1 0 6"/><path d="M21 21c0-2.5-1.4-4.5-3.5-5.5"/></svg></span>

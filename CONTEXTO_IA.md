@@ -78,6 +78,8 @@ contable-auto/
 │   ├── importador.py        # Lectura/normalización de RADIAN y maestros
 │   ├── clasificador.py      # Reglas deterministas de tipo de documento
 │   ├── terceros.py          # Identificación y cruce de terceros
+│   ├── rut.py               # Lectura del RUT de la DIAN en PDF (jurídica/natural)
+│   ├── terceros_rut.py      # Upsert del maestro de terceros a partir del RUT
 │   ├── impuestos.py         # Separación de impuestos + base gravable
 │   ├── comprobantes.py      # Asignación de código de comprobante
 │   ├── preasiento.py        # ⭐ Generación de líneas contables (asientos)
