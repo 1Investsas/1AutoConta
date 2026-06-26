@@ -2,7 +2,7 @@
 
 {% block title %}Terceros — 1CONTIGO{% endblock %}
 {% block page_title %}👥 Terceros{% endblock %}
-{% block page_subtitle %}<p class="topbar-sub">Actualiza el maestro de terceros importando el RUT de la DIAN</p>{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Actualiza el maestro de terceros con el RUT de la DIAN e importa sus cuentas bancarias</p>{% endblock %}
 
 {% block content %}
 
@@ -12,7 +12,8 @@
     <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
       Lee el PDF del <strong>RUT de la DIAN</strong> (persona jurídica o natural)
       y actualiza automáticamente el <strong>Listado de Terceros</strong>: agrega
-      los nuevos y actualiza los existentes (cruce por NIT/cédula).
+      los nuevos y actualiza los existentes (cruce por NIT/cédula). También importa
+      las <strong>cuentas bancarias</strong> del tercero desde el certificado del banco.
     </div>
   </div>
   <div class="card">
@@ -39,6 +40,11 @@
     {% else %}
     <div class="card-sub" style="margin-top:10px">Aún no disponible</div>
     {% endif %}
+  </div>
+  <div class="card">
+    <div class="card-title">Cuentas bancarias</div>
+    <div class="card-value" style="color:var(--success); font-size:1.6rem">{{ cuentas_bancarias|length }}</div>
+    <div class="card-sub">cuentas de terceros registradas</div>
   </div>
 </div>
 
@@ -127,6 +133,123 @@
 </div>
 {% endif %}
 
+<!-- ===== Cuentas bancarias de terceros ===== -->
+<div class="form-section" style="margin-top:24px">
+  <h2>🏦 Importar cuentas bancarias del tercero</h2>
+
+  <p class="muted" style="margin-bottom:16px; font-size:0.85rem; line-height:1.6">
+    Sube el <strong>certificado bancario</strong> en PDF del tercero al que le realizas
+    los pagos (persona jurídica o natural). Se leen el banco, el titular y la(s)
+    cuenta(s), y se guardan asociadas al tercero por su NIT/cédula.
+  </p>
+
+  <form method="POST" action="{{ url_for('web.terceros_cuentas_importar') }}"
+        enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Drag & Drop certificado (admite varios PDF) -->
+    <div class="drop-zone" id="dropZoneCert">
+      <div class="drop-icon">🏦</div>
+      <div class="drop-text">
+        Arrastra uno o varios <strong>certificados bancarios en PDF</strong> aquí<br>
+        o <strong><label for="certFile">haz click para elegir</label></strong>
+      </div>
+      <input type="file" id="certFile" name="certificado" accept=".pdf" multiple required>
+      <div class="file-chosen" id="certChosen"></div>
+    </div>
+
+    <div style="margin-top:20px">
+      <button type="submit" class="btn btn-primary" id="btnImportarCert">
+        <span>⚙</span> Importar cuentas bancarias
+      </button>
+    </div>
+  </form>
+
+  {% if resultado_cuentas %}
+  <div style="margin-top:24px">
+    <h3 style="margin-bottom:12px">Resultado de la importación</h3>
+    {% if resultado_cuentas.cuentas_leidas %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Archivo</th><th>Titular</th><th>Documento</th>
+            <th>Banco</th><th>Producto</th><th>Nº de cuenta</th><th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in resultado_cuentas.cuentas_leidas %}
+          <tr>
+            <td>{{ c.archivo }}</td>
+            <td>{{ c.titular }}
+                <span class="muted">({% if c.tipo_persona == 'juridica' %}Jurídica{% else %}Natural{% endif %})</span></td>
+            <td>{{ c.tipo_documento }} {{ c.numero_documento }}</td>
+            <td>{{ c.banco }}</td>
+            <td>{{ c.tipo_producto }}</td>
+            <td>{{ c.numero_cuenta }}</td>
+            <td>{{ c.estado }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if resultado_cuentas.errores %}
+    <div class="flash error" style="margin-top:16px">
+      <strong>Archivos con error:</strong>
+      <ul style="margin:8px 0 0 18px">
+        {% for e in resultado_cuentas.errores %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- ===== Cuentas bancarias registradas ===== -->
+<div class="form-section" style="margin-top:24px">
+  <h2>Cuentas bancarias registradas</h2>
+  {% if cuentas_bancarias %}
+  <div class="table-wrapper" style="margin-top:12px">
+    <table>
+      <thead>
+        <tr>
+          <th>Titular</th><th>Documento</th><th>Banco</th>
+          <th>Producto</th><th>Nº de cuenta</th><th>Apertura</th>
+          <th>Estado</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in cuentas_bancarias %}
+        <tr>
+          <td>{{ c.nombre_tercero }}</td>
+          <td>{{ c.tipo_documento }} {{ c.nit_tercero }}</td>
+          <td>{{ c.banco }}</td>
+          <td>{{ c.tipo_producto }}</td>
+          <td>{{ c.numero_cuenta }}</td>
+          <td>{{ c.fecha_apertura }}</td>
+          <td>{{ c.estado }}</td>
+          <td style="text-align:right">
+            <form method="POST"
+                  action="{{ url_for('web.terceros_cuenta_eliminar', cuenta_id=c.id) }}"
+                  onsubmit="return confirm('¿Eliminar esta cuenta bancaria?');"
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-secondary btn-sm" title="Eliminar">🗑</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:12px">
+    Todavía no hay cuentas bancarias registradas. Importa el certificado bancario de un tercero.
+  </p>
+  {% endif %}
+</div>
+
 <!-- Pie del módulo: Guía rápida + Actividad reciente -->
 <div class="modulo-bottom">
 
@@ -198,9 +321,9 @@
 
 <script>
 // Mostrar cuántos PDF se seleccionaron (el drop-zone base solo muestra el primero).
-(function () {
-  const input = document.getElementById('rutFile');
-  const label = document.getElementById('rutChosen');
+function mostrarSeleccion(inputId, labelId) {
+  const input = document.getElementById(inputId);
+  const label = document.getElementById(labelId);
   if (!input || !label) return;
   input.addEventListener('change', () => {
     const n = input.files.length;
@@ -208,7 +331,9 @@
     else if (n === 1) { label.textContent = '📄 ' + input.files[0].name; }
     else { label.textContent = '📄 ' + n + ' archivos seleccionados'; }
   });
-})();
+}
+mostrarSeleccion('rutFile', 'rutChosen');
+mostrarSeleccion('certFile', 'certChosen');
 </script>
 
 {% endblock %}

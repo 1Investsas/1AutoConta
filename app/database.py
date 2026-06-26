@@ -347,7 +347,7 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
     Crea todas las tablas necesarias si no existen.
 
     Tablas: documentos_importados, bitacora, historial_cuentas, importaciones,
-    procesos_banco.
+    procesos_banco, correcciones_tercero, cuentas_bancarias_tercero.
 
     El esquema se asegura una sola vez por proceso y por ruta de BD: el DDL es
     idempotente y estático, de modo que reejecutarlo en cada request solo añade
@@ -431,6 +431,8 @@ _INDICES_MSSQL = (
     ("ix_procesos_banco_empresa",    "procesos_banco",       "empresa_id, id"),
     # Analítica: distribución/evolución agrupada por clasificación dentro de la empresa.
     ("ix_documentos_empresa_clasif", "documentos_importados", "empresa_id, clasificacion"),
+    # Cuentas bancarias por empresa, consultadas por tercero.
+    ("ix_cuentas_banco_tercero",     "cuentas_bancarias_tercero", "empresa_id, nit_tercero"),
 )
 
 
@@ -530,6 +532,22 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             usos             INTEGER DEFAULT 1,
             ultima_vez       TEXT,
             UNIQUE(nit_original)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cuentas_bancarias_tercero (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            nit_tercero     TEXT    NOT NULL,
+            nombre_tercero  TEXT,
+            tipo_documento  TEXT,
+            banco           TEXT,
+            tipo_producto   TEXT,
+            numero_cuenta   TEXT    NOT NULL,
+            fecha_apertura  TEXT,
+            estado          TEXT,
+            archivo_origen  TEXT,
+            fecha_registro  TEXT,
+            UNIQUE(nit_tercero, numero_cuenta)
         )
     """)
 
@@ -633,6 +651,24 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             usos             INT DEFAULT 1,
             ultima_vez       NVARCHAR(50),
             CONSTRAINT uq_correccion_tercero UNIQUE(empresa_id, nit_original)
+        )
+    """)
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cuentas_bancarias_tercero')
+        CREATE TABLE cuentas_bancarias_tercero (
+            id              INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id      NVARCHAR(100)  NOT NULL DEFAULT 'principal',
+            nit_tercero     NVARCHAR(50)   NOT NULL,
+            nombre_tercero  NVARCHAR(300),
+            tipo_documento  NVARCHAR(20),
+            banco           NVARCHAR(200),
+            tipo_producto   NVARCHAR(100),
+            numero_cuenta   NVARCHAR(50)   NOT NULL,
+            fecha_apertura  NVARCHAR(50),
+            estado          NVARCHAR(50),
+            archivo_origen  NVARCHAR(300),
+            fecha_registro  NVARCHAR(50),
+            CONSTRAINT uq_cuenta_banco_tercero UNIQUE(empresa_id, nit_tercero, numero_cuenta)
         )
     """)
 
@@ -1730,6 +1766,166 @@ def listar_correcciones_tercero(
             p_emp,
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Cuentas bancarias de terceros — importadas del certificado bancario
+# ---------------------------------------------------------------------------
+
+def registrar_cuenta_bancaria_tercero(
+    nit_tercero: str,
+    numero_cuenta: str,
+    nombre_tercero: str = "",
+    tipo_documento: str = "",
+    banco: str = "",
+    tipo_producto: str = "",
+    fecha_apertura: str = "",
+    estado: str = "",
+    archivo_origen: str = "",
+    db_path: str = DB_PATH,
+) -> None:
+    """
+    Registra (o actualiza) una cuenta bancaria de un tercero.
+
+    Hace un UPSERT por ``(nit_tercero, numero_cuenta)``: si la cuenta ya estaba
+    registrada para ese tercero, refresca sus datos (banco, estado, etc.) en vez
+    de duplicarla. Así reimportar el mismo certificado es idempotente.
+
+    Args:
+        nit_tercero:    Identificación del tercero (solo dígitos) titular de la cuenta.
+        numero_cuenta:  Número de la cuenta/producto bancario.
+        nombre_tercero: Nombre o razón social del titular.
+        tipo_documento: Tipo de documento del titular (NIT, CC, CE…).
+        banco:          Entidad bancaria (p. ej. 'BANCOLOMBIA S.A.').
+        tipo_producto:  Tipo de cuenta (p. ej. 'CUENTA DE AHORROS').
+        fecha_apertura: Fecha de apertura de la cuenta (texto, como en el certificado).
+        estado:         Estado de la cuenta (p. ej. 'ACTIVA').
+        archivo_origen: Nombre del archivo del certificado de origen (trazabilidad).
+    """
+    if not nit_tercero or not numero_cuenta:
+        return
+    conn = get_connection(db_path)
+    ahora = datetime.now().isoformat()
+    try:
+        if conn.is_sqlite:
+            conn.execute(
+                """
+                INSERT INTO cuentas_bancarias_tercero
+                    (nit_tercero, nombre_tercero, tipo_documento, banco,
+                     tipo_producto, numero_cuenta, fecha_apertura, estado,
+                     archivo_origen, fecha_registro)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(nit_tercero, numero_cuenta) DO UPDATE SET
+                    nombre_tercero = excluded.nombre_tercero,
+                    tipo_documento = excluded.tipo_documento,
+                    banco          = excluded.banco,
+                    tipo_producto  = excluded.tipo_producto,
+                    fecha_apertura = excluded.fecha_apertura,
+                    estado         = excluded.estado,
+                    archivo_origen = excluded.archivo_origen,
+                    fecha_registro = excluded.fecha_registro
+                """,
+                (nit_tercero, nombre_tercero, tipo_documento, banco,
+                 tipo_producto, numero_cuenta, fecha_apertura, estado,
+                 archivo_origen, ahora),
+            )
+        else:
+            emp_id = _empresa_id_desde_db_path(db_path)
+            conn.execute(
+                """
+                MERGE cuentas_bancarias_tercero AS target
+                USING (SELECT ? AS empresa_id, ? AS nit_tercero, ? AS numero_cuenta,
+                              ? AS nombre_tercero, ? AS tipo_documento, ? AS banco,
+                              ? AS tipo_producto, ? AS fecha_apertura, ? AS estado,
+                              ? AS archivo_origen, ? AS fecha_registro) AS source
+                ON target.empresa_id = source.empresa_id
+                   AND target.nit_tercero = source.nit_tercero
+                   AND target.numero_cuenta = source.numero_cuenta
+                WHEN MATCHED THEN
+                    UPDATE SET nombre_tercero = source.nombre_tercero,
+                               tipo_documento = source.tipo_documento,
+                               banco          = source.banco,
+                               tipo_producto  = source.tipo_producto,
+                               fecha_apertura = source.fecha_apertura,
+                               estado         = source.estado,
+                               archivo_origen = source.archivo_origen,
+                               fecha_registro = source.fecha_registro
+                WHEN NOT MATCHED THEN
+                    INSERT (empresa_id, nit_tercero, nombre_tercero, tipo_documento,
+                            banco, tipo_producto, numero_cuenta, fecha_apertura,
+                            estado, archivo_origen, fecha_registro)
+                    VALUES (source.empresa_id, source.nit_tercero, source.nombre_tercero,
+                            source.tipo_documento, source.banco, source.tipo_producto,
+                            source.numero_cuenta, source.fecha_apertura, source.estado,
+                            source.archivo_origen, source.fecha_registro);
+                """,
+                (emp_id, nit_tercero, numero_cuenta, nombre_tercero, tipo_documento,
+                 banco, tipo_producto, fecha_apertura, estado, archivo_origen, ahora),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_CUENTAS_BANCARIAS_COLS = (
+    "id, nit_tercero, nombre_tercero, tipo_documento, banco, tipo_producto, "
+    "numero_cuenta, fecha_apertura, estado, archivo_origen, fecha_registro"
+)
+
+
+def listar_cuentas_bancarias_tercero(
+    db_path: str = DB_PATH,
+    nit_tercero: Optional[str] = None,
+    limite: int = 500,
+) -> list[dict]:
+    """Lista las cuentas bancarias registradas (más recientes primero).
+
+    Si se pasa ``nit_tercero`` solo se devuelven las cuentas de ese tercero.
+    """
+    conn = get_connection(db_path)
+    try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
+        params = p_emp
+        sql = (
+            f"SELECT {_CUENTAS_BANCARIAS_COLS} FROM cuentas_bancarias_tercero{where_emp}"
+        )
+        if nit_tercero:
+            sql += (" AND" if where_emp else " WHERE") + " nit_tercero = ?"
+            params = params + (nit_tercero,)
+        sql += " ORDER BY nombre_tercero, id DESC"
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows[:limite]]
+    finally:
+        conn.close()
+
+
+def contar_cuentas_bancarias_tercero(db_path: str = DB_PATH) -> int:
+    """Número de cuentas bancarias de terceros registradas en la empresa."""
+    conn = get_connection(db_path)
+    try:
+        where_emp, p_emp = _where_empresa(conn, db_path)
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM cuentas_bancarias_tercero{where_emp}", p_emp
+        ).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def eliminar_cuenta_bancaria_tercero(
+    cuenta_id: int, db_path: str = DB_PATH
+) -> None:
+    """Elimina una cuenta bancaria de tercero por id (acotado a la empresa)."""
+    conn = get_connection(db_path)
+    try:
+        and_emp, p_emp = _and_empresa(conn, db_path)
+        conn.execute(
+            f"DELETE FROM cuentas_bancarias_tercero WHERE id = ?{and_emp}",
+            (cuenta_id,) + p_emp,
+        )
+        conn.commit()
     finally:
         conn.close()
 

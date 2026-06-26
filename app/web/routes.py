@@ -1492,6 +1492,17 @@ def _actividad_terceros(emp, limite: int = 6) -> list[dict]:
     return out
 
 
+def _listar_cuentas_bancarias(emp) -> list[dict]:
+    """Lista las cuentas bancarias de terceros registradas en la empresa."""
+    from app.database import inicializar_db, listar_cuentas_bancarias_tercero
+    try:
+        inicializar_db(emp.db_path)
+        return listar_cuentas_bancarias_tercero(emp.db_path)
+    except Exception:
+        logger.exception("No se pudieron listar las cuentas bancarias de terceros.")
+        return []
+
+
 @bp.route("/terceros")
 @require_permission("terceros.ver")
 def terceros():
@@ -1501,6 +1512,7 @@ def terceros():
         "terceros.html",
         info=_info_maestro_terceros(emp),
         actividad=_actividad_terceros(emp),
+        cuentas_bancarias=_listar_cuentas_bancarias(emp),
         resultado=None,
     )
 
@@ -1595,6 +1607,7 @@ def terceros_importar():
         "terceros.html",
         info=_info_maestro_terceros(emp),
         actividad=_actividad_terceros(emp),
+        cuentas_bancarias=_listar_cuentas_bancarias(emp),
         resultado=resultado,
     )
 
@@ -1614,6 +1627,130 @@ def terceros_descargar():
         download_name="Listado_de_Terceros.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+# ---------------------------------------------------------------------------
+# Cuentas bancarias de terceros — importación desde el certificado bancario
+# ---------------------------------------------------------------------------
+
+@bp.route("/terceros/cuentas-bancarias/importar", methods=["POST"])
+@require_permission("terceros.gestionar")
+def terceros_cuentas_importar():
+    """Lee uno o varios certificados bancarios (PDF) y registra las cuentas.
+
+    Cada certificado pertenece a un tercero (persona jurídica o natural) e
+    informa una o más cuentas. Se guardan en la tabla `cuentas_bancarias_tercero`
+    de la empresa, asociadas por la identificación del tercero (NIT/cédula).
+    """
+    import tempfile
+    from app.certificado_bancario import (
+        parsear_certificado_pdf, CertificadoBancarioError,
+    )
+    from app.database import inicializar_db, registrar_cuenta_bancaria_tercero
+
+    archivos = [f for f in request.files.getlist("certificado") if f and f.filename]
+    if not archivos:
+        flash("Debes seleccionar al menos un certificado bancario en PDF.", "error")
+        return redirect(url_for("web.terceros"))
+
+    emp = _empresa_actual()
+    inicializar_db(emp.db_path)
+
+    leidas: list[dict] = []   # info legible para la vista de resultados
+    errores: list[str] = []
+    n_registradas = 0
+
+    for f in archivos:
+        if not _allowed_pdf(f.filename):
+            errores.append(f"{f.filename}: el archivo debe ser un PDF.")
+            continue
+        nombre_archivo = secure_filename(f.filename)
+        tmp_path = None
+        try:
+            data = f.read()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+            cert = parsear_certificado_pdf(tmp_path)
+            nit = cert.get("numero_documento", "")
+            if not nit:
+                errores.append(f"{f.filename}: no se identificó el documento del titular.")
+                continue
+            for cuenta in cert.get("cuentas", []):
+                registrar_cuenta_bancaria_tercero(
+                    nit_tercero=nit,
+                    numero_cuenta=cuenta.get("numero_cuenta", ""),
+                    nombre_tercero=cert.get("titular", ""),
+                    tipo_documento=cert.get("tipo_documento", ""),
+                    banco=cert.get("banco", ""),
+                    tipo_producto=cuenta.get("tipo_producto", ""),
+                    fecha_apertura=cuenta.get("fecha_apertura", ""),
+                    estado=cuenta.get("estado", ""),
+                    archivo_origen=nombre_archivo,
+                    db_path=emp.db_path,
+                )
+                n_registradas += 1
+                leidas.append({
+                    "archivo": nombre_archivo,
+                    "titular": cert.get("titular", ""),
+                    "tipo_persona": cert.get("tipo_persona", ""),
+                    "tipo_documento": cert.get("tipo_documento", ""),
+                    "numero_documento": nit,
+                    "banco": cert.get("banco", ""),
+                    "tipo_producto": cuenta.get("tipo_producto", ""),
+                    "numero_cuenta": cuenta.get("numero_cuenta", ""),
+                    "estado": cuenta.get("estado", ""),
+                })
+        except CertificadoBancarioError as exc:
+            errores.append(f"{f.filename}: {exc}")
+        except Exception:
+            logger.exception("Error inesperado leyendo el certificado %s", f.filename)
+            errores.append(f"{f.filename}: error inesperado al leer el certificado.")
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    if n_registradas:
+        audit.registrar(
+            "terceros.cuentas_importar", empresa_id=emp.id,
+            detalle=f"archivos={len(archivos)} cuentas={n_registradas}",
+        )
+        msg = f"✓ {n_registradas} cuenta(s) bancaria(s) registrada(s)."
+        if errores:
+            msg += f" {len(errores)} archivo(s) con error."
+        flash(msg, "success" if not errores else "info")
+    else:
+        flash("No se pudo leer ningún certificado bancario. " + " ".join(errores),
+              "error")
+
+    return render_template(
+        "terceros.html",
+        info=_info_maestro_terceros(emp),
+        actividad=_actividad_terceros(emp),
+        cuentas_bancarias=_listar_cuentas_bancarias(emp),
+        resultado=None,
+        resultado_cuentas={"cuentas_leidas": leidas, "errores": errores},
+    )
+
+
+@bp.route("/terceros/cuentas-bancarias/<int:cuenta_id>/eliminar", methods=["POST"])
+@require_permission("terceros.gestionar")
+def terceros_cuenta_eliminar(cuenta_id):
+    """Elimina una cuenta bancaria de tercero registrada."""
+    from app.database import inicializar_db, eliminar_cuenta_bancaria_tercero
+
+    emp = _empresa_actual()
+    inicializar_db(emp.db_path)
+    eliminar_cuenta_bancaria_tercero(cuenta_id, db_path=emp.db_path)
+    audit.registrar(
+        "terceros.cuenta_eliminar", empresa_id=emp.id,
+        detalle=f"cuenta_id={cuenta_id}",
+    )
+    flash("Cuenta bancaria eliminada.", "info")
+    return redirect(url_for("web.terceros"))
 
 
 # ---------------------------------------------------------------------------
