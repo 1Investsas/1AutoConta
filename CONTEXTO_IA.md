@@ -80,6 +80,7 @@ contable-auto/
 │   ├── terceros.py          # Identificación y cruce de terceros
 │   ├── rut.py               # Lectura del RUT de la DIAN en PDF (jurídica/natural)
 │   ├── terceros_rut.py      # Upsert del maestro de terceros a partir del RUT
+│   ├── certificado_bancario.py # Lectura del certificado bancario (Bancolombia, PJ/PN)
 │   ├── impuestos.py         # Separación de impuestos + base gravable
 │   ├── comprobantes.py      # Asignación de código de comprobante
 │   ├── preasiento.py        # ⭐ Generación de líneas contables (asientos)
@@ -328,10 +329,17 @@ Diccionario `_GENERADORES` mapea clasificación → función generadora de líne
 | `historial_cuentas` | Aprendizaje del motor de sugerencias. Único por (clasificación, nit_tercero, tipo_linea) |
 | `importaciones` | Registro persistente de cada proceso RADIAN + **snapshot editable durable** (`preasientos_json`) con ciclo de estados (`procesando/procesada/corregida/exportada/error/anulada`). «Abrir» recupera el estado guardado con las correcciones; «Regenerar» reprocesa desde cero |
 | `procesos_banco` | Histórico del módulo Bancos: cada extracto previsualizado/exportado (archivo, cuenta, NIT banco, nº movimientos, estado `procesando`/`completada`/`error`) |
+| `cuentas_bancarias_tercero` | Cuentas bancarias de un tercero importadas del **certificado bancario** (Bancolombia, PJ y PN). Único por (`nit_tercero`, `numero_cuenta`); guarda banco, tipo de producto, fecha de apertura y estado. Lo alimenta el módulo Terceros |
 
 CRUD de procesos de banco: `registrar_proceso_banco` (al previsualizar, estado
 `procesando`), `actualizar_proceso_banco` (a `completada`/`error` al exportar) y
 `listar_procesos_banco` (descendente por id, límite en Python).
+
+CRUD de cuentas bancarias de terceros: `registrar_cuenta_bancaria_tercero`
+(UPSERT por `nit_tercero`+`numero_cuenta`), `listar_cuentas_bancarias_tercero`
+(todas o por tercero), `contar_cuentas_bancarias_tercero` y
+`eliminar_cuenta_bancaria_tercero`. El PDF se lee con
+`app/certificado_bancario.py::parsear_certificado_pdf`.
 
 ### `storage.py` — abstracción de archivos
 API: `save_file`, `save_local_file`, `load_file`, `get_download_bytes`, `delete_file`,
@@ -554,7 +562,8 @@ Containers o Container Apps sin `/home` persistente). Ver `database.py` §7.
 `pytest` con fixtures realistas en `conftest.py` (`df_radian_basico` con los 6 tipos de
 documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módulo:
 `test_clasificador`, `test_terceros`, `test_impuestos`, `test_preasiento`, `test_validaciones`,
-`test_sugerencias`, `test_empresas`, `test_storage`, `test_siigo_mapeador`, `test_procesos_banco`.
+`test_sugerencias`, `test_empresas`, `test_storage`, `test_siigo_mapeador`, `test_procesos_banco`,
+`test_certificado_bancario` (lector PJ/PN), `test_cuentas_bancarias_db` (CRUD cuentas de terceros).
 
 > Los tests corren en CI antes de cada despliegue: **mantenerlos verdes es requisito para deploy**.
 
