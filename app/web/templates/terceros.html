@@ -6,6 +6,12 @@
 
 {% block content %}
 
+{% if info.tipo_invalido %}
+<div class="flash error" style="margin-bottom:20px">
+  ⚠ {{ info.advertencia }}
+</div>
+{% endif %}
+
 <div class="stats-grid" style="margin-bottom:28px">
   <div class="card">
     <div class="card-title">¿Qué hace este módulo?</div>
@@ -18,7 +24,10 @@
   </div>
   <div class="card">
     <div class="card-title">Maestro actual · {{ empresa_sigla }}</div>
-    {% if info.existe %}
+    {% if info.tipo_invalido %}
+    <div class="card-value" style="color:var(--danger); font-size:1.2rem">Archivo incorrecto</div>
+    <div class="card-sub">no es el Listado de Terceros</div>
+    {% elif info.existe %}
     <div class="card-value" style="color:var(--success); font-size:1.6rem">{{ info.total }}</div>
     <div class="card-sub">terceros registrados</div>
     {% else %}
@@ -33,7 +42,7 @@
   </div>
   <div class="card">
     <div class="card-title">Maestro de terceros</div>
-    {% if info.existe %}
+    {% if info.existe and not info.tipo_invalido %}
     <a href="{{ url_for('web.terceros_descargar') }}" class="btn btn-secondary" style="margin-top:10px">
       <span>⬇</span> Descargar Excel
     </a>
