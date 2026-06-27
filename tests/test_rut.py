@@ -160,7 +160,8 @@ class TestParserNatural:
         assert datos["segundo_apellido"] == "CHICA"
         assert datos["primer_nombre"] == "JUAN"
         assert datos["otros_nombres"] == "CAMILO"
-        assert datos["nombre"] == "VERGARA CHICA JUAN CAMILO"
+        # Nombre legible: nombres primero, luego apellidos.
+        assert datos["nombre"] == "JUAN CAMILO VERGARA CHICA"
         assert datos["razon_social"] == ""
 
     def test_ubicacion_y_contacto(self, datos):
@@ -179,6 +180,24 @@ def test_parser_sin_nit_lanza_error():
     """Un documento sin NIT reconocible no es un RUT válido."""
     with pytest.raises(RUTParseError):
         parsear_rut_words([_w("Hola", 100, 180)])
+
+
+def test_cedula_de_10_digitos_no_pierde_el_primer_digito():
+    """Una cédula de 10 dígitos arranca más a la izquierda (x≈75); el primer
+    dígito no debe perderse."""
+    words: list[dict] = []
+    # NIT 1017189674 + DV 9 — el primer dígito en x=75 (cédula de 10 dígitos).
+    words += _digitos("1017189674", 75, 180, 11)
+    words += [_w("9", 193, 180)]
+    # Identificación como persona natural + apellidos/nombres.
+    words += [_w("Persona", 27, 216), _w("natural", 55, 216),
+              _w("Cédula", 186, 216), _w("Ciudadanía", 220, 216)]
+    words += [_w("HENAO", 27, 264), _w("YEPES", 155, 264),
+              _w("ANA", 282, 264), _w("MARIA", 407, 264)]
+    datos = parsear_rut_words(words)
+    assert datos["nit"] == "1017189674"
+    assert datos["dv"] == "9"
+    assert datos["nombre"] == "ANA MARIA HENAO YEPES"
 
 
 # ---------------------------------------------------------------------------
