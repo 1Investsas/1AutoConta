@@ -192,9 +192,23 @@ def actualizar_maestro_terceros(
     columnas = _mapa_columnas(ws, fila_enc)
 
     if "identificacion" not in columnas:
+        # El archivo de terceros no tiene una columna de identificación. La causa
+        # más común es haber subido otro maestro (p. ej. el Plan de Cuentas) en
+        # la casilla de Terceros: damos un mensaje claro según lo que parezca ser.
+        from app.maestros import clasificar_encabezados, ETIQUETA_MAESTRO
+        encabezados = [c.value for c in ws[fila_enc]]
+        clase = clasificar_encabezados([str(e) for e in encabezados if e])
+        if clase in ("cuentas", "comprobantes"):
+            etiqueta = ETIQUETA_MAESTRO.get(clase, clase)
+            raise ValueError(
+                f"El archivo guardado como «Listado de Terceros» parece ser el "
+                f"«{etiqueta}». Ve a Configuraciones → Empresas → Maestros y sube "
+                f"el archivo de terceros correcto en su casilla."
+            )
         raise ValueError(
             "El maestro de terceros no tiene una columna de «Identificación» "
-            "reconocible en la fila de encabezados."
+            "(NIT/Cédula) reconocible en la fila 7. Verifica que el archivo sea "
+            "el Listado de Terceros exportado del sistema."
         )
 
     col_id = columnas["identificacion"]

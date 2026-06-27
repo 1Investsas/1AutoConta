@@ -524,9 +524,20 @@ def procesar():
     ]:
         f = request.files.get(key)
         if f and f.filename and _allowed(f.filename):
+            from app.maestros import validar_maestro
             file_bytes = f.read()
-            ref = store.save_file(file_bytes, emp.data_category, default_name)
-            path = store.load_file(ref)
+            error = validar_maestro(key, file_bytes)
+            if error:
+                # Archivo en la casilla equivocada: no se guarda; se usa el maestro
+                # ya configurado de la empresa y se avisa al usuario.
+                flash(error, "error")
+                try:
+                    path = emp.ruta_maestro(default_name)
+                except FileNotFoundError:
+                    path = str(Path(_project_root()) / emp.data_category / default_name)
+            else:
+                ref = store.save_file(file_bytes, emp.data_category, default_name)
+                path = store.load_file(ref)
         else:
             try:
                 path = emp.ruta_maestro(default_name)
@@ -1567,16 +1578,43 @@ def _maestro_terceros_bytes(emp) -> bytes | None:
 
 
 def _info_maestro_terceros(emp) -> dict:
-    """Resumen del maestro de terceros actual (existencia y nº de registros)."""
+    """Resumen del maestro de terceros actual (existencia y nº de registros).
+
+    Si el archivo guardado en la casilla de Terceros resulta ser otro maestro
+    (p. ej. el Plan de Cuentas), lo señala con ``tipo_invalido`` y una
+    ``advertencia`` para que el usuario lo corrija.
+    """
     from app.importador import cargar_maestro_terceros
+    from app.maestros import clasificar_maestro, ETIQUETA_MAESTRO
+
     try:
         path = emp.ruta_maestro("Listado_de_Terceros.xlsx")
-        if not os.path.exists(path):
-            return {"existe": False, "total": 0}
-        df = _cargar_maestro_cacheado(cargar_maestro_terceros, path)
-        return {"existe": True, "total": int(len(df))}
+    except FileNotFoundError:
+        return {"existe": False, "total": 0, "tipo_invalido": False}
+    if not os.path.exists(path):
+        return {"existe": False, "total": 0, "tipo_invalido": False}
+
+    # Verificar que el archivo almacenado sea de verdad un maestro de terceros.
+    try:
+        with open(path, "rb") as fh:
+            clase = clasificar_maestro(fh.read())
     except Exception:
-        return {"existe": False, "total": 0}
+        clase = "terceros"  # no bloquear por un fallo de lectura puntual
+    if clase in ("cuentas", "comprobantes"):
+        return {
+            "existe": True, "total": 0, "tipo_invalido": True,
+            "advertencia": (
+                f"El archivo guardado como «Listado de Terceros» parece ser el "
+                f"«{ETIQUETA_MAESTRO.get(clase, clase)}». Súbelo de nuevo en "
+                f"Configuraciones → Empresas → Maestros, en la casilla de Terceros."
+            ),
+        }
+
+    try:
+        df = _cargar_maestro_cacheado(cargar_maestro_terceros, path)
+        return {"existe": True, "total": int(len(df)), "tipo_invalido": False}
+    except Exception:
+        return {"existe": False, "total": 0, "tipo_invalido": False}
 
 
 def _actividad_terceros(emp, limite: int = 6) -> list[dict]:
@@ -1683,6 +1721,11 @@ def terceros_importar():
         contenido = _maestro_terceros_bytes(emp)
         nuevos_bytes, resumen = actualizar_maestro_terceros(parseados, contenido)
         store.save_file(nuevos_bytes, emp.data_category, "Listado_de_Terceros.xlsx")
+    except ValueError as exc:
+        # Error de validación esperado (p. ej. el archivo guardado no es el
+        # maestro de terceros): mensaje claro, sin traza de error.
+        flash(str(exc), "error")
+        return redirect(url_for("web.terceros"))
     except Exception as exc:
         logger.exception("Error actualizando el maestro de terceros")
         flash(f"Error al actualizar el maestro de terceros: {exc}", "error")
@@ -2725,20 +2768,37 @@ def empresas_eliminar(empresa_id):
 @bp.route("/empresas/maestros", methods=["POST"])
 @require_permission("empresas.gestionar")
 def empresas_maestros():
-    """Sube/reemplaza los archivos maestros de la empresa indicada."""
+    """Sube/reemplaza los archivos maestros de la empresa indicada.
+
+    Antes de guardar, valida que cada archivo corresponda a su casilla (terceros,
+    cuentas, comprobantes): si se subió uno en la casilla equivocada —p. ej. el
+    Plan de Cuentas en «Terceros»— se rechaza con un mensaje claro y no se
+    sobrescribe el maestro existente.
+    """
+    from app.maestros import validar_maestro
+
     emp = obtener_empresa(request.form.get("empresa_id", "").strip())
     subidos = []
+    rechazados = []
     for key, default_name in MAESTROS_EMPRESA:
         f = request.files.get(key)
-        if f and f.filename and _allowed(f.filename):
-            store.save_file(f.read(), emp.data_category, default_name)
-            subidos.append(default_name)
+        if not (f and f.filename and _allowed(f.filename)):
+            continue
+        contenido = f.read()
+        error = validar_maestro(key, contenido)
+        if error:
+            rechazados.append(error)
+            continue
+        store.save_file(contenido, emp.data_category, default_name)
+        subidos.append(default_name)
 
     if subidos:
         audit.registrar("empresa.maestros", empresa_id=emp.id,
                         detalle=", ".join(subidos))
         flash(f"✓ Maestros actualizados para {emp.nombre}: {', '.join(subidos)}", "success")
-    else:
+    for error in rechazados:
+        flash(error, "error")
+    if not subidos and not rechazados:
         flash("No se subió ningún archivo maestro.", "info")
     return redirect(url_for("web.empresas"))
 
