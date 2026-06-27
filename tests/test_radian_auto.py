@@ -106,6 +106,90 @@ class TestDescargaSinSesion:
 
 
 # ---------------------------------------------------------------------------
+# Cabeceras de navegador y activación de sesión (evita el 403 del WAF)
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    def __init__(self, status_code=200, text="", headers=None, content=b""):
+        self.status_code = status_code
+        self.text = text
+        self.headers = headers or {}
+        self.content = content
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"{self.status_code} Error", response=self)
+
+
+_AUTH_URL = (
+    "https://catalogo-vpfe.dian.gov.co/User/AuthToken"
+    "?pk=10910094%7C8356245&rk=901331657&token=92077f00-5170-431d-b97d-845a42d0d4da"
+)
+
+
+class TestCabecerasNavegador:
+    def test_user_agent_parece_navegador(self):
+        cli = dc.DianClient()
+        ua = cli.session.headers["User-Agent"]
+        assert "Mozilla/5.0" in ua and "Chrome/" in ua
+        assert "contable-auto" not in ua          # ya no se anuncia como bot
+        assert cli.session.headers["sec-ch-ua-mobile"] == "?0"
+        assert cli.session.headers["Accept-Language"].startswith("es-CO")
+
+    def test_user_agent_y_headers_configurables(self):
+        cli = dc.DianClient(
+            user_agent="MiAgente/9", extra_headers={"X-Extra": "1"},
+        )
+        assert cli.session.headers["User-Agent"] == "MiAgente/9"
+        assert cli.session.headers["X-Extra"] == "1"
+
+
+class TestActivarSesion:
+    def _cliente_con_respuesta(self, resp):
+        cli = dc.DianClient()
+        enviados = {}
+
+        def fake_get(url, timeout=None, allow_redirects=None, headers=None, **kw):
+            enviados["url"] = url
+            enviados["headers"] = headers or {}
+            return resp
+
+        cli.session.get = fake_get  # type: ignore[assignment]
+        return cli, enviados
+
+    def test_403_da_mensaje_accionable(self):
+        cli, _ = self._cliente_con_respuesta(_FakeResponse(status_code=403))
+        with pytest.raises(dc.DianAuthError) as exc:
+            cli.activar_sesion(_AUTH_URL)
+        msg = str(exc.value)
+        assert "403" in msg
+        assert "expir" in msg.lower()          # explica la causa más común
+        assert cli.autenticado is False
+
+    def test_exito_activa_sesion_y_envia_sec_fetch(self):
+        cli, enviados = self._cliente_con_respuesta(
+            _FakeResponse(status_code=200, text="<html>ok</html>")
+        )
+        cli.activar_sesion(_AUTH_URL)
+        assert cli.autenticado is True
+        assert enviados["headers"]["Sec-Fetch-Mode"] == "navigate"
+        assert enviados["headers"]["Sec-Fetch-Site"] == "none"
+
+    def test_token_expirado_en_cuerpo_lanza(self):
+        cli, _ = self._cliente_con_respuesta(
+            _FakeResponse(status_code=200, text="El token ha expirado")
+        )
+        with pytest.raises(dc.DianAuthError):
+            cli.activar_sesion(_AUTH_URL)
+
+    def test_enlace_sin_token_lanza(self):
+        cli = dc.DianClient()
+        with pytest.raises(dc.DianAuthError):
+            cli.activar_sesion("https://catalogo-vpfe.dian.gov.co/User/AuthToken")
+
+
+# ---------------------------------------------------------------------------
 # Extracción del enlace desde el correo
 # ---------------------------------------------------------------------------
 
