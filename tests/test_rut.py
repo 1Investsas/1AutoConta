@@ -127,6 +127,20 @@ class TestParserJuridica:
         assert datos["ciudad"] == "Medellín"
         assert datos["direccion"] == "CR 82 A CL 32 A 310"
 
+    def test_codigos_ubicacion(self, datos):
+        # Los códigos (DIAN/DANE) alimentan el modelo de Siigo, que usa códigos.
+        assert datos["pais_codigo"] == "169"
+        assert datos["departamento_codigo"] == "05"
+        assert datos["ciudad_codigo"] == "05001"   # departamento (05) + municipio (001)
+
+    def test_mapeo_a_codigos_siigo(self, datos):
+        t = mapear_rut_a_tercero(datos)
+        assert t["codigo_pais"] == "COL"           # 169/COLOMBIA → ISO-3
+        assert t["codigo_departamento"] == "05"
+        assert t["codigo_ciudad"] == "05001"
+        assert t["tipo_identificacion"] == "31"    # NIT → 31
+        assert t["regimen_iva"] == "2 - Responsable de IVA"
+
     def test_contacto(self, datos):
         assert datos["correo"] == "contabilidad@1inversionesestrategicas.com"
         # El dígito "1" de la etiqueta "Teléfono 1" no debe colarse en el número.
@@ -219,7 +233,7 @@ class TestActualizarMaestro:
         assert contenido  # bytes no vacíos
 
     def test_round_trip_con_lector_real(self, tmp_path):
-        """El archivo generado se lee con el lector real del maestro (fila 7)."""
+        """El archivo generado se lee con el lector real del maestro."""
         from app.importador import cargar_maestro_terceros
 
         contenido, _ = actualizar_maestro_terceros(self._terceros(), None)
@@ -233,7 +247,39 @@ class TestActualizarMaestro:
         # La identificación queda normalizada (solo dígitos) y los nombres presentes.
         fila_pj = df[df["Identificación"] == "901331657"].iloc[0]
         assert "INVERSIONES ESTRATEGICAS" in fila_pj["Nombre tercero"]
-        assert fila_pj["Tipo de identificación"] == "NIT"
+        # El tipo de identificación se guarda con el código de Siigo (NIT = 31).
+        assert fila_pj["Tipo identificación (Obligatorio)"] == "31"
+        assert fila_pj["Tipo (Obligatorio)"] == "Empresa"
+
+    def test_estructura_y_formato_de_texto(self):
+        """El maestro nuevo usa el modelo de Siigo (29 columnas en la fila 1) y
+        TODAS las celdas escritas quedan en formato de texto ('@')."""
+        import io as _io
+        import openpyxl
+        from app.terceros_schema import COLUMNAS_SIIGO, FORMATO_TEXTO
+
+        contenido, _ = actualizar_maestro_terceros(self._terceros(), None)
+        ws = openpyxl.load_workbook(_io.BytesIO(contenido)).active
+
+        # Encabezados del modelo de Siigo en la fila 1, en orden.
+        encabezados = [ws.cell(row=1, column=c).value for c in range(1, len(COLUMNAS_SIIGO) + 1)]
+        assert encabezados == COLUMNAS_SIIGO
+
+        # Cada celda con datos (encabezados + filas) conserva el formato de texto.
+        for r in range(1, ws.max_row + 1):
+            for c in range(1, len(COLUMNAS_SIIGO) + 1):
+                celda = ws.cell(row=r, column=c)
+                if celda.value not in (None, ""):
+                    assert celda.number_format == FORMATO_TEXTO, (
+                        f"La celda {celda.coordinate} perdió el formato de texto"
+                    )
+
+        # La identificación con ceros a la izquierda se preserva como texto.
+        t = mapear_rut_a_tercero(parsear_rut_words(_words_juridica()))
+        t["identificacion"] = "0012345"
+        contenido2, _ = actualizar_maestro_terceros([t], None)
+        ws2 = openpyxl.load_workbook(_io.BytesIO(contenido2)).active
+        assert ws2.cell(row=2, column=1).value == "0012345"
 
     def test_upsert_actualiza_existente_y_agrega(self):
         # 1) Crear con un tercero.
@@ -247,17 +293,16 @@ class TestActualizarMaestro:
         assert resumen["agregados"] == 1       # el natural
         assert resumen["actualizados"] == 1    # el jurídico
 
-        from app.importador import cargar_maestro_terceros
         import io as _io
-        ruta = _io.BytesIO(contenido2)
         import openpyxl
-        wb = openpyxl.load_workbook(ruta)
-        ws = wb.active
+        ws = openpyxl.load_workbook(_io.BytesIO(contenido2)).active
         # Solo deben existir dos filas de datos (no se duplicó el jurídico).
+        # En el modelo de Siigo, la identificación es la columna 1 y los datos
+        # empiezan en la fila 2.
         ids = [
-            ws.cell(row=r, column=3).value  # columna "Identificación"
-            for r in range(8, ws.max_row + 1)
-            if ws.cell(row=r, column=3).value
+            ws.cell(row=r, column=1).value
+            for r in range(2, ws.max_row + 1)
+            if ws.cell(row=r, column=1).value
         ]
         assert ids.count("901331657") == 1
         assert "8356245" in [str(i) for i in ids]
@@ -271,13 +316,11 @@ class TestActualizarMaestro:
         t_vacio["telefono"] = ""   # sin teléfono nuevo
         contenido2, _ = actualizar_maestro_terceros([t_vacio], contenido)
 
-        from app.importador import cargar_maestro_terceros
         import io as _io
-        ruta = _io.BytesIO(contenido2)
         import openpyxl
-        ws = openpyxl.load_workbook(ruta).active
-        fila = next(r for r in range(8, ws.max_row + 1)
-                    if ws.cell(row=r, column=3).value == "901331657")
+        ws = openpyxl.load_workbook(_io.BytesIO(contenido2)).active
+        fila = next(r for r in range(2, ws.max_row + 1)
+                    if ws.cell(row=r, column=1).value == "901331657")
         # El teléfono original sigue ahí (no fue borrado por el vacío).
         telefonos = [ws.cell(row=fila, column=c).value for c in range(1, ws.max_column + 1)]
         assert "3193651539" in [str(v) for v in telefonos]

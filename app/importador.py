@@ -137,35 +137,95 @@ def importar_radian(filepath: str, db_path: Optional[str] = None) -> pd.DataFram
 
 def cargar_maestro_terceros(filepath: str) -> pd.DataFrame:
     """
-    Lee el archivo maestro de terceros exportado del sistema contable.
+    Lee el maestro de terceros con la estructura del modelo de Siigo Nube.
 
-    Los encabezados reales se encuentran en la fila 7 (índice 6).
-    Los datos comienzan en la fila 8.
+    El modelo de Siigo trae los encabezados en la **fila 1** y los datos desde la
+    fila 2. La fila de encabezados se detecta automáticamente, de modo que el
+    lector también acepta la planilla antigua (encabezados en la fila 7) sin
+    cambios, por compatibilidad.
+
+    Además de las columnas propias del modelo, el DataFrame expone columnas
+    *canónicas* que el resto del sistema espera —``Identificación`` (solo
+    dígitos), ``Nombre tercero`` y ``Estado``— para que el cruce de terceros, el
+    autocompletado y las plantillas sigan funcionando sin cambios.
 
     Args:
         filepath: Ruta al archivo Listado_de_Terceros.xlsx.
 
     Returns:
-        DataFrame con los terceros. Columna 'Identificación' normalizada.
+        DataFrame con los terceros, con las columnas canónicas garantizadas.
 
     Raises:
         FileNotFoundError: Si el archivo no existe.
     """
+    from app import terceros_schema as esquema
+
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"Maestro de terceros no encontrado: {filepath}")
 
     logger.info("Cargando maestro de terceros: %s", filepath)
-    df = pd.read_excel(filepath, header=FILA_ENCABEZADOS_MAESTROS, dtype=str)
+
+    # Detectar la fila de encabezados (modelo Siigo: fila 1; planilla antigua: 7).
+    crudo = pd.read_excel(filepath, header=None, nrows=15, dtype=str)
+    fila_enc = esquema.fila_encabezados_desde_valores(crudo.values.tolist())
+    df = pd.read_excel(filepath, header=fila_enc, dtype=str)
     df.columns = [str(c).strip() for c in df.columns]
     df.dropna(how="all", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    if "Identificación" in df.columns:
-        df["Identificación"] = df["Identificación"].apply(_limpiar_nit)
+    _agregar_columnas_canonicas(df, esquema)
 
     logger.info("Terceros cargados: %d registros.", len(df))
     return df
+
+
+def _agregar_columnas_canonicas(df: pd.DataFrame, esquema) -> None:
+    """Garantiza en ``df`` las columnas canónicas que usa el resto del sistema.
+
+    Resuelve, por su nombre (modelo Siigo o planilla antigua), las columnas de
+    identificación, nombre y estado, y las copia a ``Identificación`` (solo
+    dígitos), ``Nombre tercero`` y ``Estado``. El nombre se toma de la razón
+    social y, si está vacía, se compone con los nombres y apellidos del tercero.
+    """
+    def _col(campo: str):
+        for c in df.columns:
+            if esquema.campo_de_encabezado(c) == campo:
+                return c
+        return None
+
+    col_id = _col("identificacion")
+    if col_id is not None:
+        df["Identificación"] = df[col_id].apply(_limpiar_nit)
+    elif "Identificación" not in df.columns:
+        df["Identificación"] = ""
+
+    col_razon = _col("razon_social")
+    col_nombres = _col("nombres")
+    col_apellidos = _col("apellidos")
+
+    def _nombre(row) -> str:
+        razon = str(row[col_razon]).strip() if col_razon is not None and pd.notna(row[col_razon]) else ""
+        if razon and razon.lower() != "nan":
+            return razon
+        partes = []
+        for c in (col_nombres, col_apellidos):
+            if c is not None and pd.notna(row[c]):
+                v = str(row[c]).strip()
+                if v and v.lower() != "nan":
+                    partes.append(v)
+        return " ".join(partes)
+
+    if col_razon is not None or col_nombres is not None or col_apellidos is not None:
+        df["Nombre tercero"] = df.apply(_nombre, axis=1)
+    elif "Nombre tercero" not in df.columns:
+        df["Nombre tercero"] = ""
+
+    col_estado = _col("estado")
+    if col_estado is not None and col_estado != "Estado":
+        df["Estado"] = df[col_estado]
+    elif "Estado" not in df.columns:
+        df["Estado"] = ""
 
 
 def cargar_maestro_cuentas(filepath: str) -> pd.DataFrame:

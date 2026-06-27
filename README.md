@@ -63,7 +63,7 @@ Coloca en la carpeta `data/`:
 
 | Archivo | Descripción |
 |---------|-------------|
-| `Listado_de_Terceros.xlsx` | Exportado del sistema contable. Encabezados en fila 7. |
+| `Listado_de_Terceros.xlsx` | Modelo de importación de terceros de **Siigo Nube** (29 columnas, encabezados en fila 1, todas las celdas en formato de texto). |
 | `Listado_de_Cuentas_Contables.xlsx` | Plan de cuentas. Encabezados en fila 7. |
 | `Tipos_de_comprobante_contable.xlsx` | Catálogo de comprobantes. Encabezados en fila 7. |
 
@@ -78,9 +78,11 @@ En **Configuraciones › Terceros** puedes actualizar automáticamente el
 - Lee NIT/DV, razón social o nombre completo, tipo de identificación, dirección,
   ciudad, departamento, correo y teléfono de la primera hoja del RUT.
 - Hace *upsert* por NIT/cédula: agrega los terceros nuevos y actualiza los
-  existentes, conservando el formato del archivo (encabezados en la fila 7).
-- Si el maestro aún no existe, lo crea. El resultado queda listo para el cruce
-  de terceros del módulo RADIAN.
+  existentes, **conservando el formato de las casillas del modelo de Siigo**
+  (cada celda escrita queda en formato de texto, de modo que las
+  identificaciones y los códigos nunca pierden los ceros a la izquierda).
+- Si el maestro aún no existe, lo crea con la estructura del modelo de Siigo
+  Nube. El resultado queda listo para el cruce de terceros del módulo RADIAN.
 
 Puedes subir varios RUT a la vez y descargar el maestro actualizado.
 

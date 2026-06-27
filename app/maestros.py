@@ -16,22 +16,12 @@ from __future__ import annotations
 
 import io
 import logging
-import unicodedata
 from typing import Optional
 
 from app.config import FILA_ENCABEZADOS_MAESTROS
+from app.terceros_schema import normalizar_encabezado as _normalizar
 
 logger = logging.getLogger(__name__)
-
-
-def _normalizar(texto: object) -> str:
-    """Minúsculas, sin tildes y espacios colapsados (para comparar encabezados)."""
-    s = str(texto or "").strip().lower()
-    s = "".join(
-        c for c in unicodedata.normalize("NFD", s)
-        if unicodedata.category(c) != "Mn"
-    )
-    return " ".join(s.split())
 
 
 # Encabezados (normalizados) que identifican a un tercero (NIT/cédula/nombre).
@@ -54,20 +44,42 @@ ETIQUETA_MAESTRO = {
 
 
 def leer_encabezados(contenido: bytes) -> list[str]:
-    """Lee los encabezados (fila 7) de un Excel maestro a partir de sus bytes.
+    """Lee los encabezados de un Excel maestro a partir de sus bytes.
+
+    Detecta automáticamente la fila de encabezados: el maestro de terceros sigue
+    el modelo de Siigo (encabezados en la fila 1), mientras que el plan de
+    cuentas y los comprobantes los traen en la fila 7. Se elige la primera fila
+    (entre las 15 primeras) cuyas columnas se clasifican como un maestro
+    conocido; si ninguna lo hace, se usa la fila 7 (comportamiento histórico).
 
     Devuelve la lista de nombres de columna, o ``[]`` si el archivo no se puede
     leer (en cuyo caso la validación es permisiva: no bloquea la subida).
     """
     try:
         import pandas as pd
-        df = pd.read_excel(
-            io.BytesIO(contenido), header=FILA_ENCABEZADOS_MAESTROS, nrows=0
-        )
-        return [str(c).strip() for c in df.columns]
+        crudo = pd.read_excel(io.BytesIO(contenido), header=None, nrows=15, dtype=str)
     except Exception:
         logger.debug("No se pudieron leer los encabezados del maestro.", exc_info=True)
         return []
+
+    def _celdas(fila) -> list[str]:
+        out = []
+        for v in fila:
+            s = "" if v is None else str(v).strip()
+            if s and s.lower() != "nan":   # las celdas vacías llegan como NaN
+                out.append(s)
+        return out
+
+    filas = crudo.values.tolist()
+    for fila in filas:
+        encabezados = _celdas(fila)
+        if encabezados and clasificar_encabezados(encabezados) != "desconocido":
+            return encabezados
+
+    # Reserva: la fila histórica de los maestros (fila 7 de Excel).
+    if len(filas) > FILA_ENCABEZADOS_MAESTROS:
+        return _celdas(filas[FILA_ENCABEZADOS_MAESTROS])
+    return []
 
 
 def clasificar_encabezados(encabezados: list[str]) -> str:
