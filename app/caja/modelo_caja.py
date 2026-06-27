@@ -54,6 +54,57 @@ MESES_ES = [
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ]
 
+# ── Tipos de comprobante SIIGO (igual que el módulo Bancos) ──────────────────
+# Una entrada de efectivo es un Recibo de caja; una salida, un Recibo de pago;
+# y un movimiento entre cajas/bancos, un Traslado. Se reutilizan los códigos
+# configurados para Bancos para mantener un único catálogo.
+from app.config import (  # noqa: E402
+    SIIGO_COMP_BANCO_INGRESO as COMP_INGRESO,
+    SIIGO_COMP_BANCO_EGRESO as COMP_EGRESO,
+    SIIGO_COMP_BANCO_TRASLADO as COMP_TRASLADO,
+)
+
+COMPROBANTES_CAJA: dict[int, str] = {
+    COMP_INGRESO: "Recibo de caja",
+    COMP_EGRESO: "Recibo de pago",
+    COMP_TRASLADO: "Traslado de fondos",
+}
+
+
+def comprobante_label(codigo) -> str:
+    """Etiqueta legible 'NNN - Nombre' de un comprobante (o '' si vacío)."""
+    try:
+        c = int(codigo)
+    except (TypeError, ValueError):
+        return ""
+    nombre = COMPROBANTES_CAJA.get(c)
+    return f"{c} - {nombre}" if nombre else str(c)
+
+
+def comprobante_desde_texto(texto) -> str:
+    """Extrae el código de comprobante desde una etiqueta o número (o '').
+
+    Acepta '111', '111 - Recibo de caja', 'Recibo de caja', etc.
+    """
+    t = str(texto or "").strip()
+    if not t:
+        return ""
+    # Primer grupo de dígitos.
+    digitos = "".join(ch for ch in t.split("-")[0] if ch.isdigit())
+    if digitos:
+        return digitos
+    # Si no hay dígitos, intentar por nombre.
+    t_low = t.lower()
+    for codigo, nombre in COMPROBANTES_CAJA.items():
+        if nombre.lower() in t_low:
+            return str(codigo)
+    return ""
+
+
+def comprobante_por_defecto(es_entrada: bool) -> int:
+    """Comprobante sugerido según el tipo: entrada→ingreso, salida→egreso."""
+    return COMP_INGRESO if es_entrada else COMP_EGRESO
+
 
 def a_decimal(valor) -> Decimal:
     """Convierte un valor heterogéneo (str/int/float/None) a Decimal.
@@ -115,17 +166,32 @@ class MovimientoCaja:
 
     sequence: int                       # consecutivo interno (orden de registro)
     movement_date: Optional[date]
-    movement_type: str                  # ENTRADA | SALIDA
+    movement_type: str                  # ENTRADA | SALIDA (derivado de los montos)
     concept: str = ""
     third_party_nit: str = ""
     third_party_name: str = ""
     cost_center: str = ""
     category: str = ""
+    contrapartida: str = ""             # cuenta contable de la contrapartida
+    comprobante: str = ""               # tipo de comprobante SIIGO ("" = automático)
     inflow_amount: Decimal = field(default_factory=lambda: Decimal("0"))
     outflow_amount: Decimal = field(default_factory=lambda: Decimal("0"))
     running_balance: Decimal = field(default_factory=lambda: Decimal("0"))
     observations: str = ""
     id: Optional[int] = None            # id en BD (None si aún no persistido)
+
+    @property
+    def es_entrada(self) -> bool:
+        return self.movement_type == ENTRADA
+
+    def comprobante_efectivo(self) -> int:
+        """Código de comprobante a usar: el elegido o el automático por tipo."""
+        if self.comprobante:
+            try:
+                return int(self.comprobante)
+            except (TypeError, ValueError):
+                pass
+        return comprobante_por_defecto(self.es_entrada)
 
     @property
     def monto(self) -> Decimal:
@@ -211,6 +277,8 @@ def a_dict(m: MovimientoCaja) -> dict:
         "third_party_name": m.third_party_name,
         "cost_center": m.cost_center,
         "category": m.category,
+        "contrapartida": m.contrapartida,
+        "comprobante": m.comprobante,
         "inflow_amount": str(m.inflow_amount),
         "outflow_amount": str(m.outflow_amount),
         "running_balance": str(m.running_balance),
@@ -219,19 +287,37 @@ def a_dict(m: MovimientoCaja) -> dict:
 
 
 def desde_dict(d: dict) -> MovimientoCaja:
-    """Reconstruye un MovimientoCaja desde un dict (sesión/BD/formulario)."""
+    """Reconstruye un MovimientoCaja desde un dict (sesión/BD/formulario).
+
+    El tipo de movimiento (entrada/salida) se DERIVA de los montos: si hay
+    valor en Entrada es una entrada; si lo hay en Salida es una salida. Así la
+    hoja de trabajo y la plantilla no necesitan una columna explícita de tipo
+    (la columna 'Tipo' se reserva para el tipo de comprobante).
+    """
+    inflow = a_decimal(d.get("inflow_amount"))
+    outflow = a_decimal(d.get("outflow_amount"))
+    if inflow > 0 and outflow <= 0:
+        tipo = ENTRADA
+    elif outflow > 0 and inflow <= 0:
+        tipo = SALIDA
+    else:
+        # Sin montos claros: respetar el tipo provisto (si lo hay).
+        tipo = normalizar_tipo(d.get("movement_type", ""))
+
     return MovimientoCaja(
         id=d.get("id"),
         sequence=int(d.get("sequence") or 0),
         movement_date=_parse_fecha(d.get("movement_date")),
-        movement_type=normalizar_tipo(d.get("movement_type", "")),
+        movement_type=tipo,
         concept=str(d.get("concept", "")).strip(),
         third_party_nit=str(d.get("third_party_nit", "")).strip(),
         third_party_name=str(d.get("third_party_name", "")).strip(),
         cost_center=str(d.get("cost_center", "")).strip(),
         category=str(d.get("category", "")).strip(),
-        inflow_amount=a_decimal(d.get("inflow_amount")),
-        outflow_amount=a_decimal(d.get("outflow_amount")),
+        contrapartida=str(d.get("contrapartida", "")).strip(),
+        comprobante=comprobante_desde_texto(d.get("comprobante", "")),
+        inflow_amount=inflow,
+        outflow_amount=outflow,
         running_balance=a_decimal(d.get("running_balance")),
         observations=str(d.get("observations", "")).strip(),
     )

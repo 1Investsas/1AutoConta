@@ -26,8 +26,8 @@ import openpyxl
 
 from app.caja import modelo_caja as mc
 from app.caja.plantilla_caja import (
-    COL_CATEGORIA, COL_CENTRO, COL_CONCEPTO, COL_ENTRADA, COL_FECHA, COL_NIT,
-    COL_NOMBRE, COL_OBSERVACIONES, COL_SALIDA, COL_TIPO, COLUMNAS_TABLA,
+    COL_CENTRO, COL_COMPROBANTE, COL_CONCEPTO, COL_CONTRAPARTIDA, COL_ENTRADA,
+    COL_FECHA, COL_NIT, COL_NOMBRE, COL_OBSERVACIONES, COL_SALIDA, COLUMNAS_TABLA,
     FILA_ANIO, FILA_CUENTA, FILA_EMPRESA, FILA_MES, FILA_RESPONSABLE,
     FILA_SALDO_INICIAL, FILA_TABLA_HEADER, FILA_TABLA_INICIO, FILA_VERSION,
     HOJA_CAJA, VERSION_PLANTILLA,
@@ -135,12 +135,12 @@ def importar_plantilla(path: str | Path) -> ResultadoImportacion:
     while filas_vacias_seguidas < 15:
         valores = {
             "movement_date": _celda(ws, fila, COL_FECHA),
-            "movement_type": _celda(ws, fila, COL_TIPO),
+            "comprobante": _celda(ws, fila, COL_COMPROBANTE),
             "concept": _celda(ws, fila, COL_CONCEPTO),
             "third_party_nit": _celda(ws, fila, COL_NIT),
             "third_party_name": _celda(ws, fila, COL_NOMBRE),
             "cost_center": _celda(ws, fila, COL_CENTRO),
-            "category": _celda(ws, fila, COL_CATEGORIA),
+            "contrapartida": _celda(ws, fila, COL_CONTRAPARTIDA),
             "inflow_amount": _celda(ws, fila, COL_ENTRADA),
             "outflow_amount": _celda(ws, fila, COL_SALIDA),
             "observations": _celda(ws, fila, COL_OBSERVACIONES),
@@ -168,8 +168,8 @@ def importar_plantilla(path: str | Path) -> ResultadoImportacion:
 def _fila_vacia(valores: dict) -> bool:
     """True si la fila no tiene ningún dato diligenciable."""
     relevantes = (
-        "movement_date", "movement_type", "concept", "third_party_nit",
-        "third_party_name", "cost_center", "category", "inflow_amount",
+        "movement_date", "comprobante", "concept", "third_party_nit",
+        "third_party_name", "cost_center", "contrapartida", "inflow_amount",
         "outflow_amount", "observations",
     )
     return all(_texto(valores.get(k)) == "" for k in relevantes)

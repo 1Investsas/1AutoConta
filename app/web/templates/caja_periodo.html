@@ -78,12 +78,12 @@
       <thead>
         <tr>
           <th style="width:120px">Fecha</th>
-          <th style="width:110px">Tipo</th>
+          <th style="width:150px">Tipo comprobante</th>
           <th>Concepto</th>
           <th style="width:120px">NIT tercero</th>
           <th>Nombre tercero</th>
-          <th style="width:130px">Centro costo</th>
-          <th style="width:130px">Categoría</th>
+          <th style="width:120px">Centro costo</th>
+          <th style="width:130px">Contrapartida</th>
           <th style="width:120px; text-align:right">Entrada</th>
           <th style="width:120px; text-align:right">Salida</th>
           <th style="width:130px; text-align:right">Saldo</th>
@@ -95,14 +95,32 @@
     </table>
   </div>
 
+  <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+    {% if period.editable %}
+    <form method="POST" action="{{ url_for('web.caja_periodo_guardar', period_id=period.id) }}"
+          id="formGuardar" data-loading="true" style="display:contents">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="movimientos_json" id="movimientosJson">
+      <input type="hidden" name="opening_balance" id="openingBalanceHidden">
+      <button type="submit" class="btn btn-primary">💾 Guardar avance (borrador)</button>
+    </form>
+    {% endif %}
+
+    {# Generar SIIGO: igual que en Bancos. Genera el Excel de importación a SIIGO
+       de los movimientos ya GUARDADOS del período. #}
+    <form method="POST" action="{{ url_for('web.caja_periodo_exportar_siigo', period_id=period.id) }}"
+          onsubmit="descargaConOverlay(this, 'Generando archivo SIIGO…')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-gold">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+        Generar SIIGO
+      </button>
+    </form>
+  </div>
   {% if period.editable %}
-  <form method="POST" action="{{ url_for('web.caja_periodo_guardar', period_id=period.id) }}"
-        id="formGuardar" data-loading="true" style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="movimientos_json" id="movimientosJson">
-    <input type="hidden" name="opening_balance" id="openingBalanceHidden">
-    <button type="submit" class="btn btn-primary">💾 Guardar avance (borrador)</button>
-  </form>
+  <p class="muted small" style="margin-top:8px">
+    El archivo SIIGO usa los movimientos <strong>guardados</strong>. Guarda el avance antes de generarlo si hiciste cambios.
+  </p>
   {% endif %}
 </div>
 
@@ -136,6 +154,7 @@
 </div>
 
 <datalist id="dlTerceros"></datalist>
+<datalist id="dlCuentasCaja"></datalist>
 
 {% endblock %}
 
@@ -153,34 +172,44 @@
 (function () {
   const EDITABLE = {{ 'true' if period.editable else 'false' }};
   const datos = {{ movimientos | tojson }};
+  const COMPROBANTES = {{ comprobantes | tojson }};
+  const COMP_INGRESO = '{{ comp_ingreso }}';
+  const COMP_EGRESO = '{{ comp_egreso }}';
   const body = document.getElementById('cajaBody');
   const dl = document.getElementById('dlTerceros');
+  const dlCuentas = document.getElementById('dlCuentasCaja');
   const openingInput = document.getElementById('openingBalance');
 
-  // Cache de terceros para autocompletar NIT ↔ nombre.
+  // Cache para autocompletar NIT ↔ nombre y cuentas contables.
   const porNit = {};
   const porNombre = {};
 
   const fmt = (n) => (isNaN(n) ? 0 : n).toLocaleString('es-CO', {maximumFractionDigits: 0});
   const num = (v) => { const x = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(x) ? 0 : x; };
 
+  function opcionesComprobante(sel) {
+    sel = String(sel || '');
+    return COMPROBANTES.map(c =>
+      `<option value="${c.codigo}" ${String(c.codigo) === sel ? 'selected' : ''}>${c.label}</option>`
+    ).join('');
+  }
+
   function nuevaFila(m) {
     m = m || {};
     const tr = document.createElement('tr');
-    const tipo = (m.movement_type || '').toLowerCase();
     const ro = EDITABLE ? '' : 'readonly';
     const dis = EDITABLE ? '' : 'disabled';
+    // Comprobante: el guardado o, si no hay, el automático según entrada/salida.
+    let comp = m.comprobante || '';
+    if (!comp) comp = num(m.inflow_amount) > 0 ? COMP_INGRESO : (num(m.outflow_amount) > 0 ? COMP_EGRESO : COMP_INGRESO);
     tr.innerHTML = `
       <td><input type="date" class="f-fecha" value="${m.movement_date || ''}" ${ro}></td>
-      <td><select class="f-tipo" ${dis}>
-        <option value="entrada" ${tipo==='entrada'?'selected':''}>Entrada</option>
-        <option value="salida" ${tipo==='salida'?'selected':''}>Salida</option>
-      </select></td>
+      <td><select class="f-comprobante" data-auto="${m.comprobante ? '0' : '1'}" ${dis}>${opcionesComprobante(comp)}</select></td>
       <td><input type="text" class="f-concepto" value="${escAttr(m.concept)}" ${ro}></td>
       <td><input type="text" class="f-nit" list="dlTerceros" value="${escAttr(m.third_party_nit)}" ${ro}></td>
       <td><input type="text" class="f-nombre" value="${escAttr(m.third_party_name)}" ${ro}></td>
       <td><input type="text" class="f-centro" value="${escAttr(m.cost_center)}" ${ro}></td>
-      <td><input type="text" class="f-categoria" value="${escAttr(m.category)}" ${ro}></td>
+      <td><input type="text" class="f-contrapartida" list="dlCuentasCaja" value="${escAttr(m.contrapartida)}" ${ro} style="font-family:monospace"></td>
       <td><input type="number" step="any" min="0" class="f-entrada num-input" value="${m.inflow_amount && num(m.inflow_amount) ? num(m.inflow_amount) : ''}" ${ro}></td>
       <td><input type="number" step="any" min="0" class="f-salida num-input" value="${m.outflow_amount && num(m.outflow_amount) ? num(m.outflow_amount) : ''}" ${ro}></td>
       <td class="saldo-cell">0</td>
@@ -194,8 +223,17 @@
         el.addEventListener('input', recalc);
         el.addEventListener('change', recalc);
       });
-      const tipoSel = tr.querySelector('.f-tipo');
-      tipoSel.addEventListener('change', () => ajustarTipo(tr));
+      // El usuario fijó el comprobante manualmente → no auto-cambiarlo.
+      const compSel = tr.querySelector('.f-comprobante');
+      compSel.addEventListener('change', () => { compSel.dataset.auto = '0'; });
+
+      const entEl = tr.querySelector('.f-entrada');
+      const salEl = tr.querySelector('.f-salida');
+      // Entrada y salida son excluyentes; al llenar una se limpia la otra y se
+      // ajusta el comprobante por defecto (si no fue fijado a mano).
+      entEl.addEventListener('input', () => { if (num(entEl.value) > 0) { salEl.value = ''; autoComprobante(tr, true); } });
+      salEl.addEventListener('input', () => { if (num(salEl.value) > 0) { entEl.value = ''; autoComprobante(tr, false); } });
+
       const delBtn = tr.querySelector('.btn-del');
       if (delBtn) delBtn.addEventListener('click', () => { tr.remove(); recalc(); });
 
@@ -205,17 +243,17 @@
       nitEl.addEventListener('change', () => { if (porNit[nitEl.value.trim()] && !nomEl.value) nomEl.value = porNit[nitEl.value.trim()]; });
       nomEl.addEventListener('input', () => buscarTerceros(nomEl.value));
       nomEl.addEventListener('change', () => { const k = nomEl.value.trim(); if (porNombre[k] && !nitEl.value) nitEl.value = porNombre[k]; });
+
+      const cpEl = tr.querySelector('.f-contrapartida');
+      cpEl.addEventListener('input', () => buscarCuentas(cpEl.value));
     }
     return tr;
   }
 
-  function ajustarTipo(tr) {
-    // Al cambiar el tipo, limpiar el campo del lado opuesto para evitar
-    // entrada y salida simultáneas.
-    const tipo = tr.querySelector('.f-tipo').value;
-    if (tipo === 'entrada') tr.querySelector('.f-salida').value = '';
-    else tr.querySelector('.f-entrada').value = '';
-    recalc();
+  function autoComprobante(tr, esEntrada) {
+    const sel = tr.querySelector('.f-comprobante');
+    if (sel.dataset.auto === '0') return;  // fijado a mano
+    sel.value = esEntrada ? COMP_INGRESO : COMP_EGRESO;
   }
 
   let buscarTimer = null;
@@ -235,6 +273,26 @@
             opt.value = it.nit;
             opt.label = it.nombre;
             dl.appendChild(opt);
+          });
+        }).catch(() => {});
+    }, 220);
+  }
+
+  let buscarCuentasTimer = null;
+  function buscarCuentas(q) {
+    q = (q || '').trim();
+    if (q.length < 2) return;
+    clearTimeout(buscarCuentasTimer);
+    buscarCuentasTimer = setTimeout(() => {
+      fetch('{{ url_for("web.api_cuentas") }}?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(items => {
+          dlCuentas.innerHTML = '';
+          items.forEach(it => {
+            const opt = document.createElement('option');
+            opt.value = it.codigo;
+            opt.label = it.nombre;
+            dlCuentas.appendChild(opt);
           });
         }).catch(() => {});
     }, 220);
@@ -281,12 +339,12 @@
       const filas = Array.from(body.querySelectorAll('tr'));
       const movs = filas.map(tr => ({
         movement_date: tr.querySelector('.f-fecha').value,
-        movement_type: tr.querySelector('.f-tipo').value,
+        comprobante: tr.querySelector('.f-comprobante').value,
         concept: tr.querySelector('.f-concepto').value,
         third_party_nit: tr.querySelector('.f-nit').value,
         third_party_name: tr.querySelector('.f-nombre').value,
         cost_center: tr.querySelector('.f-centro').value,
-        category: tr.querySelector('.f-categoria').value,
+        contrapartida: tr.querySelector('.f-contrapartida').value,
         inflow_amount: num(tr.querySelector('.f-entrada').value),
         outflow_amount: num(tr.querySelector('.f-salida').value),
         observations: tr.querySelector('.f-obs').value,

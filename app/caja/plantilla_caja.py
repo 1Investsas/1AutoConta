@@ -11,10 +11,12 @@ Dos modos:
     incluye los movimientos ya registrados en la app, como respaldo / soporte.
 
 Características (secciones 17 y 18 de la especificación):
-  - Encabezado con la información general del período.
-  - Tabla de movimientos con validación de tipo (Entrada/Salida) y de fecha.
+  - Encabezado con la información general del período, incluida la **cuenta
+    contable** del maestro asociada a la caja.
+  - Tabla de movimientos con **Tipo de comprobante** (Recibo de caja / pago /
+    traslado, como en Bancos) y **Contrapartida** (cuenta contable del otro
+    lado del asiento), además de validación de fecha y formato monetario.
   - Columna **Saldo** calculada por fórmula y protegida (no editable).
-  - Formato monetario en Entrada, Salida y Saldo.
   - Hoja auxiliar ``Terceros`` para autocompletar NIT ↔ nombre en Excel.
   - Versión de plantilla para control de compatibilidad.
 
@@ -33,10 +35,12 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Si
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from app.caja.modelo_caja import ENTRADA, SALIDA, MESES_ES
+from app.caja.modelo_caja import (
+    COMPROBANTES_CAJA, MESES_ES, comprobante_label, comprobante_por_defecto,
+)
 
 # Versión del formato. Súbela si cambia la estructura (el importador la valida).
-VERSION_PLANTILLA = "1.0"
+VERSION_PLANTILLA = "2.0"
 
 HOJA_CAJA = "Caja General"
 HOJA_TERCEROS = "Terceros"
@@ -45,16 +49,18 @@ HOJA_TERCEROS = "Terceros"
 FILA_TITULO = 1
 FILA_EMPRESA = 3
 FILA_CUENTA = 4
-FILA_MES = 5
-FILA_ANIO = 6
-FILA_SALDO_INICIAL = 7
-FILA_RESPONSABLE = 8
-FILA_FECHA_GEN = 9
-FILA_VERSION = 10
+FILA_CUENTA_CONTABLE = 5
+FILA_MES = 6
+FILA_ANIO = 7
+FILA_SALDO_INICIAL = 8
+FILA_RESPONSABLE = 9
+FILA_FECHA_GEN = 10
+FILA_VERSION = 11
 
 ETIQUETAS_ENCABEZADO = {
     FILA_EMPRESA: "Empresa",
     FILA_CUENTA: "Cuenta de caja",
+    FILA_CUENTA_CONTABLE: "Cuenta contable",
     FILA_MES: "Mes",
     FILA_ANIO: "Año",
     FILA_SALDO_INICIAL: "Saldo inicial",
@@ -64,23 +70,23 @@ ETIQUETAS_ENCABEZADO = {
 }
 
 # ── Tabla de movimientos ─────────────────────────────────────────────────────
-FILA_TABLA_HEADER = 12
-FILA_TABLA_INICIO = 13
+FILA_TABLA_HEADER = 13
+FILA_TABLA_INICIO = 14
 FILAS_VACIAS_PLANTILLA = 60  # filas en blanco listas para diligenciar
 
 COLUMNAS_TABLA = [
-    "Fecha", "Tipo movimiento", "Concepto", "NIT tercero", "Nombre tercero",
-    "Centro de costo", "Categoría / cuenta", "Entrada", "Salida", "Saldo",
+    "Fecha", "Tipo comprobante", "Concepto", "NIT tercero", "Nombre tercero",
+    "Centro de costo", "Contrapartida", "Entrada", "Salida", "Saldo",
     "Observaciones",
 ]
 # Índices (1-based) de columnas clave dentro de la tabla.
 COL_FECHA = 1
-COL_TIPO = 2
+COL_COMPROBANTE = 2
 COL_CONCEPTO = 3
 COL_NIT = 4
 COL_NOMBRE = 5
 COL_CENTRO = 6
-COL_CATEGORIA = 7
+COL_CONTRAPARTIDA = 7
 COL_ENTRADA = 8
 COL_SALIDA = 9
 COL_SALDO = 10
@@ -104,6 +110,8 @@ def generar_plantilla(
     *,
     empresa: str = "",
     cuenta_caja: str = "",
+    cuenta_contable: str = "",
+    cuenta_contable_nombre: str = "",
     anio: Optional[int] = None,
     mes: Optional[int] = None,
     saldo_inicial="0",
@@ -116,6 +124,8 @@ def generar_plantilla(
     Args:
         empresa:        Nombre de la empresa propietaria.
         cuenta_caja:    Nombre de la cuenta de caja.
+        cuenta_contable: Código de la cuenta contable del maestro asociada.
+        cuenta_contable_nombre: Nombre de esa cuenta contable.
         anio, mes:      Período del registro.
         saldo_inicial:  Saldo inicial del mes.
         responsable:    Persona a cargo del registro.
@@ -131,7 +141,12 @@ def generar_plantilla(
     ws = wb.active
     ws.title = HOJA_CAJA
 
-    _escribir_encabezado(ws, empresa, cuenta_caja, anio, mes, saldo_inicial, responsable)
+    cuenta_contable_txt = cuenta_contable
+    if cuenta_contable and cuenta_contable_nombre:
+        cuenta_contable_txt = f"{cuenta_contable} — {cuenta_contable_nombre}"
+
+    _escribir_encabezado(ws, empresa, cuenta_caja, cuenta_contable_txt,
+                         anio, mes, saldo_inicial, responsable)
     _escribir_tabla_header(ws)
     n_filas = _escribir_movimientos(ws, movimientos or [])
     _aplicar_validaciones(ws, anio, mes)
@@ -145,7 +160,8 @@ def generar_plantilla(
     return buffer.getvalue()
 
 
-def _escribir_encabezado(ws, empresa, cuenta_caja, anio, mes, saldo_inicial, responsable):
+def _escribir_encabezado(ws, empresa, cuenta_caja, cuenta_contable,
+                         anio, mes, saldo_inicial, responsable):
     """Escribe el bloque de información general del período."""
     titulo = ws.cell(row=FILA_TITULO, column=1, value="CAJA GENERAL — MOVIMIENTOS DE EFECTIVO")
     titulo.font = Font(bold=True, size=14, color=_AZUL)
@@ -154,6 +170,7 @@ def _escribir_encabezado(ws, empresa, cuenta_caja, anio, mes, saldo_inicial, res
     valores = {
         FILA_EMPRESA: empresa,
         FILA_CUENTA: cuenta_caja,
+        FILA_CUENTA_CONTABLE: cuenta_contable,
         FILA_MES: mes_txt,
         FILA_ANIO: anio or "",
         FILA_SALDO_INICIAL: float(saldo_inicial or 0),
@@ -208,23 +225,22 @@ def _formula_saldo(fila: int) -> str:
 def _escribir_movimientos(ws, movimientos: list[dict]) -> int:
     """Escribe las filas de movimientos (o filas vacías) y retorna cuántas filas hay."""
     n = max(len(movimientos), FILAS_VACIAS_PLANTILLA)
-    tipo_label = {ENTRADA: "Entrada", SALIDA: "Salida"}
     for i in range(n):
         fila = FILA_TABLA_INICIO + i
         mov = movimientos[i] if i < len(movimientos) else None
 
         if mov:
-            fecha = mov.get("movement_date") or ""
-            ws.cell(row=fila, column=COL_FECHA, value=fecha)
-            ws.cell(row=fila, column=COL_TIPO,
-                    value=tipo_label.get(mov.get("movement_type", ""), ""))
+            ws.cell(row=fila, column=COL_FECHA, value=mov.get("movement_date") or "")
+            ent = float(mov.get("inflow_amount") or 0)
+            sal = float(mov.get("outflow_amount") or 0)
+            # Comprobante: el elegido, o el automático según entrada/salida.
+            codigo = mov.get("comprobante") or comprobante_por_defecto(ent > 0)
+            ws.cell(row=fila, column=COL_COMPROBANTE, value=comprobante_label(codigo))
             ws.cell(row=fila, column=COL_CONCEPTO, value=mov.get("concept", ""))
             ws.cell(row=fila, column=COL_NIT, value=mov.get("third_party_nit", ""))
             ws.cell(row=fila, column=COL_NOMBRE, value=mov.get("third_party_name", ""))
             ws.cell(row=fila, column=COL_CENTRO, value=mov.get("cost_center", ""))
-            ws.cell(row=fila, column=COL_CATEGORIA, value=mov.get("category", ""))
-            ent = float(mov.get("inflow_amount") or 0)
-            sal = float(mov.get("outflow_amount") or 0)
+            ws.cell(row=fila, column=COL_CONTRAPARTIDA, value=mov.get("contrapartida", ""))
             ws.cell(row=fila, column=COL_ENTRADA, value=ent or None)
             ws.cell(row=fila, column=COL_SALIDA, value=sal or None)
             ws.cell(row=fila, column=COL_OBSERVACIONES, value=mov.get("observations", ""))
@@ -246,16 +262,17 @@ def _aplicar_validaciones(ws, anio, mes):
     """Agrega listas desplegables y validación de fecha a la tabla."""
     fila_fin = FILA_TABLA_INICIO + max(FILAS_VACIAS_PLANTILLA, 1) - 1
 
-    # Tipo de movimiento: lista controlada.
-    dv_tipo = DataValidation(
-        type="list", formula1='"Entrada,Salida"', allow_blank=True,
+    # Tipo de comprobante: lista controlada (igual que Bancos).
+    etiquetas = ",".join(comprobante_label(c) for c in COMPROBANTES_CAJA)
+    dv_comp = DataValidation(
+        type="list", formula1=f'"{etiquetas}"', allow_blank=True,
         showErrorMessage=True,
     )
-    dv_tipo.error = "El tipo debe ser Entrada o Salida."
-    dv_tipo.errorTitle = "Tipo de movimiento inválido"
-    col_tipo = get_column_letter(COL_TIPO)
-    dv_tipo.add(f"{col_tipo}{FILA_TABLA_INICIO}:{col_tipo}{fila_fin}")
-    ws.add_data_validation(dv_tipo)
+    dv_comp.error = "Selecciona un tipo de comprobante de la lista."
+    dv_comp.errorTitle = "Tipo de comprobante inválido"
+    col_comp = get_column_letter(COL_COMPROBANTE)
+    dv_comp.add(f"{col_comp}{FILA_TABLA_INICIO}:{col_comp}{fila_fin}")
+    ws.add_data_validation(dv_comp)
 
     # Fecha dentro del período, si se conoce el mes/año.
     if anio and mes:
@@ -274,7 +291,7 @@ def _aplicar_validaciones(ws, anio, mes):
 
 
 def _aplicar_anchos(ws):
-    anchos = [13, 16, 34, 14, 30, 18, 22, 15, 15, 16, 30]
+    anchos = [13, 22, 32, 14, 28, 16, 18, 15, 15, 16, 28]
     for i, ancho in enumerate(anchos, start=1):
         ws.column_dimensions[get_column_letter(i)].width = ancho
 

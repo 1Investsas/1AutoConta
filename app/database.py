@@ -379,6 +379,12 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
                               "TEXT", "NVARCHAR(50)")
             _asegurar_columna(conn, "cash_accounts", "account_name",
                               "TEXT", "NVARCHAR(300)")
+            # Caja General: contrapartida y tipo de comprobante por movimiento
+            # (para generar el archivo de importación SIIGO, igual que Bancos).
+            _asegurar_columna(conn, "cash_movements", "contrapartida",
+                              "TEXT", "NVARCHAR(50)")
+            _asegurar_columna(conn, "cash_movements", "comprobante",
+                              "TEXT", "NVARCHAR(10)")
             # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
             # cada empresa tiene su propio archivo y no hay columna empresa_id.
             if not conn.is_sqlite:
@@ -607,6 +613,8 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             third_party_name    TEXT,
             cost_center         TEXT,
             category            TEXT,
+            contrapartida       TEXT,
+            comprobante         TEXT,
             inflow_amount       TEXT    DEFAULT '0',
             outflow_amount      TEXT    DEFAULT '0',
             running_balance     TEXT    DEFAULT '0',
@@ -790,6 +798,8 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             third_party_name NVARCHAR(300),
             cost_center      NVARCHAR(200),
             category         NVARCHAR(200),
+            contrapartida    NVARCHAR(50),
+            comprobante      NVARCHAR(10),
             inflow_amount    NVARCHAR(50)   DEFAULT '0',
             outflow_amount   NVARCHAR(50)   DEFAULT '0',
             running_balance  NVARCHAR(50)   DEFAULT '0',
@@ -2949,6 +2959,7 @@ def reemplazar_cash_movements(
                 m.get("movement_type", ""), m.get("concept", ""),
                 m.get("third_party_nit", ""), m.get("third_party_name", ""),
                 m.get("cost_center", ""), m.get("category", ""),
+                m.get("contrapartida", ""), m.get("comprobante", ""),
                 str(m.get("inflow_amount", "0")), str(m.get("outflow_amount", "0")),
                 str(m.get("running_balance", "0")), m.get("observations", ""),
                 ahora, ahora,
@@ -2958,9 +2969,10 @@ def reemplazar_cash_movements(
                     """INSERT INTO cash_movements
                        (cash_period_id, sequence, movement_date, movement_type, concept,
                         third_party_nit, third_party_name, cost_center, category,
+                        contrapartida, comprobante,
                         inflow_amount, outflow_amount, running_balance, observations,
                         created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     campos,
                 )
             else:
@@ -2968,9 +2980,10 @@ def reemplazar_cash_movements(
                     """INSERT INTO cash_movements
                        (empresa_id, cash_period_id, sequence, movement_date, movement_type, concept,
                         third_party_nit, third_party_name, cost_center, category,
+                        contrapartida, comprobante,
                         inflow_amount, outflow_amount, running_balance, observations,
                         created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (emp_id,) + campos,
                 )
         conn.commit()

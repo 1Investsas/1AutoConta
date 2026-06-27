@@ -194,6 +194,51 @@ def test_plantilla_round_trip(tmp_path):
     assert res.movimientos[1].running_balance == Decimal("580000")
 
 
+def test_plantilla_propaga_cuenta_contable_y_columnas(tmp_path):
+    movs = [mc.a_dict(mc.desde_dict({"movement_date": "2026-06-02",
+                                     "concept": "Recaudo", "contrapartida": "41350101",
+                                     "comprobante": "111", "inflow_amount": "100000"}))]
+    data = pl.generar_plantilla(
+        empresa="X", cuenta_caja="Caja menor", cuenta_contable="11050501",
+        cuenta_contable_nombre="Caja general", anio=2026, mes=6,
+        saldo_inicial="0", movimientos=movs,
+    )
+    import openpyxl
+    fp = tmp_path / "c.xlsx"
+    fp.write_bytes(data)
+    wb = openpyxl.load_workbook(fp)
+    ws = wb[pl.HOJA_CAJA]
+    # La cuenta contable está en el encabezado.
+    assert str(ws.cell(row=pl.FILA_CUENTA_CONTABLE, column=2).value).startswith("11050501")
+    # Encabezados de tabla: Tipo comprobante y Contrapartida.
+    headers = [ws.cell(row=pl.FILA_TABLA_HEADER, column=c + 1).value
+               for c in range(len(pl.COLUMNAS_TABLA))]
+    assert "Tipo comprobante" in headers
+    assert "Contrapartida" in headers
+
+
+def test_plantilla_round_trip_comprobante_contrapartida(tmp_path):
+    movs = [
+        mc.a_dict(mc.desde_dict({"movement_date": "2026-06-02", "concept": "Recaudo",
+                                 "contrapartida": "41350101", "comprobante": "111",
+                                 "inflow_amount": "100000"})),
+        mc.a_dict(mc.desde_dict({"movement_date": "2026-06-03", "concept": "Traslado",
+                                 "contrapartida": "11100501", "comprobante": "110",
+                                 "outflow_amount": "50000"})),
+    ]
+    data = pl.generar_plantilla(empresa="X", cuenta_caja="Caja", cuenta_contable="11050501",
+                                anio=2026, mes=6, saldo_inicial="0", movimientos=movs)
+    fp = tmp_path / "c.xlsx"
+    fp.write_bytes(data)
+    res = importar_plantilla(fp)
+    assert not res.tiene_errores
+    assert res.movimientos[0].contrapartida == "41350101"
+    assert res.movimientos[0].comprobante == "111"
+    assert res.movimientos[0].movement_type == mc.ENTRADA   # derivado del monto
+    assert res.movimientos[1].comprobante == "110"
+    assert res.movimientos[1].movement_type == mc.SALIDA
+
+
 def test_plantilla_vacia_se_genera(tmp_path):
     data = pl.generar_plantilla(empresa="X", cuenta_caja="Caja", anio=2026, mes=6)
     assert data[:2] == b"PK"  # xlsx es un zip
@@ -216,6 +261,50 @@ def test_importar_marca_errores_por_fila(tmp_path):
     res = importar_plantilla(fp)
     assert res.tiene_errores
     assert any(res.errores_por_fila.values())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Mapeo SIIGO
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_mapeo_siigo_entrada_y_salida():
+    from app.caja.mapeador_caja import mapear_caja_a_siigo
+    movs = [
+        mc.desde_dict({"sequence": 1, "movement_date": "2026-06-02", "concept": "Recaudo",
+                       "contrapartida": "41350101", "inflow_amount": "100000"}),
+        mc.desde_dict({"sequence": 2, "movement_date": "2026-06-03", "concept": "Pago",
+                       "contrapartida": "51959501", "comprobante": "112",
+                       "outflow_amount": "20000"}),
+    ]
+    filas = mapear_caja_a_siigo(movs, "11050501")
+    assert len(filas) == 4
+    # Entrada: caja débito, contrapartida crédito.
+    assert filas[0].codigo_cuenta == "11050501" and filas[0].debito == 100000.0
+    assert filas[1].codigo_cuenta == "41350101" and filas[1].credito == 100000.0
+    assert filas[0].tipo_comprobante == 111
+    # Salida: caja crédito, contrapartida débito.
+    assert filas[2].codigo_cuenta == "11050501" and filas[2].credito == 20000.0
+    assert filas[3].codigo_cuenta == "51959501" and filas[3].debito == 20000.0
+    assert filas[2].tipo_comprobante == 112
+
+
+def test_mapeo_siigo_sin_contrapartida_es_pendiente():
+    from app.caja.mapeador_caja import mapear_caja_a_siigo
+    movs = [mc.desde_dict({"sequence": 1, "movement_date": "2026-06-02",
+                           "concept": "x", "inflow_amount": "100000"})]
+    filas = mapear_caja_a_siigo(movs, "11050501")
+    assert filas[1].es_pendiente is True
+    assert filas[1].codigo_cuenta == ""
+
+
+def test_exportar_caja_siigo_genera_archivo(tmp_path):
+    from app.caja.exportador_caja import exportar_caja_siigo
+    movs = [mc.desde_dict({"sequence": 1, "movement_date": "2026-06-02",
+                           "concept": "x", "contrapartida": "41350101",
+                           "inflow_amount": "100000"})]
+    rutas = exportar_caja_siigo(movs, "11050501", output_path=str(tmp_path))
+    assert len(rutas) == 1
+    assert open(rutas[0], "rb").read(2) == b"PK"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -325,6 +414,37 @@ def test_descargar_plantillas(client):
     r2 = client.get(f"/caja/periodo/{per_id}/plantilla-prediligenciada")
     assert r1.status_code == 200 and r1.data[:2] == b"PK"
     assert r2.status_code == 200 and r2.data[:2] == b"PK"
+
+
+def test_guardar_con_contrapartida_y_comprobante(client):
+    _, per_id = _crear_cuenta_y_periodo(client)
+    movs = [
+        {"movement_date": "2026-06-02", "comprobante": "111", "concept": "Recaudo",
+         "contrapartida": "41350101", "inflow_amount": 100000, "outflow_amount": 0},
+    ]
+    client.post(f"/caja/periodo/{per_id}/guardar",
+                data={"movimientos_json": json.dumps(movs), "opening_balance": "0"})
+    guardados = db.listar_cash_movements(per_id, config.DB_PATH)
+    assert guardados[0]["contrapartida"] == "41350101"
+    assert guardados[0]["comprobante"] == "111"
+    assert guardados[0]["movement_type"] == "entrada"  # derivado del monto
+
+
+def test_generar_siigo(client):
+    _, per_id = _crear_cuenta_y_periodo(client)  # cuenta con account_code 11050501
+    movs = [{"movement_date": "2026-06-02", "comprobante": "111", "concept": "Recaudo",
+             "contrapartida": "41350101", "inflow_amount": 100000, "outflow_amount": 0}]
+    client.post(f"/caja/periodo/{per_id}/guardar",
+                data={"movimientos_json": json.dumps(movs), "opening_balance": "0"})
+    r = client.post(f"/caja/periodo/{per_id}/exportar-siigo")
+    assert r.status_code == 200
+    assert r.data[:2] == b"PK"  # xlsx (un solo archivo, no zip)
+
+
+def test_generar_siigo_sin_movimientos_avisa(client):
+    _, per_id = _crear_cuenta_y_periodo(client)
+    r = client.post(f"/caja/periodo/{per_id}/exportar-siigo", follow_redirects=True)
+    assert "No hay movimientos" in r.get_data(as_text=True)
 
 
 def test_importar_plantilla_valida(client):

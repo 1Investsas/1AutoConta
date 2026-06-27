@@ -3134,11 +3134,21 @@ def caja_periodo(period_id):
     movimientos = listar_cash_movements(period_id, db_path)
     period = _resumen_periodo(emp, period)
 
+    from app.caja.modelo_caja import (
+        COMPROBANTES_CAJA, COMP_INGRESO, COMP_EGRESO, comprobante_label,
+    )
+    comprobantes = [
+        {"codigo": c, "label": comprobante_label(c)} for c in COMPROBANTES_CAJA
+    ]
+
     return render_template(
         "caja_periodo.html",
         period=period,
         cuenta=cuenta,
         movimientos=movimientos,
+        comprobantes=comprobantes,
+        comp_ingreso=COMP_INGRESO,
+        comp_egreso=COMP_EGRESO,
     )
 
 
@@ -3320,6 +3330,8 @@ def _descargar_plantilla_caja(period_id, prediligenciada: bool):
     data = generar_plantilla(
         empresa=emp.nombre,
         cuenta_caja=(cuenta or {}).get("name", ""),
+        cuenta_contable=(cuenta or {}).get("account_code", ""),
+        cuenta_contable_nombre=(cuenta or {}).get("account_name", ""),
         anio=period["year"], mes=period["month"],
         saldo_inicial=period["opening_balance"],
         responsable=period.get("responsible", ""),
@@ -3425,3 +3437,67 @@ def caja_periodo_importar(period_id):
     flash(f"Plantilla importada: {len(ordenados)} movimientos. "
           f"Saldo final {cierre:,.0f}.", "success")
     return redirect(url_for("web.caja_periodo", period_id=period_id))
+
+
+# ---------------------------------------------------------------------------
+# POST /caja/periodo/<id>/exportar-siigo — Generar el Excel de importación SIIGO
+# ---------------------------------------------------------------------------
+
+@bp.route("/caja/periodo/<int:period_id>/exportar-siigo", methods=["POST"])
+@require_permission("caja.exportar")
+def caja_periodo_exportar_siigo(period_id):
+    """Genera el archivo Excel de importación SIIGO de los movimientos de caja.
+
+    Cada movimiento produce un asiento de dos líneas: la cuenta contable de la
+    caja (lado fijo) y la contrapartida, con el tipo de comprobante y el
+    consecutivo asignados como en el módulo Bancos.
+    """
+    from app.database import (
+        obtener_cash_period, obtener_cash_account, listar_cash_movements,
+    )
+    from app.caja import modelo_caja as mc
+    from app.caja.exportador_caja import exportar_caja_siigo
+    from app.importador import cargar_maestro_cuentas
+
+    emp = _empresa_actual()
+    db_path = _caja_db(emp)
+    period = obtener_cash_period(period_id, db_path)
+    if not period:
+        flash("El período de caja no existe.", "error")
+        return redirect(url_for("web.caja"))
+
+    cuenta = obtener_cash_account(period["cash_account_id"], db_path)
+    cuenta_caja = (cuenta or {}).get("account_code", "").strip()
+    if not cuenta_caja:
+        flash("La caja no tiene una cuenta contable asociada; no se puede "
+              "generar el archivo SIIGO.", "error")
+        return redirect(url_for("web.caja_periodo", period_id=period_id))
+
+    movimientos = [mc.desde_dict(m) for m in listar_cash_movements(period_id, db_path)]
+    if not any(abs(m.inflow_amount) > 0 or abs(m.outflow_amount) > 0 for m in movimientos):
+        flash("No hay movimientos con valor para exportar a SIIGO.", "error")
+        return redirect(url_for("web.caja_periodo", period_id=period_id))
+
+    try:
+        df_cuentas = cargar_maestro_cuentas(
+            emp.ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
+        )
+    except Exception:
+        df_cuentas = None
+
+    try:
+        rutas = exportar_caja_siigo(
+            movimientos, cuenta_caja,
+            output_path=os.path.join(_project_root(), "output"),
+            df_cuentas=df_cuentas,
+        )
+    except Exception as exc:
+        logger.exception("Error generando Excel SIIGO de caja")
+        flash(f"Error al generar el archivo SIIGO: {exc}", "error")
+        return redirect(url_for("web.caja_periodo", period_id=period_id))
+
+    audit.registrar("caja.exportar_siigo", empresa_id=emp.id,
+                    detalle=f"periodo={period_id} archivos={len(rutas)}")
+    return _responder_descarga(
+        _enviar_archivos_siigo(rutas, zip_name="siigo_caja.zip")
+    )
