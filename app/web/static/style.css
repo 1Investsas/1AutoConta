@@ -925,6 +925,15 @@ td.mono { font-family: monospace; font-size: 0.82rem; }
 .file-field input[type="file"]::file-selector-button:hover {
   border-color: var(--blue-500); color: var(--blue-600);
 }
+.file-field-control { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.maestro-dl {
+  display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+  font-size: 0.75rem; font-weight: 600; color: var(--blue-600); text-decoration: none;
+}
+.maestro-dl svg { width: 13px; height: 13px; }
+.maestro-dl:hover { text-decoration: underline; }
+.maestro-none { font-size: 0.75rem; }
+.maestro-dl[hidden], .maestro-none[hidden] { display: none; }
 
 /* Acordeón (secciones avanzadas de "Crear empresa") */
 .accordion {

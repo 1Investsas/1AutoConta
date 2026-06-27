@@ -95,20 +95,47 @@ def _save_upload(file_bytes: bytes, filename: str, emp=None) -> str:
     return store.save_file(file_bytes, categoria, f"{uuid.uuid4().hex[:8]}_{fname}")
 
 
+# Maestros de una empresa: (tipo / clave de formulario, nombre de archivo destino).
+# Se comparte entre la subida, la descarga y la resolución de rutas por defecto.
+MAESTROS_EMPRESA = (
+    ("terceros",     "Listado_de_Terceros.xlsx"),
+    ("cuentas",      "Listado_de_Cuentas_Contables.xlsx"),
+    ("comprobantes", "Tipos_de_comprobante_contable.xlsx"),
+)
+
+
 def _rutas_maestros_default(emp) -> tuple:
     """Resuelve las rutas de los 3 maestros de la empresa (sin uploads nuevos)."""
     rutas = []
-    for default_name in [
-        "Listado_de_Terceros.xlsx",
-        "Listado_de_Cuentas_Contables.xlsx",
-        "Tipos_de_comprobante_contable.xlsx",
-    ]:
+    for _tipo, default_name in MAESTROS_EMPRESA:
         try:
             path = emp.ruta_maestro(default_name)
         except FileNotFoundError:
             path = str(Path(_project_root()) / emp.data_category / default_name)
         rutas.append(path)
     return tuple(rutas)
+
+
+def _ref_maestro(emp, filename: str) -> str:
+    """Referencia de almacenamiento (local o blob) a un maestro de la empresa.
+
+    Coincide con la referencia que produce `store.save_file` al subirlo, de modo
+    que sirve para `file_exists` / `get_download_bytes` sin descargar a temp.
+    """
+    if store.is_cloud():
+        return f"blob://{emp.data_category}/{filename}"
+    return str(Path(_project_root()) / emp.data_category / filename)
+
+
+def _maestros_disponibles(empresas) -> dict:
+    """Mapa {empresa_id: [tipos con maestro cargado]} para la UI de descarga."""
+    return {
+        emp.id: [
+            tipo for tipo, filename in MAESTROS_EMPRESA
+            if store.file_exists(_ref_maestro(emp, filename))
+        ]
+        for emp in empresas
+    }
 
 
 # Cache en memoria de los maestros Excel para los endpoints de autocompletar,
@@ -2519,9 +2546,11 @@ def proceso_banco_anular(proceso_id):
 @require_permission("empresas.ver")
 def empresas():
     """Página de administración de empresas."""
+    empresas_acc = tenancy.empresas_accesibles(authn.usuario_actual())
     return render_template(
         "empresas.html",
         formato_default=FORMATO_BANCO_DEFAULT,
+        maestros_disponibles=_maestros_disponibles(empresas_acc),
     )
 
 
@@ -2651,10 +2680,12 @@ def empresas_crear():
 def empresas_editar(empresa_id):
     """Muestra el formulario de edición pre-rellenado con la empresa indicada."""
     emp = obtener_empresa(empresa_id)
+    empresas_acc = tenancy.empresas_accesibles(authn.usuario_actual())
     return render_template(
         "empresas.html",
         formato_default=FORMATO_BANCO_DEFAULT,
         empresa_editar=emp,
+        maestros_disponibles=_maestros_disponibles(empresas_acc),
     )
 
 
@@ -2697,11 +2728,7 @@ def empresas_maestros():
     """Sube/reemplaza los archivos maestros de la empresa indicada."""
     emp = obtener_empresa(request.form.get("empresa_id", "").strip())
     subidos = []
-    for key, default_name in [
-        ("terceros",     "Listado_de_Terceros.xlsx"),
-        ("cuentas",      "Listado_de_Cuentas_Contables.xlsx"),
-        ("comprobantes", "Tipos_de_comprobante_contable.xlsx"),
-    ]:
+    for key, default_name in MAESTROS_EMPRESA:
         f = request.files.get(key)
         if f and f.filename and _allowed(f.filename):
             store.save_file(f.read(), emp.data_category, default_name)
@@ -2714,6 +2741,31 @@ def empresas_maestros():
     else:
         flash("No se subió ningún archivo maestro.", "info")
     return redirect(url_for("web.empresas"))
+
+
+@bp.route("/empresas/<empresa_id>/maestros/<tipo>/descargar")
+@require_permission("empresas.gestionar")
+def empresas_maestros_descargar(empresa_id, tipo):
+    """Descarga el archivo maestro `tipo` de la empresa indicada."""
+    filename = dict(MAESTROS_EMPRESA).get(tipo)
+    if filename is None:
+        flash("Tipo de archivo maestro no válido.", "error")
+        return redirect(url_for("web.empresas"))
+
+    emp = obtener_empresa(empresa_id)
+    ref = _ref_maestro(emp, filename)
+    if not store.file_exists(ref):
+        flash(f"{emp.nombre} no tiene cargado el archivo maestro solicitado.", "error")
+        return redirect(url_for("web.empresas"))
+
+    audit.registrar("empresa.maestros.descargar", empresa_id=emp.id, detalle=filename)
+    content = store.get_download_bytes(ref)
+    return send_file(
+        io.BytesIO(content),
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 # ---------------------------------------------------------------------------
