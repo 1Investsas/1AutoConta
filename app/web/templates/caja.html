@@ -44,6 +44,16 @@
         <input type="text" id="name" name="name" placeholder="Caja menor sede norte" required>
       </div>
       <div class="form-group">
+        <label for="account_code">
+          Cuenta contable *
+          <small style="color:var(--text-dim); font-weight:400">— del plan de cuentas</small>
+        </label>
+        <input type="text" id="account_code" name="account_code" list="dlCuentas"
+               autocomplete="off" placeholder="Código (ej. 11050501)" required
+               style="font-family:monospace">
+        <small id="cuentaNombre" class="muted" style="display:block; margin-top:4px; min-height:1em"></small>
+      </div>
+      <div class="form-group">
         <label for="responsible">Responsable</label>
         <input type="text" id="responsible" name="responsible" placeholder="Nombre del encargado">
       </div>
@@ -56,6 +66,7 @@
       <label for="description">Descripción</label>
       <input type="text" id="description" name="description" placeholder="Uso de la caja, ubicación, etc.">
     </div>
+    <datalist id="dlCuentas"></datalist>
     <div style="margin-top:14px">
       <button type="submit" class="btn btn-primary">Crear cuenta de caja</button>
     </div>
@@ -69,6 +80,7 @@
       <div class="qa-body">
         <div class="qa-title">{{ c.name }}{% if not c.active %} <span class="pill">inactiva</span>{% endif %}</div>
         <div class="qa-desc">
+          {% if c.account_code %}<span style="font-family:monospace">{{ c.account_code }}</span>{% if c.account_name %} {{ c.account_name }}{% endif %} · {% endif %}
           {{ c.n_periodos }} período(s){% if c.responsible %} · {{ c.responsible }}{% endif %}
           {%- if c.description %} · {{ c.description }}{% endif %}
         </div>
@@ -119,4 +131,42 @@
 
 {% block extra_scripts %}
 <style>.hidden{display:none}</style>
+<script>
+(function () {
+  const input = document.getElementById('account_code');
+  const dl = document.getElementById('dlCuentas');
+  const hint = document.getElementById('cuentaNombre');
+  if (!input) return;
+  const porCodigo = {};
+  let t = null;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    actualizarNombre();
+    if (q.length < 2) return;
+    clearTimeout(t);
+    t = setTimeout(() => {
+      fetch('{{ url_for("web.api_cuentas") }}?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(items => {
+          dl.innerHTML = '';
+          items.forEach(it => {
+            porCodigo[it.codigo] = it.nombre;
+            const opt = document.createElement('option');
+            opt.value = it.codigo;
+            opt.label = it.nombre;
+            dl.appendChild(opt);
+          });
+          actualizarNombre();
+        }).catch(() => {});
+    }, 220);
+  });
+
+  function actualizarNombre() {
+    const n = porCodigo[input.value.trim()];
+    hint.textContent = n ? '✓ ' + n : '';
+    hint.style.color = n ? 'var(--success)' : '';
+  }
+})();
+</script>
 {% endblock %}

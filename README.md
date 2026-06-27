@@ -97,7 +97,9 @@ un extracto externo.
 
 Flujo de trabajo:
 
-1. **Crear una cuenta de caja** (caja menor, general, por sede o centro de costo).
+1. **Crear una cuenta de caja** (caja menor, general, por sede o centro de costo),
+   **asociada a una cuenta contable** del plan de cuentas (maestro), que se elige
+   con autocompletado al momento de crearla.
 2. **Abrir un período mensual** con su **saldo inicial** (se sugiere el saldo
    final del mes anterior).
 3. **Registrar movimientos** de entrada/salida en la app o con la **plantilla de
@@ -107,14 +109,24 @@ Flujo de trabajo:
 5. Llevar el período por sus **estados**: Borrador → En revisión → Aprobado →
    Cerrado → Reabierto. Un mes cerrado no se modifica sin reapertura.
 
+Cada movimiento lleva su **Tipo de comprobante** (Recibo de caja / Recibo de
+pago / Traslado, como en Bancos) y su **Contrapartida** (la cuenta contable del
+otro lado del asiento, con autocompletado). La caja se asienta siempre contra su
+**cuenta contable** asociada.
+
 Características:
 
-- **Autocompletado NIT ↔ nombre** del tercero contra el maestro de terceros.
-- **Plantilla de Excel** descargable **vacía** o **prediligenciada**, con fórmula
-  de saldo protegida, validación de tipo y fecha, formato monetario y una hoja
-  auxiliar `Terceros` para autocompletar en Excel.
+- **Autocompletado NIT ↔ nombre** del tercero y **autocompletado de cuentas**
+  (contrapartida) contra los maestros de la empresa.
+- **Plantilla de Excel** descargable **vacía** o **prediligenciada**, con la
+  cuenta contable en el encabezado, fórmula de saldo protegida, lista de tipo de
+  comprobante, validación de fecha, formato monetario y una hoja auxiliar
+  `Terceros` para autocompletar en Excel.
 - **Importación** de la plantilla diligenciada: valida fila por fila, recalcula
   el saldo (no confía en el digitado en Excel) y no guarda nada si hay errores.
+- **Generar SIIGO**: produce el Excel de importación de comprobantes para SIIGO
+  Nube, igual que el módulo Bancos — un asiento de dos líneas por movimiento
+  (cuenta de caja + contrapartida), con tipo de comprobante y consecutivo.
 - **Permisos por rol** (`caja.ver`, `caja.gestionar`, `caja.procesar`,
   `caja.exportar`, `caja.aprobar`, `caja.cerrar`) y trazabilidad en auditoría.
 
