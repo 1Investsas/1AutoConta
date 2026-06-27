@@ -4,6 +4,7 @@
 {% block page_title %}💵 {{ cuenta.name }} — {{ period.mes_nombre }} {{ period.year }}{% endblock %}
 {% block page_subtitle %}<p class="topbar-sub">
   <a href="{{ url_for('web.caja_cuenta', account_id=cuenta.id) }}" class="link-more">← {{ cuenta.name }}</a>
+  {% if cuenta.account_code %} · <code>{{ cuenta.account_code }}</code>{% endif %}
   · Estado: <span class="pill">{{ period.estado_label }}</span>
   {% if period.responsible %} · Responsable: {{ period.responsible }}{% endif %}
 </p>{% endblock %}

@@ -2883,6 +2883,39 @@ def _usuario_email() -> str:
     return (u or {}).get("email", "") if u else ""
 
 
+def _resolver_cuenta_contable(emp, codigo: str) -> tuple[str, bool, bool]:
+    """Resuelve el nombre de una cuenta contable por su código en el maestro.
+
+    Retorna ``(nombre, encontrada, maestro_disponible)``:
+    - encontrada=True: el código existe en el plan de cuentas; ``nombre`` es el
+      nombre oficial.
+    - maestro_disponible=False: no se pudo leer el plan de cuentas de la empresa
+      (no se puede validar); el llamador decide aceptar el código tal cual.
+    """
+    from app.importador import cargar_maestro_cuentas
+
+    codigo = (codigo or "").strip()
+    if not codigo:
+        return "", False, True
+    try:
+        path = emp.ruta_maestro("Listado_de_Cuentas_Contables.xlsx")
+        df = _cargar_maestro_cacheado(cargar_maestro_cuentas, path)
+    except Exception:
+        logger.debug("Plan de cuentas no disponible para validar %s", codigo)
+        return "", False, False
+
+    try:
+        cod_col, nom_col = _columnas_cuentas(df)
+        coincide = df[df[cod_col].astype(str).str.strip() == codigo]
+        if not coincide.empty:
+            nombre = str(coincide.iloc[0][nom_col]).strip() if nom_col else ""
+            return nombre, True, True
+    except Exception:
+        logger.debug("No se pudo resolver la cuenta contable %s", codigo)
+        return "", False, False
+    return "", False, True
+
+
 def _terceros_para_plantilla(emp, limite: int = 2000) -> list[dict]:
     """Lista de {'nit','nombre'} del maestro de terceros para la hoja auxiliar."""
     from app.importador import cargar_maestro_terceros
@@ -2968,16 +3001,30 @@ def caja_cuenta_crear():
         flash("El nombre de la cuenta de caja es obligatorio.", "error")
         return redirect(url_for("web.caja"))
 
+    # La caja debe quedar asociada a una cuenta contable del maestro.
+    account_code = request.form.get("account_code", "").strip()
+    if not account_code:
+        flash("Debes asociar la caja a una cuenta contable del plan de cuentas.", "error")
+        return redirect(url_for("web.caja"))
+
+    account_name, encontrada, maestro_ok = _resolver_cuenta_contable(emp, account_code)
+    if maestro_ok and not encontrada:
+        flash(f"La cuenta contable {account_code} no se encontró en el plan de "
+              f"cuentas. Verifica el código en el maestro.", "error")
+        return redirect(url_for("web.caja"))
+
     acc_id = crear_cash_account(
         name=nombre,
         description=request.form.get("description", "").strip(),
         currency=request.form.get("currency", "COP").strip() or "COP",
         responsible=request.form.get("responsible", "").strip(),
+        account_code=account_code,
+        account_name=account_name,
         db_path=db_path,
     )
     audit.registrar("caja.cuenta_crear", empresa_id=emp.id,
-                    detalle=f"cuenta={acc_id} nombre={nombre}")
-    flash(f"Cuenta de caja «{nombre}» creada.", "success")
+                    detalle=f"cuenta={acc_id} nombre={nombre} contable={account_code}")
+    flash(f"Cuenta de caja «{nombre}» creada (cuenta contable {account_code}).", "success")
     return redirect(url_for("web.caja_cuenta", account_id=acc_id))
 
 

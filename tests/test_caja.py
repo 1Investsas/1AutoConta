@@ -126,6 +126,30 @@ def test_db_round_trip(tmp_path):
     assert cp["closed_by"] == "ana@x.com"
 
 
+def test_migracion_agrega_cuenta_contable(tmp_path):
+    """Una BD con cash_accounts sin la columna de cuenta contable la gana."""
+    import sqlite3
+    p = str(tmp_path / "legacy.db")
+    conn = sqlite3.connect(p)
+    conn.execute("""
+        CREATE TABLE cash_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            description TEXT, currency TEXT, responsible TEXT,
+            active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT
+        )
+    """)
+    conn.execute("INSERT INTO cash_accounts (name) VALUES ('Caja vieja')")
+    conn.commit()
+    conn.close()
+
+    db.inicializar_db(p)  # debe ALTER ADD account_code + account_name
+    cols = [c[1] for c in sqlite3.connect(p)
+            .execute("PRAGMA table_info(cash_accounts)").fetchall()]
+    assert "account_code" in cols
+    assert "account_name" in cols
+    assert db.listar_cash_accounts(p, incluir_inactivas=True)[0]["name"] == "Caja vieja"
+
+
 def test_reemplazar_movimientos_es_total(tmp_path):
     p = str(tmp_path / "c.db")
     db.inicializar_db(p)
@@ -217,7 +241,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _crear_cuenta_y_periodo(client):
-    r = client.post("/caja/cuenta", data={"name": "Caja menor"})
+    r = client.post("/caja/cuenta", data={"name": "Caja menor", "account_code": "11050501"})
     acc_id = int(r.headers["Location"].rstrip("/").split("/")[-1])
     r = client.post(f"/caja/cuenta/{acc_id}/periodo",
                     data={"year": "2026", "month": "6", "opening_balance": "500000"})
@@ -229,6 +253,22 @@ def test_ruta_landing(client):
     r = client.get("/caja")
     assert r.status_code == 200
     assert "Caja General" in r.get_data(as_text=True)
+
+
+def test_crear_cuenta_requiere_cuenta_contable(client):
+    # Sin account_code la creación se rechaza y no crea nada.
+    r = client.post("/caja/cuenta", data={"name": "Caja sin cuenta"},
+                    follow_redirects=True)
+    assert "cuenta contable" in r.get_data(as_text=True).lower()
+    assert db.listar_cash_accounts(config.DB_PATH, incluir_inactivas=True) == []
+
+
+def test_crear_cuenta_guarda_cuenta_contable(client):
+    r = client.post("/caja/cuenta",
+                    data={"name": "Caja menor", "account_code": "11050501"})
+    acc_id = int(r.headers["Location"].rstrip("/").split("/")[-1])
+    cuenta = db.obtener_cash_account(acc_id, config.DB_PATH)
+    assert cuenta["account_code"] == "11050501"
 
 
 def test_crear_cuenta_y_periodo_y_guardar(client, tmp_path):

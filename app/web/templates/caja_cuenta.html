@@ -4,6 +4,7 @@
 {% block page_title %}💵 {{ cuenta.name }}{% endblock %}
 {% block page_subtitle %}<p class="topbar-sub">
   <a href="{{ url_for('web.caja') }}" class="link-more">← Caja General</a>
+  {% if cuenta.account_code %} · Cuenta contable: <code>{{ cuenta.account_code }}</code>{% if cuenta.account_name %} {{ cuenta.account_name }}{% endif %}{% endif %}
   {% if cuenta.responsible %} · Responsable: {{ cuenta.responsible }}{% endif %}
   {% if cuenta.description %} · {{ cuenta.description }}{% endif %}
 </p>{% endblock %}

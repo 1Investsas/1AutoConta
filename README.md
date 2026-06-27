@@ -95,7 +95,9 @@ un extracto externo.
 
 Flujo de trabajo:
 
-1. **Crear una cuenta de caja** (caja menor, general, por sede o centro de costo).
+1. **Crear una cuenta de caja** (caja menor, general, por sede o centro de costo),
+   **asociada a una cuenta contable** del plan de cuentas (maestro), que se elige
+   con autocompletado al momento de crearla.
 2. **Abrir un período mensual** con su **saldo inicial** (se sugiere el saldo
    final del mes anterior).
 3. **Registrar movimientos** de entrada/salida en la app o con la **plantilla de
