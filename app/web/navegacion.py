@@ -59,7 +59,7 @@ CATEGORIAS: dict[str, dict] = {
             {
                 "nombre": "Caja general",
                 "descripcion": "Movimientos de caja menor y general",
-                "endpoint": None,
+                "endpoint": "web.caja",
                 "icono": '<rect x="2" y="6" width="20" height="13" rx="2"/>'
                          '<path d="M2 10h20"/><circle cx="16" cy="14" r="1.4"/>',
             },

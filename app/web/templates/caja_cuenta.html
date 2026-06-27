@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cuenta.name }} — Caja General{% endblock %}
+{% block page_title %}💵 {{ cuenta.name }}{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">
+  <a href="{{ url_for('web.caja') }}" class="link-more">← Caja General</a>
+  {% if cuenta.responsible %} · Responsable: {{ cuenta.responsible }}{% endif %}
+  {% if cuenta.description %} · {{ cuenta.description }}{% endif %}
+</p>{% endblock %}
+
+{% block content %}
+
+{% set meses = ['', 'Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'] %}
+
+<!-- ── Crear período ── -->
+<div class="form-section">
+  <h2>📅 Abrir período mensual</h2>
+  <p class="muted" style="margin-top:4px">
+    El saldo inicial sugerido es el saldo final del período más reciente de esta caja.
+  </p>
+  <form method="POST" action="{{ url_for('web.caja_periodo_crear', account_id=cuenta.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="month">Mes *</label>
+        <select id="month" name="month" required>
+          {% for m in range(1, 13) %}
+          <option value="{{ m }}" {% if m == mes_actual %}selected{% endif %}>{{ meses[m] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="year">Año *</label>
+        <input type="number" id="year" name="year" value="{{ anio_actual }}" min="2000" max="2100" required>
+      </div>
+      <div class="form-group">
+        <label for="opening_balance">Saldo inicial</label>
+        <input type="number" id="opening_balance" name="opening_balance" step="any" min="0"
+               value="{{ saldo_sugerido }}">
+      </div>
+      <div class="form-group">
+        <label for="responsible">Responsable</label>
+        <input type="text" id="responsible" name="responsible" value="{{ cuenta.responsible or '' }}">
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <button type="submit" class="btn btn-primary">Crear período</button>
+    </div>
+  </form>
+</div>
+
+<!-- ── Períodos existentes ── -->
+<div class="panel" style="margin-top:24px">
+  <div class="panel-head"><h2>Períodos de la caja</h2></div>
+  {% if periodos %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Período</th><th>Estado</th>
+          <th style="text-align:right">Saldo inicial</th>
+          <th style="text-align:right">Entradas</th>
+          <th style="text-align:right">Salidas</th>
+          <th style="text-align:right">Saldo final</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in periodos %}
+        <tr>
+          <td><strong>{{ p.mes_nombre }} {{ p.year }}</strong></td>
+          <td><span class="pill">{{ p.estado_label }}</span></td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(p.opening_balance|float) }}</td>
+          <td style="text-align:right; font-family:monospace; color:var(--success)">{{ '{:,.0f}'.format(p.total_inflows|float) }}</td>
+          <td style="text-align:right; font-family:monospace; color:var(--danger)">{{ '{:,.0f}'.format(p.total_outflows|float) }}</td>
+          <td style="text-align:right; font-family:monospace"><strong>{{ '{:,.0f}'.format(p.closing_balance|float) }}</strong></td>
+          <td style="text-align:right">
+            <a href="{{ url_for('web.caja_periodo', period_id=p.id) }}" class="btn btn-secondary btn-sm">Abrir</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Esta caja aún no tiene períodos. Crea el primero arriba.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

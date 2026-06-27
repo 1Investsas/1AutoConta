@@ -41,6 +41,12 @@ PERMISOS: dict[str, str] = {
     "banco.ver":              "Ver el módulo de Bancos y su historial",
     "banco.procesar":         "Cargar y previsualizar extractos bancarios",
     "banco.exportar":         "Generar el archivo SIIGO de Bancos",
+    "caja.ver":               "Ver el módulo de Caja General y sus períodos",
+    "caja.gestionar":         "Crear y editar cuentas de caja",
+    "caja.procesar":          "Crear períodos, registrar movimientos e importar plantillas",
+    "caja.exportar":          "Descargar plantillas de caja (vacía y prediligenciada)",
+    "caja.aprobar":           "Enviar a revisión y aprobar períodos de caja",
+    "caja.cerrar":            "Cerrar y reabrir períodos de caja",
     "importaciones.ver":      "Ver el listado de importaciones",
     "importaciones.gestionar": "Retomar, corregir, anular y descargar importaciones",
     "analitica.ver":          "Ver analíticas y reportes",
@@ -55,7 +61,7 @@ PERMISOS: dict[str, str] = {
 
 # Permisos de solo lectura (compartidos por todos los roles operativos).
 _VER = (
-    "dashboard.ver", "radian.ver", "banco.ver",
+    "dashboard.ver", "radian.ver", "banco.ver", "caja.ver",
     "importaciones.ver", "analitica.ver", "ml.ver", "empresas.ver",
     "terceros.ver",
 )
@@ -73,6 +79,8 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
         _VER + (
             "radian.procesar", "radian.editar", "radian.exportar", "radian.auto",
             "banco.procesar", "banco.exportar",
+            "caja.gestionar", "caja.procesar", "caja.exportar",
+            "caja.aprobar", "caja.cerrar",
             "importaciones.gestionar", "auditoria.ver",
             "terceros.gestionar",
         ),
@@ -82,13 +90,14 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
         _VER + (
             "radian.procesar", "radian.editar", "radian.auto",
             "banco.procesar",
+            "caja.gestionar", "caja.procesar", "caja.exportar",
             "importaciones.gestionar",
             "terceros.gestionar",
         ),
     ),
     "consulta": (
         "Visualización — solo lectura",
-        _VER,
+        _VER + ("caja.exportar",),
     ),
 }
 
