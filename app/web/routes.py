@@ -1718,7 +1718,17 @@ def terceros_importar():
         return redirect(url_for("web.terceros"))
 
     try:
+        from app.maestros import clasificar_maestro
         contenido = _maestro_terceros_bytes(emp)
+        # Si el archivo guardado en la casilla de Terceros no es un maestro de
+        # terceros (p. ej. quedó el Plan de Cuentas), no lo usamos como base:
+        # creamos uno nuevo con los RUT y avisamos para que lo revisen.
+        if contenido and clasificar_maestro(contenido) in ("cuentas", "comprobantes"):
+            flash("El archivo que estaba en la casilla de Terceros no era un "
+                  "maestro de terceros; se creó uno nuevo con los RUT importados. "
+                  "Revisa en Empresas → Maestros que cada archivo esté en su casilla.",
+                  "info")
+            contenido = None
         nuevos_bytes, resumen = actualizar_maestro_terceros(parseados, contenido)
         store.save_file(nuevos_bytes, emp.data_category, "Listado_de_Terceros.xlsx")
     except ValueError as exc:
