@@ -47,6 +47,42 @@ _PESOS_DV = (3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71)
 _AUTH_TOKEN_PATH = "/User/AuthToken"
 _TIMEOUT = 30
 
+# El portal de la DIAN está detrás de un WAF que rechaza (HTTP 403) las
+# peticiones que no parecen venir de un navegador real. Por eso el cliente se
+# presenta con un juego de cabeceras de navegador. (No fijamos Accept-Encoding:
+# se deja que `requests` anuncie solo lo que sabe descomprimir —gzip/deflate—,
+# evitando recibir brotli sin poder decodificarlo.)
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+_BROWSER_HEADERS = {
+    "User-Agent": _DEFAULT_USER_AGENT,
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
+    "Accept-Language": "es-CO,es;q=0.9,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "sec-ch-ua": (
+        '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+    ),
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+}
+
+
+def _headers_navegacion(sec_fetch_site: str) -> dict:
+    """Cabeceras `Sec-Fetch-*` propias de una navegación de página (GET de un
+    enlace/descarga). Se combinan por petición con las de la sesión."""
+    return {
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": sec_fetch_site,
+        "Sec-Fetch-User": "?1",
+    }
+
 
 class DianError(Exception):
     """Error genérico al interactuar con el portal de la DIAN."""
@@ -175,6 +211,8 @@ class DianClient:
         descarga_params: Optional[dict] = None,
         session: Optional[requests.Session] = None,
         timeout: int = _TIMEOUT,
+        user_agent: str = "",
+        extra_headers: Optional[dict] = None,
     ):
         self.portal_url = portal_url.rstrip("/")
         self.login_path = login_path
@@ -183,10 +221,14 @@ class DianClient:
         self.descarga_params = descarga_params or {}
         self.timeout = timeout
         self.session = session or requests.Session()
-        self.session.headers.setdefault(
-            "User-Agent",
-            "Mozilla/5.0 (compatible; contable-auto/1.0; +https://catalogo-vpfe.dian.gov.co)",
-        )
+        # Presentarse como un navegador real: el WAF de la DIAN devuelve 403 a
+        # los clientes que no lo parecen. user_agent / extra_headers permiten
+        # calibrar si el portal endurece el filtro, sin tocar el código.
+        self.session.headers.update(_BROWSER_HEADERS)
+        if user_agent.strip():
+            self.session.headers["User-Agent"] = user_agent.strip()
+        if extra_headers:
+            self.session.headers.update(extra_headers)
         self._autenticado = False
         # Nombre de archivo sugerido por la última descarga (Content-Disposition).
         self.ultimo_archivo: str = ""
@@ -263,13 +305,37 @@ class DianClient:
                 f"{auth_url[:80]}…"
             )
         try:
+            # Sec-Fetch-Site=none: navegación de nivel superior (como abrir el
+            # enlace desde el correo), no una petición incrustada.
             resp = self.session.get(
-                auth_url, timeout=self.timeout, allow_redirects=True
+                auth_url,
+                timeout=self.timeout,
+                allow_redirects=True,
+                headers=_headers_navegacion("none"),
             )
-            resp.raise_for_status()
         except requests.RequestException as exc:
             raise DianAuthError(
-                f"No se pudo activar la sesión con el enlace de la DIAN: {exc}"
+                f"No se pudo conectar con el portal de la DIAN: {exc}"
+            ) from exc
+
+        if resp.status_code == 403:
+            # El portal bloqueó la petición. Causas habituales, en orden:
+            raise DianAuthError(
+                "El portal de la DIAN rechazó el acceso (HTTP 403 Forbidden). "
+                "Las causas más frecuentes son: (1) el token ya expiró —vence a "
+                "los 60 minutos—, así que genera uno nuevo y pégalo de inmediato; "
+                "(2) el enlace ya se abrió antes (es de un solo uso); o (3) la "
+                "petición sale desde una IP fuera de Colombia o el portal la "
+                "tomó como automatizada (filtro antibot/WAF). Si el token es "
+                "reciente y de un solo uso, ejecuta la importación desde una red "
+                "en Colombia."
+            )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as exc:
+            raise DianAuthError(
+                "No se pudo activar la sesión con el enlace de la DIAN "
+                f"(HTTP {resp.status_code}): {exc}"
             ) from exc
 
         # El portal devuelve un error visible cuando el token expiró o es inválido.
@@ -319,7 +385,13 @@ class DianClient:
         }
         url = f"{self.portal_url}{self.descarga_path}"
         try:
-            resp = self.session.get(url, params=params, timeout=self.timeout)
+            # Same-origin: ya estamos dentro del portal tras activar la sesión.
+            resp = self.session.get(
+                url,
+                params=params,
+                timeout=self.timeout,
+                headers=_headers_navegacion("same-origin"),
+            )
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise DianDownloadError(

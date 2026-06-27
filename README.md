@@ -221,6 +221,24 @@ están publicadas por la DIAN** y pueden cambiar: por eso son **configurables**
 lugar de estar incrustadas, y deben confirmarse contra el portal real la primera
 vez. Si una corrida no devuelve un archivo, ajústalas ahí.
 
+**Error `403 Forbidden` al activar la sesión.** El portal está detrás de un WAF
+que rechaza las peticiones que no parecen venir de un navegador; el cliente ya se
+presenta con cabeceras de navegador (`User-Agent` de Chrome, `Accept-Language`,
+`sec-ch-ua`, `Sec-Fetch-*`) para evitarlo. Si aun así aparece un 403 al pegar el
+enlace, casi siempre es por una de estas razones, en orden:
+
+1. **El token expiró** (vence a los **60 minutos**): genera uno nuevo y pégalo de
+   inmediato.
+2. **El enlace ya se usó**: el `AuthToken` es de un solo uso; no lo abras en el
+   navegador antes de pegarlo.
+3. **IP fuera de Colombia**: si la app corre en un servidor en el exterior, la
+   DIAN puede bloquear el acceso. Ejecútala desde una red en Colombia (o un proxy
+   de salida en Colombia).
+
+Si el portal endurece el filtro, el `User-Agent` y cabeceras extra del cliente
+son ajustables sin tocar el código (parámetros `user_agent` / `extra_headers` de
+`DianClient`).
+
 ---
 
 ## Persistencia de datos
