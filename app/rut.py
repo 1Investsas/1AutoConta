@@ -111,7 +111,9 @@ def parsear_rut_words(palabras: list[dict], texto_completo: str = "") -> dict:
     # --- Casilla 5/6: NIT + dígito de verificación -------------------------
     # Los dígitos del NIT y el DV son palabras de un solo carácter en la franja
     # izquierda de la fila. El último dígito es el DV; el resto, el NIT.
-    nit_dv = _digitos(_palabra_en(palabras, _FILA_NIT, 78, 205))
+    # El borde izquierdo (x≈68) cubre cédulas de 10 dígitos, cuyo primer dígito
+    # arranca más a la izquierda que un NIT de 9.
+    nit_dv = _digitos(_palabra_en(palabras, _FILA_NIT, 68, 205))
     if len(nit_dv) < 2:
         raise RUTParseError(
             "No se reconoció el NIT en el documento. "
@@ -162,10 +164,13 @@ def parsear_rut_words(palabras: list[dict], texto_completo: str = "") -> dict:
         datos["segundo_apellido"] = _texto(_palabra_en(palabras, _FILA_NOMBRES, 155, 282))
         datos["primer_nombre"]    = _texto(_palabra_en(palabras, _FILA_NOMBRES, 282, 407))
         datos["otros_nombres"]    = _texto(_palabra_en(palabras, _FILA_NOMBRES, 407, 600))
+        # Nombre legible: nombres primero y luego apellidos
+        # (p. ej. "Ana Maria Henao Yepes"), no como en el formulario del RUT,
+        # que lista primero los apellidos.
         datos["nombre"] = " ".join(
             p for p in [
-                datos["primer_apellido"], datos["segundo_apellido"],
                 datos["primer_nombre"], datos["otros_nombres"],
+                datos["primer_apellido"], datos["segundo_apellido"],
             ] if p
         ).strip()
     else:
