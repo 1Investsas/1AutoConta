@@ -184,12 +184,28 @@ def parsear_rut_words(palabras: list[dict], texto_completo: str = "") -> dict:
         datos["nombre"] = datos["razon_social"]
 
     # --- Casillas 38-40: ubicación (país / departamento / ciudad) ----------
+    # Cada casilla trae el nombre y, a su derecha, el código (DIAN para el país;
+    # DANE para departamento y municipio). Capturamos ambos: el nombre es
+    # legible para la vista y los códigos alimentan el modelo de Siigo (que usa
+    # códigos, no nombres) para «Código país/departamento/ciudad».
     datos["pais"]        = _texto(_palabra_en(palabras, _FILA_UBICACION, 20, 165),
                                   descartar_codigos=True)
     datos["departamento"] = _texto(_palabra_en(palabras, _FILA_UBICACION, 195, 370),
                                    descartar_codigos=True)
     datos["ciudad"]      = _texto(_palabra_en(palabras, _FILA_UBICACION, 388, 560),
                                   descartar_codigos=True)
+    # Códigos (a la derecha del nombre de cada casilla).
+    datos["pais_codigo"]         = _digitos(_palabra_en(palabras, _FILA_UBICACION, 160, 198))
+    datos["departamento_codigo"] = _digitos(_palabra_en(palabras, _FILA_UBICACION, 365, 390))
+    municipio_codigo             = _digitos(_palabra_en(palabras, _FILA_UBICACION, 558, 600))
+    datos["municipio_codigo"]    = municipio_codigo
+    # Código DANE de ciudad = departamento (2) + municipio (3), p. ej. 05 + 001.
+    if datos["departamento_codigo"] and municipio_codigo:
+        datos["ciudad_codigo"] = (
+            datos["departamento_codigo"].zfill(2) + municipio_codigo.zfill(3)
+        )
+    else:
+        datos["ciudad_codigo"] = ""
 
     # --- Casilla 41: dirección principal -----------------------------------
     datos["direccion"] = _texto(_palabra_en(palabras, _FILA_DIRECCION, 20, 600))

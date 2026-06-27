@@ -12,6 +12,23 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+
+def _columna_identificacion(df_terceros: pd.DataFrame) -> Optional[str]:
+    """Ubica la columna de identificación del maestro (modelo Siigo o antigua).
+
+    Prefiere la columna canónica ``Identificación`` que añade el lector; si no
+    está, la resuelve por su encabezado (p. ej. ``Identificación (Obligatorio)``
+    del modelo de Siigo) usando los alias del esquema.
+    """
+    if "Identificación" in df_terceros.columns:
+        return "Identificación"
+    from app import terceros_schema as esquema
+    for col in df_terceros.columns:
+        if esquema.campo_de_encabezado(col) == "identificacion":
+            return col
+    return None
+
+
 # Clasificaciones donde el tercero es el RECEPTOR
 _TERCERO_ES_RECEPTOR = {
     "FACTURA_VENTA",
@@ -84,9 +101,9 @@ def cruzar_tercero(
     if not nit or df_terceros.empty:
         return None
 
-    col_id = "Identificación"
-    if col_id not in df_terceros.columns:
-        logger.error("El maestro de terceros no tiene la columna '%s'.", col_id)
+    col_id = _columna_identificacion(df_terceros)
+    if col_id is None:
+        logger.error("El maestro de terceros no tiene una columna de identificación.")
         return None
 
     coincidencias = df_terceros[df_terceros[col_id].astype(str) == nit]

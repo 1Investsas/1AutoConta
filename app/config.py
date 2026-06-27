@@ -178,8 +178,13 @@ CUENTAS_CONTRAPARTE: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Configuración de archivos maestros
 # ---------------------------------------------------------------------------
-# Las filas 1–6 son encabezados informativos (nombre empresa, NIT, etc.)
-# Los encabezados reales de columnas están en la fila 7 (índice 6 en pandas)
+# Aplica al plan de cuentas y a los comprobantes: las filas 1–6 son encabezados
+# informativos (nombre empresa, NIT, etc.) y los encabezados reales de columnas
+# están en la fila 7 (índice 6 en pandas).
+#
+# El maestro de TERCEROS usa el modelo de Siigo Nube (encabezados en la fila 1);
+# su estructura y la detección de la fila de encabezados viven en
+# ``app/terceros_schema.py``, no aquí.
 FILA_ENCABEZADOS_MAESTROS: int = 6   # header=6 en pandas (fila 7 de Excel)
 FILA_DATOS_MAESTROS: int = 7         # skiprows equivalente
 

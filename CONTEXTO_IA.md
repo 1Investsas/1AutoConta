@@ -137,10 +137,15 @@ contable-auto/
 - **Base gravable**: `Total − suma de impuestos`.
 - **Cuenta `[PENDIENTE]`**: línea cuya cuenta de gasto/costo/ingreso debe decidir el usuario.
   Aparece **en rojo** en el Excel. El motor de sugerencias intenta rellenarlas.
-- **Archivos maestros** (en `data/`, encabezados reales en la **fila 7** = `header=6`):
-  - `Listado_de_Terceros.xlsx`
-  - `Listado_de_Cuentas_Contables.xlsx` (se filtran solo cuentas *Transaccional* + *Activo=Sí*)
-  - `Tipos_de_comprobante_contable.xlsx`
+- **Archivos maestros** (en `data/`):
+  - `Listado_de_Terceros.xlsx` — sigue el **Modelo de importación de terceros de Siigo
+    Nube**: 29 columnas, encabezados en la **fila 1**, datos desde la fila 2 y **todas
+    las celdas en formato de texto (`@`)**. La estructura está centralizada en
+    `app/terceros_schema.py`. El lector detecta la fila de encabezados automáticamente
+    (también lee la planilla antigua, encabezados en la fila 7, por compatibilidad).
+  - `Listado_de_Cuentas_Contables.xlsx` (encabezados en la fila 7; se filtran solo
+    cuentas *Transaccional* + *Activo=Sí*)
+  - `Tipos_de_comprobante_contable.xlsx` (encabezados en la fila 7)
 
 ---
 
@@ -253,7 +258,9 @@ Todas las constantes y reglas viven aquí. Lee variables de `.env`. Lo más rele
   `AZURE_STORAGE_CONNECTION_STRING` / `AZURE_STORAGE_CONTAINER`.
 - Mapeos de negocio: `CLASIFICACIONES`, `MAPEO_COMPROBANTES`, `COLUMNAS_IMPUESTOS`,
   `CUENTAS_IMPUESTOS`, `CUENTAS_CONTRAPARTE`, `IMPUESTOS_RETENCION`, `COLUMNAS_RADIAN`.
-- Maestros: encabezados en la fila 7 (`FILA_ENCABEZADOS_MAESTROS = 6`).
+- Maestros de cuentas/comprobantes: encabezados en la fila 7 (`FILA_ENCABEZADOS_MAESTROS = 6`).
+  El maestro de **terceros** usa el modelo de Siigo Nube (encabezados en la fila 1); su
+  estructura vive en `app/terceros_schema.py`.
 - SIIGO: `SIIGO_USERNAME/ACCESS_KEY/API_URL`, `SIIGO_MAX_FILAS_POR_ARCHIVO=500`,
   `SIIGO_CODIGOS_COMPROBANTE`.
 - Banco: `BANCO_CUENTA_DEFAULT`, `BANCO_CUENTA_4X1000`, `BANCO_CODIGO_4X1000`,
@@ -574,8 +581,10 @@ documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módul
 - **Idioma:** todo el código, comentarios y docstrings están en **español**. Mantener ese estilo.
 - **NITs** siempre normalizados a solo dígitos (`_limpiar_nit`); el cruce de terceros es por
   coincidencia exacta.
-- **Maestros**: encabezados en la **fila 7** (`header=6`); el plan de cuentas se filtra a
-  Transaccional + Activo=Sí.
+- **Maestros**: el de **terceros** sigue el modelo de Siigo Nube (29 columnas, encabezados
+  en la **fila 1**, celdas en formato de texto; ver `app/terceros_schema.py`). Los de
+  cuentas/comprobantes mantienen los encabezados en la **fila 7** (`header=6`); el plan de
+  cuentas se filtra a Transaccional + Activo=Sí.
 - **`[PENDIENTE]`** es el marcador literal de cuenta sin asignar (constante en `preasiento.py`).
   Nunca se registra en el historial de sugerencias.
 - **Cuadre** con tolerancia `< 0.01`.
