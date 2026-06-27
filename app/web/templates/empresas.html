@@ -132,7 +132,7 @@
         </div>
       </div>
 
-      <form method="post" action="{{ url_for('web.empresas_maestros') }}" enctype="multipart/form-data">
+      <form id="form-maestros" method="post" action="{{ url_for('web.empresas_maestros') }}" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-field">
           <label>Empresa</label>
@@ -145,17 +145,33 @@
             {% endfor %}
           </select>
         </div>
+        {% set maestro_dl %}
+          <a class="maestro-dl" data-tipo="__TIPO__" href="#" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            Descargar archivo actual
+          </a>
+          <span class="maestro-none muted" hidden>Aún no se ha cargado este archivo.</span>
+        {% endset %}
         <div class="file-field">
           <label>Listado de Terceros (.xlsx)</label>
-          <input type="file" name="terceros" accept=".xlsx,.xls">
+          <div class="file-field-control">
+            <input type="file" name="terceros" accept=".xlsx,.xls">
+            {{ maestro_dl | replace('__TIPO__', 'terceros') | safe }}
+          </div>
         </div>
         <div class="file-field">
           <label>Listado de Cuentas Contables (.xlsx)</label>
-          <input type="file" name="cuentas" accept=".xlsx,.xls">
+          <div class="file-field-control">
+            <input type="file" name="cuentas" accept=".xlsx,.xls">
+            {{ maestro_dl | replace('__TIPO__', 'cuentas') | safe }}
+          </div>
         </div>
         <div class="file-field">
           <label>Tipos de comprobante contable (.xlsx)</label>
-          <input type="file" name="comprobantes" accept=".xlsx,.xls">
+          <div class="file-field-control">
+            <input type="file" name="comprobantes" accept=".xlsx,.xls">
+            {{ maestro_dl | replace('__TIPO__', 'comprobantes') | safe }}
+          </div>
         </div>
         <div class="card-actions-center">
           <button type="submit" class="btn btn-primary">
@@ -401,6 +417,40 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script>
+// --- Descarga de archivos maestros según la empresa seleccionada ---
+(function () {
+  var form = document.getElementById('form-maestros');
+  if (!form) return;
+  var sel = form.querySelector('select[name="empresa_id"]');
+  if (!sel) return;
+
+  var disponibles = {{ (maestros_disponibles if maestros_disponibles is defined else {}) | tojson }};
+  var base = "{{ url_for('web.empresas_maestros_descargar', empresa_id='__EMP__', tipo='__TIPO__') }}";
+  var links = form.querySelectorAll('.maestro-dl');
+
+  function refresh() {
+    var id = sel.value;
+    var tipos = disponibles[id] || [];
+    links.forEach(function (a) {
+      var tipo = a.getAttribute('data-tipo');
+      var none = a.parentNode.querySelector('.maestro-none');
+      var existe = tipos.indexOf(tipo) !== -1;
+      if (existe) {
+        a.href = base.replace('__EMP__', encodeURIComponent(id)).replace('__TIPO__', tipo);
+        a.hidden = false;
+      } else {
+        a.removeAttribute('href');
+        a.hidden = true;
+      }
+      if (none) none.hidden = existe;
+    });
+  }
+
+  sel.addEventListener('change', refresh);
+  refresh();
+}());
+</script>
 <script>
 // --- Filtro de búsqueda de empresas (cliente) ---
 (function () {
