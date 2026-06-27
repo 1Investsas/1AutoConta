@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Caja General — 1CONTIGO{% endblock %}
+{% block page_title %}💵 Caja General{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Control de movimientos de efectivo (billetes y monedas) por cuenta de caja.</p>{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Estructura el registro del efectivo: define cuentas de caja, abre períodos
+      mensuales con su saldo inicial y registra entradas y salidas. El saldo se
+      calcula solo. Puedes trabajar en la app o con la plantilla de Excel.
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Cuentas de caja</div>
+    <div class="card-value" style="color:var(--accent); font-size:1.8rem">{{ cuentas|length }}</div>
+    <div class="card-sub">caja menor, general, por sede o centro de costo</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Saldo automático</div>
+    <div class="card-value" style="font-size:1.3rem">Saldo = inicial + entradas − salidas</div>
+    <div class="card-sub">nunca se digita; se recalcula en cada cambio</div>
+  </div>
+</div>
+
+<!-- ── Cuentas de caja ── -->
+<div class="form-section">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+    <h2 style="margin:0">🗄️ Cuentas de caja</h2>
+    <button type="button" class="btn btn-primary" onclick="document.getElementById('nuevaCuenta').classList.toggle('hidden')">
+      <span>＋</span> Nueva cuenta de caja
+    </button>
+  </div>
+
+  <form method="POST" action="{{ url_for('web.caja_cuenta_crear') }}" id="nuevaCuenta" class="hidden" style="margin-top:18px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="name">Nombre de la caja *</label>
+        <input type="text" id="name" name="name" placeholder="Caja menor sede norte" required>
+      </div>
+      <div class="form-group">
+        <label for="responsible">Responsable</label>
+        <input type="text" id="responsible" name="responsible" placeholder="Nombre del encargado">
+      </div>
+      <div class="form-group">
+        <label for="currency">Moneda</label>
+        <input type="text" id="currency" name="currency" value="COP">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="description">Descripción</label>
+      <input type="text" id="description" name="description" placeholder="Uso de la caja, ubicación, etc.">
+    </div>
+    <div style="margin-top:14px">
+      <button type="submit" class="btn btn-primary">Crear cuenta de caja</button>
+    </div>
+  </form>
+
+  {% if cuentas %}
+  <section class="qa-grid" style="margin-top:22px">
+    {% for c in cuentas %}
+    <a class="qa-card" href="{{ url_for('web.caja_cuenta', account_id=c.id) }}">
+      <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><circle cx="16" cy="14" r="1.4"/></svg></span>
+      <div class="qa-body">
+        <div class="qa-title">{{ c.name }}{% if not c.active %} <span class="pill">inactiva</span>{% endif %}</div>
+        <div class="qa-desc">
+          {{ c.n_periodos }} período(s){% if c.responsible %} · {{ c.responsible }}{% endif %}
+          {%- if c.description %} · {{ c.description }}{% endif %}
+        </div>
+      </div>
+      <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+    </a>
+    {% endfor %}
+  </section>
+  {% else %}
+  <p class="muted" style="margin-top:22px">
+    Aún no hay cuentas de caja. Crea la primera para empezar a registrar movimientos de efectivo.
+  </p>
+  {% endif %}
+</div>
+
+<!-- ── Actividad reciente ── -->
+{% if recientes %}
+<div class="panel" style="margin-top:24px">
+  <div class="panel-head"><h2>Períodos recientes</h2></div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Cuenta</th><th>Período</th><th>Estado</th>
+          <th style="text-align:right">Saldo inicial</th>
+          <th style="text-align:right">Saldo final</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in recientes %}
+        <tr>
+          <td>{{ p.cuenta_nombre }}</td>
+          <td>{{ p.mes_nombre }} {{ p.year }}</td>
+          <td><span class="pill">{{ p.estado_label }}</span></td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(p.opening_balance|float) }}</td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(p.closing_balance|float) }}</td>
+          <td style="text-align:right"><a href="{{ url_for('web.caja_periodo', period_id=p.id) }}" class="link-more">Abrir</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<style>.hidden{display:none}</style>
+{% endblock %}

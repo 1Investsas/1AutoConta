@@ -86,6 +86,41 @@ Puedes subir varios RUT a la vez y descargar el maestro actualizado.
 
 ---
 
+## Módulo Caja General (web)
+
+En **Flujos directos › Caja general** (ruta `/caja`) se controlan los
+movimientos de **efectivo** (billetes y monedas). A diferencia de Bancos, aquí
+la aplicación **estructura el formato** que el usuario diligencia; no se importa
+un extracto externo.
+
+Flujo de trabajo:
+
+1. **Crear una cuenta de caja** (caja menor, general, por sede o centro de costo).
+2. **Abrir un período mensual** con su **saldo inicial** (se sugiere el saldo
+   final del mes anterior).
+3. **Registrar movimientos** de entrada/salida en la app o con la **plantilla de
+   Excel**. El **saldo acumulado se calcula solo** (saldo inicial + entradas −
+   salidas) en orden cronológico y nunca se digita.
+4. **Guardar avances** parciales y continuar después.
+5. Llevar el período por sus **estados**: Borrador → En revisión → Aprobado →
+   Cerrado → Reabierto. Un mes cerrado no se modifica sin reapertura.
+
+Características:
+
+- **Autocompletado NIT ↔ nombre** del tercero contra el maestro de terceros.
+- **Plantilla de Excel** descargable **vacía** o **prediligenciada**, con fórmula
+  de saldo protegida, validación de tipo y fecha, formato monetario y una hoja
+  auxiliar `Terceros` para autocompletar en Excel.
+- **Importación** de la plantilla diligenciada: valida fila por fila, recalcula
+  el saldo (no confía en el digitado en Excel) y no guarda nada si hay errores.
+- **Permisos por rol** (`caja.ver`, `caja.gestionar`, `caja.procesar`,
+  `caja.exportar`, `caja.aprobar`, `caja.cerrar`) y trazabilidad en auditoría.
+
+Cada empresa tiene sus propias cuentas, períodos y movimientos de caja
+(aislamiento por empresa, igual que el resto de módulos).
+
+---
+
 ## Estructura de carpetas
 
 ```
