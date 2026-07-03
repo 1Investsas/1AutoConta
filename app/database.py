@@ -274,6 +274,10 @@ class DbConnection:
         self._conn = conn
         self.is_sqlite = is_sqlite
         self._db_path = db_path
+        # True cuando la conexión se comparte durante toda la petición Flask
+        # (ver get_connection): close() pasa a ser un no-op y el cierre real
+        # ocurre en el teardown de la petición.
+        self._compartida = False
 
     def execute(self, sql, params=None):
         if self.is_sqlite:
@@ -296,12 +300,21 @@ class DbConnection:
             _programar_respaldo_db(self._db_path)
 
     def close(self):
+        if self._compartida:
+            return  # la cierra el teardown de la petición (_cerrar_conexiones_peticion)
+        self._conn.close()
+
+    def _cerrar_real(self):
         self._conn.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Fábrica de conexiones
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Clave en flask.g con las conexiones compartidas de la petición actual.
+_G_CONEXIONES = "_db_conexiones_peticion"
+
 
 def get_connection(db_path: str = DB_PATH):
     """
@@ -310,7 +323,56 @@ def get_connection(db_path: str = DB_PATH):
     Cuando USE_SQLITE es True (por defecto), usa SQLite en la ruta indicada.
     Cuando USE_SQLITE es False, usa Azure SQL Database vía pyodbc.
     El parámetro db_path se ignora en modo Azure SQL.
+
+    Dentro de una petición Flask la conexión se REUTILIZA (cacheada en
+    ``flask.g`` por ruta de BD): una sola página ejecuta muchas consultas
+    (autenticación, permisos, registro de empresas, datos de la vista) y abrir
+    una conexión nueva por consulta es costoso —handshake TLS+login con Azure
+    SQL, o reapertura del archivo SQLite sobre el SMB de /home en App Service—.
+    Para estas conexiones compartidas ``close()`` es un no-op; el cierre real
+    ocurre al terminar la petición (ver ``init_app``). Fuera de un contexto
+    Flask (CLI, tests, hilos de fondo) el comportamiento es el original:
+    conexión nueva por llamada.
     """
+    try:
+        from flask import g, has_app_context
+    except ImportError:
+        return _abrir_conexion(db_path)
+    if not has_app_context():
+        return _abrir_conexion(db_path)
+
+    clave = str(Path(db_path).resolve()) if USE_SQLITE else "_mssql"
+    conexiones = g.setdefault(_G_CONEXIONES, {})
+    conn = conexiones.get(clave)
+    if conn is None:
+        conn = _abrir_conexion(db_path)
+        conn._compartida = True
+        conexiones[clave] = conn
+    return conn
+
+
+def _cerrar_conexiones_peticion(exc=None) -> None:
+    """``teardown_appcontext``: cierra las conexiones compartidas de la petición."""
+    from flask import g
+    conexiones = g.pop(_G_CONEXIONES, None)
+    if not conexiones:
+        return
+    for conn in conexiones.values():
+        try:
+            # Cerrar sin commit descarta cualquier transacción sin confirmar,
+            # igual que el close() explícito del patrón original.
+            conn._cerrar_real()
+        except Exception:
+            logger.debug("Error cerrando conexión de la petición", exc_info=True)
+
+
+def init_app(app) -> None:
+    """Engancha el cierre de las conexiones por-petición en la app Flask."""
+    app.teardown_appcontext(_cerrar_conexiones_peticion)
+
+
+def _abrir_conexion(db_path: str = DB_PATH):
+    """Abre una conexión NUEVA, sin pasar por el caché por-petición."""
     if USE_SQLITE:
         import sqlite3
         # Si la BD vive en Blob y no existe localmente, restaurarla antes de

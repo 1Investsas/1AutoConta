@@ -69,6 +69,7 @@ def _resolver_secret_key() -> str:
 
 def create_app() -> Flask:
     """Crea y configura la aplicación Flask."""
+    from app import database
     from app.config import DB_PATH
     from app.database import inicializar_db
 
@@ -80,6 +81,14 @@ def create_app() -> Flask:
 
     # Protección CSRF para todos los formularios POST
     csrf.init_app(app)
+
+    # Cierre de las conexiones de BD compartidas por-petición (ver database.py)
+    database.init_app(app)
+
+    # Caché agresivo de estáticos (CSS, logos): las URLs llevan un parámetro de
+    # versión (?v=<mtime>), así que pueden cachearse por mucho tiempo sin riesgo
+    # de servir versiones viejas tras un despliegue.
+    _configurar_cache_estaticos(app)
 
     # Crear carpeta de uploads si no existe
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -102,6 +111,49 @@ def create_app() -> Flask:
     _registrar_manejadores_error(app)
 
     return app
+
+
+def _configurar_cache_estaticos(app: Flask) -> None:
+    """Permite al navegador cachear los archivos estáticos de forma segura.
+
+    Sin esto el navegador revalida (o re-descarga) el CSS y los logos en CADA
+    página, lo que hace sentir lenta toda la app. La estrategia es la clásica de
+    "cache busting": cada URL de estático lleva ``?v=<mtime del archivo>``, de
+    modo que puede cachearse por 30 días; cuando un despliegue cambia el
+    archivo, cambia la URL y el navegador descarga la versión nueva.
+    """
+    static_dir = Path(app.static_folder)
+    versiones: dict[str, int] = {}  # caché de mtimes (evita stat() repetidos)
+
+    @app.url_defaults
+    def _versionar_estaticos(endpoint, values):
+        if endpoint != "static" or "v" in values:
+            return
+        filename = values.get("filename")
+        if not filename:
+            return
+        v = versiones.get(filename)
+        if v is None:
+            try:
+                v = int((static_dir / filename).stat().st_mtime)
+            except OSError:
+                v = 0
+            versiones[filename] = v
+        if v:
+            values["v"] = v
+
+    @app.after_request
+    def _cache_control_estaticos(resp):
+        from flask import request
+        if request.endpoint == "static" and resp.status_code in (200, 304):
+            # Flask marca los estáticos con "no-cache" cuando no hay
+            # SEND_FILE_MAX_AGE_DEFAULT; hay que quitarlo o el navegador
+            # revalidaría en cada página a pesar del max-age.
+            resp.cache_control.no_cache = None
+            resp.cache_control.public = True
+            resp.cache_control.max_age = 60 * 60 * 24 * 30  # 30 días
+            resp.cache_control.immutable = True
+        return resp
 
 
 def _iniciar_scheduler_radian() -> None:

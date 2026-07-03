@@ -125,16 +125,23 @@ az webapp config appsettings set \
         NOMBRE_EMPRESA="1INVEST SAS" \
         FLASK_SECRET_KEY="$(openssl rand -hex 32)" \
         LOG_LEVEL="INFO" \
-        SCM_DO_BUILD_DURING_DEPLOYMENT="true"
+        SCM_DO_BUILD_DURING_DEPLOYMENT="false"
+# Nota: las dependencias viajan empaquetadas en ./vendor desde GitHub Actions
+# (ver .github/workflows), así que la build de Oryx en el servidor es
+# redundante y solo alarga cada despliegue.
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. CONFIGURAR STARTUP COMMAND
 # ═══════════════════════════════════════════════════════════════════════════
 echo "🔧 Configurando comando de inicio..."
+# --always-on true: sin esto App Service APAGA el contenedor tras ~20 min sin
+# tráfico y la siguiente visita paga un arranque en frío de 30-60 s (gunicorn +
+# import de pandas desde el SMB de wwwroot). Disponible desde el plan B1.
 az webapp config set \
     --name $APP_NAME \
     --resource-group $RESOURCE_GROUP \
-    --startup-file "startup.sh"
+    --startup-file "startup.sh" \
+    --always-on true
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 7. RESUMEN

@@ -11,7 +11,7 @@ las versiones que usa la WebApp:
 
 Uso típico
 ----------
-1. Sube tu logo en alta a:  app/web/static/img/logo-1contigo-source.png
+1. Sube tu logo en alta a:  assets/branding/logo-1contigo-source.png
 2. Ejecuta:                 python scripts/optimizar_logo.py
 3. Listo: el sidebar usará automáticamente el logo optimizado.
 
@@ -21,8 +21,8 @@ Opciones
                                      [--umbral 30] [--no-favicon]
 
 `ORIGEN` puede ser cualquier ruta (.png/.jpg/.webp). Si se omite, se busca en
-app/web/static/img/ en este orden: logo-1contigo-source, logo-1contigo-original,
-logo-1contigo.
+assets/branding/ y luego en app/web/static/img/, en este orden:
+logo-1contigo-source, logo-1contigo-original, logo-1contigo.
 
 Requisito (solo para esta herramienta, no para la app): pip install pillow
 """
@@ -40,7 +40,11 @@ except ImportError:
     sys.exit(1)
 
 # Carpeta de assets: scripts/optimizar_logo.py → raíz → app/web/static/img
-IMG_DIR = Path(__file__).resolve().parent.parent / "app" / "web" / "static" / "img"
+_RAIZ = Path(__file__).resolve().parent.parent
+IMG_DIR = _RAIZ / "app" / "web" / "static" / "img"
+# El logo original en alta vive FUERA de static/ para que no se sirva al
+# navegador ni engorde el paquete de despliegue (pesa varios MB).
+SOURCE_DIR = _RAIZ / "assets" / "branding"
 SALIDA_DEFAULT = IMG_DIR / "logo-1contigo.png"
 FAVICON_DEFAULT = IMG_DIR / "favicon.png"
 
@@ -49,12 +53,13 @@ CANDIDATOS = ("logo-1contigo-source", "logo-1contigo-original", "logo-1contigo")
 
 
 def _buscar_origen() -> Path | None:
-    """Busca un logo de origen en la carpeta de assets."""
-    for base in CANDIDATOS:
-        for ext in EXTS:
-            p = IMG_DIR / f"{base}{ext}"
-            if p.exists():
-                return p
+    """Busca un logo de origen en assets/branding/ y luego en static/img/."""
+    for carpeta in (SOURCE_DIR, IMG_DIR):
+        for base in CANDIDATOS:
+            for ext in EXTS:
+                p = carpeta / f"{base}{ext}"
+                if p.exists():
+                    return p
     return None
 
 

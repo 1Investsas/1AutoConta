@@ -9,7 +9,13 @@ La WebApp usa estos archivos (servidos desde `static/img/`):
 | `logo-1contigo.png` | Logo del **sidebar** (alto 46 px) | Manual u optimizado por script |
 | `logo-1contigo-full.png` | **Lockup completo** (login / pantalla de carga) | Script, modo `--solo-isotipo` |
 | `favicon.png` | Ícono de la pestaña del navegador | Optimizado por script |
-| `logo-1contigo-source.png` | Logo **original en alta** (no se usa en la web) | Lo subes tú |
+
+> ⚠️ **Mantén estos PNG pequeños** (el del sidebar ~35 KB, alto ≤140 px): se
+> descargan en **cada página**. Un logo de 1–2 MB aquí hace que toda la app se
+> sienta lenta en el navegador.
+
+El logo **original en alta** vive en `assets/branding/logo-1contigo-source.png`
+(fuera de `static/` para que no se sirva al navegador ni engorde el despliegue).
 
 ### Opción A — Rápida (sin script)
 Sube tu logo con **exactamente** este nombre:
@@ -27,7 +33,7 @@ una versión nítida + el favicon:
 
 ```bash
 # 1) Sube tu logo en alta resolución como:
-#    app/web/static/img/logo-1contigo-source.png   (puede tener fondo blanco)
+#    assets/branding/logo-1contigo-source.png   (puede tener fondo blanco)
 
 # 2) Instala Pillow (solo para esta herramienta, no para la app):
 pip install pillow
