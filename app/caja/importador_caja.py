@@ -70,6 +70,12 @@ def _texto(valor) -> str:
     return "" if valor is None else str(valor).strip()
 
 
+def _contrapartida_limpia(valor) -> str:
+    """Ignora el marcador '(dividida)' que la plantilla escribe para subdivisiones."""
+    txt = _texto(valor)
+    return "" if txt.lower() == "(dividida)" else txt
+
+
 def _parse_mes(valor) -> Optional[int]:
     """Lee el mes desde el encabezado (acepta '6', '06 — Junio', 'Junio')."""
     txt = _texto(valor)
@@ -140,7 +146,7 @@ def importar_plantilla(path: str | Path) -> ResultadoImportacion:
             "third_party_nit": _celda(ws, fila, COL_NIT),
             "third_party_name": _celda(ws, fila, COL_NOMBRE),
             "cost_center": _celda(ws, fila, COL_CENTRO),
-            "contrapartida": _celda(ws, fila, COL_CONTRAPARTIDA),
+            "contrapartida": _contrapartida_limpia(_celda(ws, fila, COL_CONTRAPARTIDA)),
             "inflow_amount": _celda(ws, fila, COL_ENTRADA),
             "outflow_amount": _celda(ws, fila, COL_SALIDA),
             "observations": _celda(ws, fila, COL_OBSERVACIONES),

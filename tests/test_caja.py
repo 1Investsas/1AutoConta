@@ -288,6 +288,42 @@ def test_mapeo_siigo_entrada_y_salida():
     assert filas[2].tipo_comprobante == 112
 
 
+def test_partes_y_validacion_contrapartida():
+    m = mc.desde_dict({"movement_date": "2026-06-02", "concept": "Compra", "outflow_amount": "100000",
+                       "contrapartidas": [
+                           {"cuenta": "51959501", "monto": "60000", "concepto": "papeleria"},
+                           {"cuenta": "52959501", "monto": "40000"}]})
+    partes = mc.partes_contrapartida(m)
+    assert len(partes) == 2 and partes[0]["monto"] == Decimal("60000")
+    assert mc.validar_contrapartidas(m) == []
+    # Sin subdivisión → una sola parte por el valor total.
+    m2 = mc.desde_dict({"concept": "x", "outflow_amount": "5000", "contrapartida": "51959501"})
+    assert mc.partes_contrapartida(m2) == [
+        {"cuenta": "51959501", "monto": Decimal("5000"), "nit_tercero": "", "concepto": ""}]
+
+
+def test_validacion_contrapartida_suma_incorrecta():
+    m = mc.desde_dict({"concept": "x", "outflow_amount": "100000",
+                       "contrapartidas": [{"cuenta": "51959501", "monto": "60000"}]})
+    assert mc.validar_contrapartidas(m)  # no cuadra 60000 != 100000
+
+
+def test_mapeo_siigo_contrapartida_subdividida():
+    from app.caja.mapeador_caja import mapear_caja_a_siigo
+    m = mc.desde_dict({"sequence": 1, "movement_date": "2026-06-02", "concept": "Compra",
+                       "outflow_amount": "100000",
+                       "contrapartidas": [
+                           {"cuenta": "51959501", "monto": "60000", "concepto": "papeleria"},
+                           {"cuenta": "52959501", "monto": "40000"}]})
+    filas = mapear_caja_a_siigo([m], "11050501")
+    # 1 línea de caja + 2 de contrapartida.
+    assert len(filas) == 3
+    assert filas[0].codigo_cuenta == "11050501" and filas[0].credito == 100000.0
+    assert filas[1].codigo_cuenta == "51959501" and filas[1].debito == 60000.0
+    assert filas[1].descripcion == "papeleria"   # concepto propio de la parte
+    assert filas[2].codigo_cuenta == "52959501" and filas[2].debito == 40000.0
+
+
 def test_mapeo_siigo_sin_contrapartida_es_pendiente():
     from app.caja.mapeador_caja import mapear_caja_a_siigo
     movs = [mc.desde_dict({"sequence": 1, "movement_date": "2026-06-02",
@@ -439,6 +475,34 @@ def test_generar_siigo(client):
     r = client.post(f"/caja/periodo/{per_id}/exportar-siigo")
     assert r.status_code == 200
     assert r.data[:2] == b"PK"  # xlsx (un solo archivo, no zip)
+
+
+def test_guardar_y_generar_con_subdivision(client):
+    _, per_id = _crear_cuenta_y_periodo(client)
+    movs = [{"movement_date": "2026-06-02", "comprobante": "112", "concept": "Compra",
+             "inflow_amount": 0, "outflow_amount": 100000, "contrapartida": "",
+             "contrapartidas": [
+                 {"cuenta": "51959501", "monto": 60000, "nit_tercero": "", "concepto": "papeleria"},
+                 {"cuenta": "52959501", "monto": 40000, "nit_tercero": "", "concepto": ""}]}]
+    client.post(f"/caja/periodo/{per_id}/guardar",
+                data={"movimientos_json": json.dumps(movs), "opening_balance": "0"})
+    row = db.listar_cash_movements(per_id, config.DB_PATH)[0]
+    assert row["contrapartidas_json"]
+    assert "51959501" in row["contrapartidas_json"] and "52959501" in row["contrapartidas_json"]
+    # SIIGO se genera (la subdivisión cuadra).
+    r = client.post(f"/caja/periodo/{per_id}/exportar-siigo")
+    assert r.status_code == 200 and r.data[:2] == b"PK"
+
+
+def test_generar_siigo_bloqueado_si_subdivision_no_cuadra(client):
+    _, per_id = _crear_cuenta_y_periodo(client)
+    movs = [{"movement_date": "2026-06-02", "comprobante": "112", "concept": "x",
+             "inflow_amount": 0, "outflow_amount": 100000, "contrapartida": "",
+             "contrapartidas": [{"cuenta": "51959501", "monto": 60000, "nit_tercero": "", "concepto": ""}]}]
+    client.post(f"/caja/periodo/{per_id}/guardar",
+                data={"movimientos_json": json.dumps(movs), "opening_balance": "0"})
+    r = client.post(f"/caja/periodo/{per_id}/exportar-siigo", follow_redirects=True)
+    assert "debe igualar" in r.get_data(as_text=True)
 
 
 def test_generar_siigo_sin_movimientos_avisa(client):

@@ -156,6 +156,34 @@
 <datalist id="dlTerceros"></datalist>
 <datalist id="dlCuentasCaja"></datalist>
 
+{% if period.editable %}
+<!-- Modal: dividir contrapartida en varias cuentas -->
+<div id="modalSub" class="cp-modal" style="display:none">
+  <div class="cp-modal-box">
+    <h3 style="margin:0 0 6px">✂ Dividir contrapartida</h3>
+    <p class="muted small" style="margin:0 0 12px">
+      El movimiento permanece por un solo valor (<strong id="subTotalLbl"></strong>).
+      Reparte la <strong>contrapartida</strong> entre varias cuentas — pueden ser
+      cuentas y terceros distintos. La suma de las partes debe igualar el valor del movimiento.
+    </p>
+    <div class="sub-head">
+      <span>Cuenta</span><span>Monto</span><span>NIT (opcional)</span><span>Concepto (opcional)</span><span></span>
+    </div>
+    <div id="subPartes"></div>
+    <button type="button" class="btn btn-secondary btn-sm" id="subAdd" style="margin-top:8px">+ Agregar cuenta</button>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px solid var(--border); gap:12px; flex-wrap:wrap">
+      <div class="small">Suma <strong id="subSuma">0</strong> de <span id="subTotal">0</span>
+        <span id="subRest" style="margin-left:8px; font-weight:600"></span></div>
+      <div style="display:flex; gap:8px">
+        <button type="button" class="btn btn-secondary btn-sm" id="subQuitar" title="Volver a una sola cuenta">↺ Quitar división</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="subCancel">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-sm" id="subAplicar">✓ Aplicar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block extra_scripts %}
@@ -167,6 +195,20 @@
   .num-input { text-align:right; font-family:monospace; }
   .btn-del { background:transparent; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; line-height:1; }
   .hidden{ display:none; }
+  /* Contrapartida: input + botón dividir, o chip cuando está subdividida */
+  .cp-cell .cp-single { display:flex; align-items:center; gap:4px; }
+  .cp-split { background:transparent; border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:2px 5px; color:var(--text-dim); line-height:1; }
+  .cp-split:hover { color:var(--accent); border-color:var(--accent); }
+  .cp-chip { display:inline-flex; align-items:center; gap:4px; cursor:pointer; padding:4px 8px; border-radius:14px;
+             background:rgba(155,89,182,.16); color:#9b59b6; font-size:0.76rem; font-weight:600; white-space:nowrap; }
+  /* Modal de subdivisión */
+  .cp-modal { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center; display:flex; }
+  .cp-modal-box { background:var(--surface, #fff); color:inherit; border-radius:12px; padding:22px; width:760px; max-width:96vw;
+                  border:1px solid var(--border); max-height:90vh; overflow-y:auto; }
+  .sub-head, .sub-row { display:grid; grid-template-columns:1.1fr 0.9fr 1fr 1.3fr 32px; gap:8px; align-items:center; }
+  .sub-head { font-size:0.74rem; color:var(--text-dim); margin-bottom:6px; padding:0 2px; }
+  .sub-row { margin-bottom:6px; }
+  .sub-row input { width:100%; box-sizing:border-box; padding:5px 6px; font-size:0.82rem; }
 </style>
 <script>
 (function () {
@@ -209,7 +251,13 @@
       <td><input type="text" class="f-nit" list="dlTerceros" value="${escAttr(m.third_party_nit)}" ${ro}></td>
       <td><input type="text" class="f-nombre" value="${escAttr(m.third_party_name)}" ${ro}></td>
       <td><input type="text" class="f-centro" value="${escAttr(m.cost_center)}" ${ro}></td>
-      <td><input type="text" class="f-contrapartida" list="dlCuentasCaja" value="${escAttr(m.contrapartida)}" ${ro} style="font-family:monospace"></td>
+      <td class="cp-cell">
+        <div class="cp-single">
+          <input type="text" class="f-contrapartida" list="dlCuentasCaja" value="${escAttr(m.contrapartida)}" ${ro} style="font-family:monospace">
+          ${EDITABLE ? '<button type="button" class="cp-split" title="Dividir la contrapartida en varias cuentas">✂</button>' : ''}
+        </div>
+        <div class="cp-chip" style="display:none"></div>
+      </td>
       <td><input type="number" step="any" min="0" class="f-entrada num-input" value="${m.inflow_amount && num(m.inflow_amount) ? num(m.inflow_amount) : ''}" ${ro}></td>
       <td><input type="number" step="any" min="0" class="f-salida num-input" value="${m.outflow_amount && num(m.outflow_amount) ? num(m.outflow_amount) : ''}" ${ro}></td>
       <td class="saldo-cell">0</td>
@@ -218,7 +266,18 @@
     `;
     body.appendChild(tr);
 
+    // Estado de la subdivisión de la contrapartida (partes) por fila.
+    tr._contrapartidas = Array.isArray(m.contrapartidas) ? m.contrapartidas.map(p => ({
+      cuenta: p.cuenta || '', monto: num(p.monto), nit_tercero: p.nit_tercero || '', concepto: p.concepto || '',
+    })) : [];
+    renderContrapartida(tr);
+
     if (EDITABLE) {
+      const splitBtn = tr.querySelector('.cp-split');
+      if (splitBtn) splitBtn.addEventListener('click', () => abrirModalSub(tr));
+      const chip = tr.querySelector('.cp-chip');
+      if (chip) chip.addEventListener('click', () => abrirModalSub(tr));
+
       tr.querySelectorAll('input, select').forEach(el => {
         el.addEventListener('input', recalc);
         el.addEventListener('change', recalc);
@@ -254,6 +313,121 @@
     const sel = tr.querySelector('.f-comprobante');
     if (sel.dataset.auto === '0') return;  // fijado a mano
     sel.value = esEntrada ? COMP_INGRESO : COMP_EGRESO;
+  }
+
+  // ── Subdivisión de la contrapartida ──────────────────────────────────────
+  function partesFila(tr) {
+    return (tr._contrapartidas || []).filter(p => p.cuenta || num(p.monto) > 0);
+  }
+
+  function renderContrapartida(tr) {
+    const partes = partesFila(tr);
+    const single = tr.querySelector('.cp-single');
+    const chip = tr.querySelector('.cp-chip');
+    const input = tr.querySelector('.f-contrapartida');
+    if (partes.length) {
+      const sum = partes.reduce((a, p) => a + num(p.monto), 0);
+      single.style.display = 'none';
+      chip.style.display = '';
+      chip.innerHTML = `✂ ${partes.length} cuentas <span style="opacity:.7">(${fmt(sum)})</span>`;
+      if (input) input.value = '';
+    } else {
+      single.style.display = '';
+      chip.style.display = 'none';
+    }
+  }
+
+  const modal = document.getElementById('modalSub');
+  const subPartes = document.getElementById('subPartes');
+  let subTR = null;
+
+  function movTotal(tr) {
+    const ent = num(tr.querySelector('.f-entrada').value);
+    const sal = num(tr.querySelector('.f-salida').value);
+    return ent > 0 ? ent : sal;
+  }
+
+  function abrirModalSub(tr) {
+    if (!EDITABLE) return;
+    subTR = tr;
+    const total = movTotal(tr);
+    document.getElementById('subTotalLbl').textContent = fmt(total);
+    document.getElementById('subTotal').textContent = fmt(total);
+    let partes = partesFila(tr).slice();
+    if (!partes.length) {
+      const cp = tr.querySelector('.f-contrapartida');
+      partes = [{cuenta: cp ? cp.value.trim() : '', monto: total,
+                 nit_tercero: tr.querySelector('.f-nit').value.trim(), concepto: ''}];
+    }
+    subPartes.innerHTML = '';
+    partes.forEach(addParteRow);
+    actualizarSuma();
+    modal.style.display = 'flex';
+  }
+
+  function addParteRow(p) {
+    p = p || {cuenta: '', monto: '', nit_tercero: '', concepto: ''};
+    const row = document.createElement('div');
+    row.className = 'sub-row';
+    row.innerHTML = `
+      <input type="text" class="s-cuenta" list="dlCuentasCaja" placeholder="Cuenta" value="${escAttr(p.cuenta)}" style="font-family:monospace">
+      <input type="number" step="any" min="0" class="s-monto num-input" placeholder="Monto" value="${p.monto && num(p.monto) ? num(p.monto) : ''}">
+      <input type="text" class="s-nit" list="dlTerceros" placeholder="NIT (opcional)" value="${escAttr(p.nit_tercero)}">
+      <input type="text" class="s-concepto" placeholder="Concepto (opcional)" value="${escAttr(p.concepto)}">
+      <button type="button" class="btn-del s-del" title="Quitar cuenta">✕</button>`;
+    subPartes.appendChild(row);
+    row.querySelector('.s-monto').addEventListener('input', actualizarSuma);
+    row.querySelector('.s-cuenta').addEventListener('input', () => buscarCuentas(row.querySelector('.s-cuenta').value));
+    row.querySelector('.s-nit').addEventListener('input', () => buscarTerceros(row.querySelector('.s-nit').value));
+    row.querySelector('.s-del').addEventListener('click', () => { row.remove(); actualizarSuma(); });
+  }
+
+  function leerPartesModal() {
+    return Array.from(subPartes.querySelectorAll('.sub-row')).map(r => ({
+      cuenta: r.querySelector('.s-cuenta').value.trim(),
+      monto: num(r.querySelector('.s-monto').value),
+      nit_tercero: r.querySelector('.s-nit').value.trim(),
+      concepto: r.querySelector('.s-concepto').value.trim(),
+    })).filter(p => p.cuenta || p.monto > 0);
+  }
+
+  function actualizarSuma() {
+    const partes = leerPartesModal();
+    const suma = partes.reduce((a, p) => a + num(p.monto), 0);
+    const total = subTR ? movTotal(subTR) : 0;
+    document.getElementById('subSuma').textContent = fmt(suma);
+    const rest = total - suma;
+    const restEl = document.getElementById('subRest');
+    if (Math.abs(rest) < 0.01) { restEl.textContent = '✓ cuadra'; restEl.style.color = 'var(--success)'; }
+    else { restEl.textContent = (rest > 0 ? 'Faltan ' : 'Sobran ') + fmt(Math.abs(rest)); restEl.style.color = 'var(--danger)'; }
+  }
+
+  function cerrarModalSub() { modal.style.display = 'none'; subTR = null; }
+
+  if (EDITABLE && modal) {
+    document.getElementById('subAdd').addEventListener('click', () => addParteRow());
+    document.getElementById('subCancel').addEventListener('click', cerrarModalSub);
+    document.getElementById('subQuitar').addEventListener('click', () => {
+      if (subTR) { subTR._contrapartidas = []; renderContrapartida(subTR); recalc(); }
+      cerrarModalSub();
+    });
+    document.getElementById('subAplicar').addEventListener('click', () => {
+      if (subTR) {
+        const partes = leerPartesModal();
+        if (partes.length >= 2) {
+          subTR._contrapartidas = partes;
+        } else {
+          // Una sola cuenta: no es subdivisión; vuelve a la contrapartida única.
+          subTR._contrapartidas = [];
+          const cp = subTR.querySelector('.f-contrapartida');
+          if (cp && partes.length === 1) cp.value = partes[0].cuenta;
+        }
+        renderContrapartida(subTR);
+        recalc();
+      }
+      cerrarModalSub();
+    });
+    modal.addEventListener('click', e => { if (e.target === modal) cerrarModalSub(); });
   }
 
   let buscarTimer = null;
@@ -337,18 +511,25 @@
 
     document.getElementById('formGuardar').addEventListener('submit', (e) => {
       const filas = Array.from(body.querySelectorAll('tr'));
-      const movs = filas.map(tr => ({
-        movement_date: tr.querySelector('.f-fecha').value,
-        comprobante: tr.querySelector('.f-comprobante').value,
-        concept: tr.querySelector('.f-concepto').value,
-        third_party_nit: tr.querySelector('.f-nit').value,
-        third_party_name: tr.querySelector('.f-nombre').value,
-        cost_center: tr.querySelector('.f-centro').value,
-        contrapartida: tr.querySelector('.f-contrapartida').value,
-        inflow_amount: num(tr.querySelector('.f-entrada').value),
-        outflow_amount: num(tr.querySelector('.f-salida').value),
-        observations: tr.querySelector('.f-obs').value,
-      }));
+      const movs = filas.map(tr => {
+        const cps = partesFila(tr);
+        return {
+          movement_date: tr.querySelector('.f-fecha').value,
+          comprobante: tr.querySelector('.f-comprobante').value,
+          concept: tr.querySelector('.f-concepto').value,
+          third_party_nit: tr.querySelector('.f-nit').value,
+          third_party_name: tr.querySelector('.f-nombre').value,
+          cost_center: tr.querySelector('.f-centro').value,
+          contrapartida: cps.length ? '' : tr.querySelector('.f-contrapartida').value,
+          contrapartidas: cps.map(p => ({
+            cuenta: p.cuenta, monto: num(p.monto),
+            nit_tercero: p.nit_tercero || '', concepto: p.concepto || '',
+          })),
+          inflow_amount: num(tr.querySelector('.f-entrada').value),
+          outflow_amount: num(tr.querySelector('.f-salida').value),
+          observations: tr.querySelector('.f-obs').value,
+        };
+      });
       document.getElementById('movimientosJson').value = JSON.stringify(movs);
       document.getElementById('openingBalanceHidden').value = openingInput ? openingInput.value : '{{ period.opening_balance }}';
     });
