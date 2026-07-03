@@ -172,7 +172,11 @@ class MovimientoCaja:
     third_party_name: str = ""
     cost_center: str = ""
     category: str = ""
-    contrapartida: str = ""             # cuenta contable de la contrapartida
+    contrapartida: str = ""             # cuenta contable de la contrapartida (única)
+    # Subdivisión opcional de la contrapartida en varias cuentas (partes que
+    # deben sumar el valor del movimiento). Cada parte: {cuenta, monto,
+    # nit_tercero, concepto}. Si está vacía se usa la contrapartida única.
+    contrapartidas: list = field(default_factory=list)
     comprobante: str = ""               # tipo de comprobante SIIGO ("" = automático)
     inflow_amount: Decimal = field(default_factory=lambda: Decimal("0"))
     outflow_amount: Decimal = field(default_factory=lambda: Decimal("0"))
@@ -192,6 +196,66 @@ class MovimientoCaja:
             except (TypeError, ValueError):
                 pass
         return comprobante_por_defecto(self.es_entrada)
+
+    @property
+    def valor_absoluto(self) -> Decimal:
+        """Valor del movimiento (entrada o salida), siempre positivo."""
+        return abs(self.inflow_amount) if self.es_entrada else abs(self.outflow_amount)
+
+
+def _partes_limpias(crudas) -> list[dict]:
+    """Normaliza y filtra las partes de una contrapartida subdividida.
+
+    Descarta las partes sin cuenta ni monto; convierte el monto a Decimal.
+    """
+    partes: list[dict] = []
+    for c in (crudas or []):
+        cuenta = str(c.get("cuenta", "")).strip()
+        monto = a_decimal(c.get("monto"))
+        if not cuenta and monto <= 0:
+            continue
+        partes.append({
+            "cuenta": cuenta,
+            "monto": monto,
+            "nit_tercero": str(c.get("nit_tercero", "")).strip(),
+            "concepto": str(c.get("concepto", "")).strip(),
+        })
+    return partes
+
+
+def partes_contrapartida(m: "MovimientoCaja") -> list[dict]:
+    """Partes de la contrapartida de un movimiento (montos como Decimal).
+
+    Si el movimiento tiene subdivisión válida, la devuelve; si no, retorna una
+    única parte con la contrapartida única por el valor total del movimiento.
+    """
+    partes = _partes_limpias(m.contrapartidas)
+    if partes:
+        return partes
+    return [{
+        "cuenta": (m.contrapartida or "").strip(),
+        "monto": m.valor_absoluto,
+        "nit_tercero": "",
+        "concepto": "",
+    }]
+
+
+def validar_contrapartidas(m: "MovimientoCaja") -> list[str]:
+    """Valida que la subdivisión de la contrapartida sume el valor del movimiento.
+
+    Retorna [] si el movimiento no está subdividido o si la suma cuadra.
+    """
+    partes = _partes_limpias(m.contrapartidas)
+    if not partes:
+        return []
+    suma = sum((p["monto"] for p in partes), Decimal("0"))
+    total = m.valor_absoluto
+    if abs(suma - total) >= Decimal("0.01"):
+        return [
+            f"La suma de la contrapartida dividida ({suma:,.2f}) debe igualar "
+            f"el valor del movimiento ({total:,.2f})."
+        ]
+    return []
 
     @property
     def monto(self) -> Decimal:
@@ -278,6 +342,15 @@ def a_dict(m: MovimientoCaja) -> dict:
         "cost_center": m.cost_center,
         "category": m.category,
         "contrapartida": m.contrapartida,
+        "contrapartidas": [
+            {
+                "cuenta": p["cuenta"],
+                "monto": str(p["monto"]),
+                "nit_tercero": p.get("nit_tercero", ""),
+                "concepto": p.get("concepto", ""),
+            }
+            for p in _partes_limpias(m.contrapartidas)
+        ],
         "comprobante": m.comprobante,
         "inflow_amount": str(m.inflow_amount),
         "outflow_amount": str(m.outflow_amount),
@@ -315,6 +388,7 @@ def desde_dict(d: dict) -> MovimientoCaja:
         cost_center=str(d.get("cost_center", "")).strip(),
         category=str(d.get("category", "")).strip(),
         contrapartida=str(d.get("contrapartida", "")).strip(),
+        contrapartidas=_partes_limpias(d.get("contrapartidas")),
         comprobante=comprobante_desde_texto(d.get("comprobante", "")),
         inflow_amount=inflow,
         outflow_amount=outflow,

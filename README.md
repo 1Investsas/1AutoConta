@@ -110,7 +110,9 @@ Flujo de trabajo:
 Cada movimiento lleva su **Tipo de comprobante** (Recibo de caja / Recibo de
 pago / Traslado, como en Bancos) y su **Contrapartida** (la cuenta contable del
 otro lado del asiento, con autocompletado). La caja se asienta siempre contra su
-**cuenta contable** asociada.
+**cuenta contable** asociada. La contrapartida se puede **dividir en varias
+cuentas** (con tercero y concepto propios) cuyos importes sumen el valor del
+movimiento, igual que en Bancos.
 
 Características:
 

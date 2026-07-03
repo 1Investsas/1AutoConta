@@ -2939,6 +2939,26 @@ def _terceros_para_plantilla(emp, limite: int = 2000) -> list[dict]:
     return out
 
 
+def _cargar_movimientos_caja(period_id: int, db_path: str) -> list[dict]:
+    """Lee los movimientos del período y parsea la subdivisión de contrapartida.
+
+    La BD guarda las partes de la contrapartida serializadas en
+    ``contrapartidas_json``; aquí se convierten a la lista ``contrapartidas`` que
+    esperan el modelo, la hoja de trabajo y el exportador SIIGO.
+    """
+    import json
+    from app.database import listar_cash_movements
+
+    filas = listar_cash_movements(period_id, db_path)
+    for m in filas:
+        crudo = m.get("contrapartidas_json")
+        try:
+            m["contrapartidas"] = json.loads(crudo) if crudo else []
+        except (ValueError, TypeError):
+            m["contrapartidas"] = []
+    return filas
+
+
 def _resumen_periodo(emp, period: dict) -> dict:
     """Enriquece un período con etiquetas legibles para las plantillas."""
     from app.caja.modelo_caja import ESTADOS_CAJA, ESTADOS_EDITABLES, MESES_ES
@@ -3131,7 +3151,7 @@ def caja_periodo(period_id):
         return redirect(url_for("web.caja"))
 
     cuenta = obtener_cash_account(period["cash_account_id"], db_path)
-    movimientos = listar_cash_movements(period_id, db_path)
+    movimientos = _cargar_movimientos_caja(period_id, db_path)
     period = _resumen_periodo(emp, period)
 
     from app.caja.modelo_caja import (
@@ -3214,6 +3234,9 @@ def caja_periodo_guardar(period_id):
     if any(m.running_balance < 0 for m in ordenados):
         flash("Advertencia: hay movimientos que generan saldo negativo de caja. "
               "Verifica las salidas de efectivo.", "error")
+    if any(mc.validar_contrapartidas(m) for m in ordenados):
+        flash("Advertencia: hay contrapartidas divididas cuya suma no coincide con "
+              "el valor del movimiento. Corrígelas antes de generar el SIIGO.", "error")
     n_invalidos = sum(
         1 for m in ordenados
         if mc.validar_movimiento(m, period["year"], period["month"])
@@ -3325,7 +3348,7 @@ def _descargar_plantilla_caja(period_id, prediligenciada: bool):
         return redirect(url_for("web.caja"))
 
     cuenta = obtener_cash_account(period["cash_account_id"], db_path)
-    movimientos = listar_cash_movements(period_id, db_path) if prediligenciada else None
+    movimientos = _cargar_movimientos_caja(period_id, db_path) if prediligenciada else None
 
     data = generar_plantilla(
         empresa=emp.nombre,
@@ -3473,9 +3496,18 @@ def caja_periodo_exportar_siigo(period_id):
               "generar el archivo SIIGO.", "error")
         return redirect(url_for("web.caja_periodo", period_id=period_id))
 
-    movimientos = [mc.desde_dict(m) for m in listar_cash_movements(period_id, db_path)]
+    movimientos = [mc.desde_dict(m) for m in _cargar_movimientos_caja(period_id, db_path)]
     if not any(abs(m.inflow_amount) > 0 or abs(m.outflow_amount) > 0 for m in movimientos):
         flash("No hay movimientos con valor para exportar a SIIGO.", "error")
+        return redirect(url_for("web.caja_periodo", period_id=period_id))
+
+    # Validar que las contrapartidas subdivididas sumen el valor del movimiento.
+    errores_sub = []
+    for m in movimientos:
+        for err in mc.validar_contrapartidas(m):
+            errores_sub.append(f"{m.movement_date or ''} {m.concept}: {err}")
+    if errores_sub:
+        flash("No se puede generar el SIIGO: " + " | ".join(errores_sub[:5]), "error")
         return redirect(url_for("web.caja_periodo", period_id=period_id))
 
     try:

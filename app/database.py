@@ -385,6 +385,9 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
                               "TEXT", "NVARCHAR(50)")
             _asegurar_columna(conn, "cash_movements", "comprobante",
                               "TEXT", "NVARCHAR(10)")
+            # Subdivisión de la contrapartida en varias cuentas (JSON).
+            _asegurar_columna(conn, "cash_movements", "contrapartidas_json",
+                              "TEXT", "NVARCHAR(MAX)")
             # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
             # cada empresa tiene su propio archivo y no hay columna empresa_id.
             if not conn.is_sqlite:
@@ -614,6 +617,7 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             cost_center         TEXT,
             category            TEXT,
             contrapartida       TEXT,
+            contrapartidas_json TEXT,
             comprobante         TEXT,
             inflow_amount       TEXT    DEFAULT '0',
             outflow_amount      TEXT    DEFAULT '0',
@@ -799,6 +803,7 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             cost_center      NVARCHAR(200),
             category         NVARCHAR(200),
             contrapartida    NVARCHAR(50),
+            contrapartidas_json NVARCHAR(MAX),
             comprobante      NVARCHAR(10),
             inflow_amount    NVARCHAR(50)   DEFAULT '0',
             outflow_amount   NVARCHAR(50)   DEFAULT '0',
@@ -2954,12 +2959,14 @@ def reemplazar_cash_movements(
         )
         emp_id = None if conn.is_sqlite else _empresa_id_desde_db_path(db_path)
         for m in movimientos:
+            partes = m.get("contrapartidas") or []
+            partes_json = json.dumps(partes, ensure_ascii=False) if partes else None
             campos = (
                 period_id, int(m.get("sequence") or 0), m.get("movement_date", ""),
                 m.get("movement_type", ""), m.get("concept", ""),
                 m.get("third_party_nit", ""), m.get("third_party_name", ""),
                 m.get("cost_center", ""), m.get("category", ""),
-                m.get("contrapartida", ""), m.get("comprobante", ""),
+                m.get("contrapartida", ""), partes_json, m.get("comprobante", ""),
                 str(m.get("inflow_amount", "0")), str(m.get("outflow_amount", "0")),
                 str(m.get("running_balance", "0")), m.get("observations", ""),
                 ahora, ahora,
@@ -2969,10 +2976,10 @@ def reemplazar_cash_movements(
                     """INSERT INTO cash_movements
                        (cash_period_id, sequence, movement_date, movement_type, concept,
                         third_party_nit, third_party_name, cost_center, category,
-                        contrapartida, comprobante,
+                        contrapartida, contrapartidas_json, comprobante,
                         inflow_amount, outflow_amount, running_balance, observations,
                         created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     campos,
                 )
             else:
@@ -2980,10 +2987,10 @@ def reemplazar_cash_movements(
                     """INSERT INTO cash_movements
                        (empresa_id, cash_period_id, sequence, movement_date, movement_type, concept,
                         third_party_nit, third_party_name, cost_center, category,
-                        contrapartida, comprobante,
+                        contrapartida, contrapartidas_json, comprobante,
                         inflow_amount, outflow_amount, running_balance, observations,
                         created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (emp_id,) + campos,
                 )
         conn.commit()

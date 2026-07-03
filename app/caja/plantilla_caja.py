@@ -240,10 +240,22 @@ def _escribir_movimientos(ws, movimientos: list[dict]) -> int:
             ws.cell(row=fila, column=COL_NIT, value=mov.get("third_party_nit", ""))
             ws.cell(row=fila, column=COL_NOMBRE, value=mov.get("third_party_name", ""))
             ws.cell(row=fila, column=COL_CENTRO, value=mov.get("cost_center", ""))
-            ws.cell(row=fila, column=COL_CONTRAPARTIDA, value=mov.get("contrapartida", ""))
+            # Contrapartida: única, o el detalle de la subdivisión en observaciones.
+            partes = mov.get("contrapartidas") or []
+            observaciones = mov.get("observations", "")
+            if partes:
+                detalle = "; ".join(
+                    f"{p.get('cuenta', '')}={p.get('monto', '')}" for p in partes
+                )
+                observaciones = (
+                    f"{observaciones} [Contrapartida dividida: {detalle}]".strip()
+                )
+                ws.cell(row=fila, column=COL_CONTRAPARTIDA, value="(dividida)")
+            else:
+                ws.cell(row=fila, column=COL_CONTRAPARTIDA, value=mov.get("contrapartida", ""))
             ws.cell(row=fila, column=COL_ENTRADA, value=ent or None)
             ws.cell(row=fila, column=COL_SALIDA, value=sal or None)
-            ws.cell(row=fila, column=COL_OBSERVACIONES, value=mov.get("observations", ""))
+            ws.cell(row=fila, column=COL_OBSERVACIONES, value=observaciones)
 
         # Saldo siempre por fórmula (también en filas vacías → quedan en blanco).
         c_saldo = ws.cell(row=fila, column=COL_SALDO, value=_formula_saldo(fila))

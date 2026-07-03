@@ -23,7 +23,7 @@ igual que en los mapeadores RADIAN y Bancos.
 
 from __future__ import annotations
 
-from app.caja.modelo_caja import MovimientoCaja
+from app.caja.modelo_caja import MovimientoCaja, partes_contrapartida
 from app.siigo.mapeador import FilaSiigo
 
 
@@ -77,11 +77,9 @@ def mapear_caja_a_siigo(
         observaciones = " | ".join(["Caja " + cuenta_caja, *partes_obs]) if cuenta_caja \
             else " | ".join(partes_obs)
 
-        contrapartida = (m.contrapartida or "").strip()
-        es_pendiente = not contrapartida
         monto = float(abs_valor)
 
-        # Línea de la caja (lado fijo).
+        # Línea de la caja: SIEMPRE una sola, por el valor total del movimiento.
         filas.append(FilaSiigo(
             tipo_comprobante=tipo_comp,
             consecutivo_comprobante=consecutivo,
@@ -94,19 +92,28 @@ def mapear_caja_a_siigo(
             debito=monto if es_ingreso else 0.0,
             credito=0.0 if es_ingreso else monto,
         ))
-        # Línea de la contrapartida (lado opuesto).
-        filas.append(FilaSiigo(
-            tipo_comprobante=tipo_comp,
-            consecutivo_comprobante=consecutivo,
-            fecha=fecha_str,
-            codigo_cuenta=contrapartida,
-            nit_tercero=nit,
-            descripcion=("[PENDIENTE] " + descripcion) if es_pendiente else descripcion,
-            observaciones=observaciones,
-            centro_costo=m.cost_center,
-            debito=0.0 if es_ingreso else monto,
-            credito=monto if es_ingreso else 0.0,
-            es_pendiente=es_pendiente,
-        ))
+
+        # Contrapartida: puede subdividirse en varias cuentas por importes
+        # distintos (que deben sumar el valor del movimiento). Si no se subdivide,
+        # es una sola línea por el valor total.
+        for parte in partes_contrapartida(m):
+            p_cuenta = (parte.get("cuenta") or "").strip()
+            p_monto = float(parte.get("monto") or 0)
+            p_nit = (parte.get("nit_tercero") or "").strip() or nit
+            p_desc = (parte.get("concepto") or "").strip() or descripcion
+            es_pendiente = not p_cuenta
+            filas.append(FilaSiigo(
+                tipo_comprobante=tipo_comp,
+                consecutivo_comprobante=consecutivo,
+                fecha=fecha_str,
+                codigo_cuenta=p_cuenta,
+                nit_tercero=p_nit,
+                descripcion=("[PENDIENTE] " + p_desc) if es_pendiente else p_desc,
+                observaciones=observaciones,
+                centro_costo=m.cost_center,
+                debito=0.0 if es_ingreso else p_monto,
+                credito=p_monto if es_ingreso else 0.0,
+                es_pendiente=es_pendiente,
+            ))
 
     return filas
