@@ -209,16 +209,17 @@ class TestTenantAwareAzure:
         # documentos_importados, bitacora, historial_cuentas, importaciones,
         # procesos_banco, correcciones_tercero, cuentas_bancarias_tercero,
         # cash_accounts, cash_periods, cash_movements,
-        # mixed_accounts, mixed_periods, mixed_movements
+        # mixed_accounts, mixed_periods, mixed_movements,
+        # patrones_aprendidos, tokens_aprendidos, importaciones_conocimiento
         # (la tabla `empresas` es el catálogo y se crea aparte, sin empresa_id).
-        assert len(creates) == 13
+        assert len(creates) == 16
         assert all("empresa_id" in sql for sql in creates)
 
     def test_asegurar_indices_idempotente_y_por_empresa(self):
         conn = _RecConn(is_sqlite=False)
         db._asegurar_indices_mssql(conn)
         sqls = [sql for sql, _ in conn.calls]
-        assert len(sqls) == 10
+        assert len(sqls) == 11
         # Todos guardados por IF NOT EXISTS (idempotencia) y liderados por empresa_id.
         assert all("IF NOT EXISTS" in sql for sql in sqls)
         assert any("CREATE INDEX ix_importaciones_empresa ON importaciones (empresa_id, id)" in sql
@@ -241,6 +242,8 @@ class TestTenantAwareAzure:
                    and "(empresa_id, mixed_account_id)" in sql for sql in sqls)
         assert any("ix_mixed_movements_periodo" in sql
                    and "(empresa_id, mixed_period_id)" in sql for sql in sqls)
+        assert any("ix_import_conocimiento_emp" in sql
+                   and "(empresa_id, id)" in sql for sql in sqls)
 
     def test_inicializar_db_azure_crea_indices(self, monkeypatch):
         conn = _RecConn(is_sqlite=False)

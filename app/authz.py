@@ -57,6 +57,7 @@ PERMISOS: dict[str, str] = {
     "importaciones.gestionar": "Retomar, corregir, anular y descargar importaciones",
     "analitica.ver":          "Ver analíticas y reportes",
     "ml.ver":                 "Ver el historial de aprendizaje (machine learning)",
+    "ml.entrenar":            "Entrenar el aprendizaje con archivos externos y depurar patrones",
     "empresas.ver":           "Ver y seleccionar empresas",
     "empresas.gestionar":     "Crear, editar y eliminar empresas y sus maestros",
     "terceros.ver":           "Ver el módulo de Terceros",
@@ -90,7 +91,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "mixto.gestionar", "mixto.procesar", "mixto.exportar",
             "mixto.aprobar", "mixto.cerrar",
             "importaciones.gestionar", "auditoria.ver",
-            "terceros.gestionar",
+            "terceros.gestionar", "ml.entrenar",
         ),
     ),
     "auxiliar": (

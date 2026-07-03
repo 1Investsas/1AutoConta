@@ -664,6 +664,17 @@ def confirmar():
                                 linea["cuenta"] = cuenta
                                 linea["es_pendiente"] = False
                                 break
+                        # Alimentar también el motor de aprendizaje generalizado
+                        # (predice por texto para terceros nuevos).
+                        try:
+                            from app import aprendizaje
+                            aprendizaje.aprender(
+                                "radian", f"cuenta_{tipo_linea}",
+                                f"{clasificacion} {p.get('tercero_nombre', '')}",
+                                cuenta, _empresa_actual().db_path,
+                            )
+                        except Exception:
+                            logger.exception("No se pudo aprender la confirmación.")
                         break
                 session_store.guardar(KEY_RESULTADO, resultado)
                 _persistir_importacion(_empresa_actual(), resultado, "corregida")
@@ -932,6 +943,155 @@ def historial():
     entradas, total = listar_historial_cuentas(db_path, limite=200)
 
     return render_template("historial.html", entradas=entradas, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Machine learning — motor de aprendizaje generalizado
+# ---------------------------------------------------------------------------
+
+# Módulos que aceptan conocimiento externo (destino del entrenamiento).
+_MODULOS_APRENDIZAJE = {
+    "general": "General (todos los módulos)",
+    "banco":   "Bancos",
+    "caja":    "Caja / Flujos mixtos",
+    "radian":  "RADIAN",
+}
+
+# Nombres legibles de los campos aprendidos (para la página).
+_CAMPOS_APRENDIZAJE = {
+    "cuenta":      "Cuenta contable",
+    "nit_tercero": "NIT tercero",
+}
+
+
+@bp.route("/aprendizaje")
+@require_permission("ml.ver")
+def aprendizaje():
+    """Centro de Machine learning: conocimiento aprendido y entrenamiento."""
+    from app.database import (
+        inicializar_db, estadisticas_aprendizaje, listar_patrones_aprendidos,
+        listar_importaciones_conocimiento,
+    )
+
+    emp = _empresa_actual()
+    inicializar_db(emp.db_path)
+
+    modulo = request.args.get("modulo", "").strip() or None
+    q = request.args.get("q", "").strip()
+
+    stats = estadisticas_aprendizaje(emp.db_path)
+    patrones = listar_patrones_aprendidos(emp.db_path, modulo=modulo,
+                                          q=q, limite=200)
+    entrenamientos = listar_importaciones_conocimiento(emp.db_path, limite=10)
+    for e in entrenamientos:
+        e["fecha_fmt"] = (e.get("fecha") or "")[:19].replace("T", " ")
+
+    from app.authz import tiene_permiso
+    puede_entrenar = tiene_permiso(authn.usuario_actual(), emp.id, "ml.entrenar")
+
+    return render_template(
+        "aprendizaje.html",
+        stats=stats,
+        patrones=patrones,
+        entrenamientos=entrenamientos,
+        modulos=_MODULOS_APRENDIZAJE,
+        campos=_CAMPOS_APRENDIZAJE,
+        filtro_modulo=modulo or "",
+        filtro_q=q,
+        puede_entrenar=puede_entrenar,
+    )
+
+
+@bp.route("/aprendizaje/entrenar", methods=["POST"])
+@require_permission("ml.entrenar")
+def aprendizaje_entrenar():
+    """Entrena el motor con un archivo externo (SIIGO u otra fuente)."""
+    from app.aprendizaje_importador import importar_conocimiento
+    from app.database import inicializar_db, registrar_importacion_conocimiento
+
+    emp = _empresa_actual()
+    inicializar_db(emp.db_path)
+
+    archivo = request.files.get("archivo")
+    if not archivo or archivo.filename == "":
+        flash("Selecciona el archivo con el que quieres entrenar.", "error")
+        return redirect(url_for("web.aprendizaje"))
+
+    nombre = archivo.filename
+    permitidas = ALLOWED_EXT | ALLOWED_EXT_CSV
+    if not ("." in nombre and nombre.rsplit(".", 1)[1].lower() in permitidas):
+        flash("El archivo debe ser Excel (.xlsx, .xls) o CSV.", "error")
+        return redirect(url_for("web.aprendizaje"))
+
+    modulo = request.form.get("modulo", "general").strip()
+    if modulo not in _MODULOS_APRENDIZAJE:
+        modulo = "general"
+
+    ref = _save_upload(archivo.read(), nombre, emp)
+    try:
+        local = store.load_file(ref)
+        resumen = importar_conocimiento(local, emp.db_path, modulo)
+    except Exception as exc:
+        logger.exception("Error entrenando con archivo externo")
+        registrar_importacion_conocimiento(
+            secure_filename(nombre), modulo, 0, 0,
+            estado="error", detalle=str(exc), db_path=emp.db_path,
+        )
+        flash(f"No se pudo entrenar con el archivo: {exc}", "error")
+        return redirect(url_for("web.aprendizaje"))
+
+    registrar_importacion_conocimiento(
+        secure_filename(nombre), modulo, resumen["filas"], resumen["aprendidos"],
+        detalle=resumen["mensaje"], db_path=emp.db_path,
+    )
+    audit.registrar("ml.entrenar", empresa_id=emp.id,
+                    detalle=f"archivo={secure_filename(nombre)} "
+                            f"modulo={modulo} aprendidos={resumen['aprendidos']}")
+    flash(f"✓ Entrenamiento completado. {resumen['mensaje']}", "success")
+    return redirect(url_for("web.aprendizaje"))
+
+
+@bp.route("/aprendizaje/patron/<int:patron_id>/eliminar", methods=["POST"])
+@require_permission("ml.entrenar")
+def aprendizaje_patron_eliminar(patron_id):
+    """Elimina un patrón aprendido incorrecto."""
+    from app.database import eliminar_patron_aprendido
+
+    emp = _empresa_actual()
+    eliminar_patron_aprendido(patron_id, emp.db_path)
+    audit.registrar("ml.eliminar_patron", empresa_id=emp.id,
+                    detalle=f"patron={patron_id}")
+    flash("Patrón eliminado. El sistema dejará de sugerir ese valor exacto.",
+          "success")
+    return redirect(url_for("web.aprendizaje"))
+
+
+@bp.route("/api/aprendizaje/sugerir")
+@require_permission("ml.ver")
+def api_aprendizaje_sugerir():
+    """Predice campos para un texto digitado (prediligenciamiento en vivo).
+
+    Parámetros GET: `modulo` (banco/caja/radian/general), `texto` (lo digitado)
+    y `campos` (lista separada por comas; por defecto 'cuenta,nit_tercero').
+    Responde {campo: {valor, confianza, origen, modulo, usos}}.
+    """
+    from flask import jsonify
+    from app import aprendizaje as motor
+    from app.database import inicializar_db
+
+    emp = _empresa_actual()
+    inicializar_db(emp.db_path)
+
+    modulo = request.args.get("modulo", "general").strip() or "general"
+    texto = request.args.get("texto", "").strip()
+    campos = [c.strip() for c in
+              request.args.get("campos", "cuenta,nit_tercero").split(",")
+              if c.strip()]
+    if not texto or len(texto) < 3:
+        return jsonify({})
+
+    predicciones = motor.predecir_campos(modulo, texto, campos, emp.db_path)
+    return jsonify({campo: pred.a_dict() for campo, pred in predicciones.items()})
 
 
 # ---------------------------------------------------------------------------
@@ -2145,13 +2305,16 @@ _ESTADOS_PROCESO_BANCO = {
 }
 
 
-def _render_banco_resultado(movimientos, cuenta_banco, nit_banco, asignaciones=None):
+def _render_banco_resultado(movimientos, cuenta_banco, nit_banco, asignaciones=None,
+                            db_path=None):
     """Construye la vista editable de movimientos bancarios (banco_resultado.html).
 
     Centraliza la preparación de las filas «principales» (defaults de cuenta, NIT
     y tipo de comprobante, y agrupación de 4x1000). Cuando se pasan `asignaciones`
     guardadas (al Retomar/Corregir un proceso), se sobreponen para conservar lo
-    que el usuario ya había trabajado.
+    que el usuario ya había trabajado. Si se pasa `db_path`, la cuenta
+    contrapartida y el NIT que sigan vacíos se prediligencian con el motor de
+    aprendizaje (por la descripción del movimiento) y se marcan como sugeridos.
     """
     from app.banco.importador_banco import a_dict
     from app.config import (
@@ -2210,6 +2373,28 @@ def _render_banco_resultado(movimientos, cuenta_banco, nit_banco, asignaciones=N
                      "nit": c.get("nit_tercero", ""), "concepto": c.get("concepto", "")}
                     for c in asig["contrapartidas"]
                 ]
+
+        # Prediligenciar con el motor de aprendizaje lo que siga vacío.
+        d["cuenta_pred"] = None
+        d["nit_pred"] = None
+        if db_path and not d["contrapartidas_guardadas"] and not m.es_4x1000:
+            try:
+                from app import aprendizaje
+                if not d["cuenta_auto"]:
+                    pred = aprendizaje.predecir("banco", "cuenta",
+                                                m.descripcion, db_path)
+                    if pred:
+                        d["cuenta_auto"] = pred.valor
+                        d["cuenta_pred"] = pred.a_dict()
+                if not d["nit_auto"] and not m.es_bancario:
+                    pred = aprendizaje.predecir("banco", "nit_tercero",
+                                                m.descripcion, db_path)
+                    if pred:
+                        d["nit_auto"] = pred.valor
+                        d["nit_pred"] = pred.a_dict()
+            except Exception:
+                logger.exception("Fallo prediligenciando el movimiento %s", m.idx)
+
         principales.append(d)
 
     return render_template(
@@ -2334,7 +2519,8 @@ def banco_previsualizar():
     # cierre la sesión antes de exportar a SIIGO.
     _persistir_proceso_banco(emp, datos_banco, "procesando")
 
-    return _render_banco_resultado(movimientos, cuenta_banco, nit_banco)
+    return _render_banco_resultado(movimientos, cuenta_banco, nit_banco,
+                                   db_path=emp.db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -2449,6 +2635,32 @@ def banco_exportar():
     audit.registrar("banco.exportar_siigo", empresa_id=emp.id,
                     detalle=f"proceso={datos_banco.get('proceso_id')} archivos={len(rutas)}")
 
+    # Aprender de las asignaciones confirmadas (descripción → cuenta / NIT):
+    # el usuario revisó la tabla antes de exportar, así que cada valor cuenta
+    # como una confirmación para el motor de aprendizaje. Best-effort.
+    try:
+        from app import aprendizaje
+        desc_por_idx = {m.idx: m.descripcion for m in movimientos}
+        es_bancario_por_idx = {m.idx: m.es_bancario for m in movimientos}
+        observaciones = []
+        for asig in asignaciones:
+            desc = desc_por_idx.get(asig["idx"], "")
+            if not desc or asig.get("contrapartidas"):
+                continue  # subdivididos: la relación descripción→cuenta es ambigua
+            if asig.get("cuenta_contrapartida"):
+                observaciones.append({
+                    "modulo": "banco", "campo": "cuenta",
+                    "texto": desc, "valor": asig["cuenta_contrapartida"],
+                })
+            if asig.get("nit_tercero") and not es_bancario_por_idx.get(asig["idx"]):
+                observaciones.append({
+                    "modulo": "banco", "campo": "nit_tercero",
+                    "texto": desc, "valor": asig["nit_tercero"],
+                })
+        aprendizaje.aprender_lote(observaciones, emp.db_path)
+    except Exception:
+        logger.exception("No se pudo aprender de las asignaciones del banco.")
+
     return _responder_descarga(_enviar_archivos_siigo(rutas, zip_name="siigo_banco.zip"))
 
 
@@ -2511,6 +2723,7 @@ def proceso_banco_abrir(proceso_id):
         snap.get("cuenta_banco", ""),
         snap.get("nit_banco", ""),
         asignaciones=snap.get("asignaciones"),
+        db_path=emp.db_path,
     )
 
 
@@ -2999,6 +3212,38 @@ def _caja_db(emp):
     return emp.db_path
 
 
+def _aprender_de_movimientos_caja(emp, movimientos) -> None:
+    """Alimenta el motor de aprendizaje con los movimientos de efectivo guardados.
+
+    Por cada movimiento con concepto se aprende (concepto → contrapartida) y
+    (concepto → NIT del tercero), de modo que la próxima vez que se digite un
+    concepto igual o similar el sistema prediligencie esos campos. Comparte el
+    módulo 'caja' entre Caja General y Flujos Mixtos (mismo dominio: efectivo).
+    Best-effort: un fallo aquí nunca rompe el guardado.
+    """
+    try:
+        from app import aprendizaje
+
+        observaciones = []
+        for m in movimientos:
+            concepto = (m.concept or "").strip()
+            if not concepto:
+                continue
+            if m.contrapartida and not m.contrapartidas:
+                observaciones.append({
+                    "modulo": "caja", "campo": "cuenta",
+                    "texto": concepto, "valor": m.contrapartida,
+                })
+            if m.third_party_nit:
+                observaciones.append({
+                    "modulo": "caja", "campo": "nit_tercero",
+                    "texto": concepto, "valor": m.third_party_nit,
+                })
+        aprendizaje.aprender_lote(observaciones, emp.db_path)
+    except Exception:
+        logger.exception("No se pudo aprender de los movimientos de efectivo.")
+
+
 def _usuario_email() -> str:
     """Email del usuario actual (para trazabilidad), o '' si no hay sesión."""
     u = authn.usuario_actual()
@@ -3351,6 +3596,7 @@ def caja_periodo_guardar(period_id):
     )
     audit.registrar("caja.guardar", empresa_id=emp.id,
                     detalle=f"periodo={period_id} movimientos={len(ordenados)}")
+    _aprender_de_movimientos_caja(emp, ordenados)
 
     # Advertencias no bloqueantes: saldo negativo / errores de validación.
     if any(m.running_balance < 0 for m in ordenados):
@@ -3579,6 +3825,7 @@ def caja_periodo_importar(period_id):
     )
     audit.registrar("caja.importar", empresa_id=emp.id,
                     detalle=f"periodo={period_id} movimientos={len(ordenados)}")
+    _aprender_de_movimientos_caja(emp, ordenados)
     flash(f"Plantilla importada: {len(ordenados)} movimientos. "
           f"Saldo final {cierre:,.0f}.", "success")
     return redirect(url_for("web.caja_periodo", period_id=period_id))
@@ -3931,6 +4178,7 @@ def mixto_flujo_guardar(period_id):
     )
     audit.registrar("mixto.guardar", empresa_id=emp.id,
                     detalle=f"flujo={period_id} movimientos={len(ordenados)}")
+    _aprender_de_movimientos_caja(emp, ordenados)
 
     if any(m.running_balance < 0 for m in ordenados):
         flash("Advertencia: hay movimientos que generan saldo negativo. "
@@ -4152,6 +4400,7 @@ def mixto_flujo_importar(period_id):
     )
     audit.registrar("mixto.importar", empresa_id=emp.id,
                     detalle=f"flujo={period_id} movimientos={len(ordenados)}")
+    _aprender_de_movimientos_caja(emp, ordenados)
     flash(f"Plantilla importada: {len(ordenados)} movimientos. "
           f"Saldo final {cierre:,.0f}.", "success")
     return redirect(url_for("web.mixto_flujo", period_id=period_id))

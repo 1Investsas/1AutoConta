@@ -45,6 +45,12 @@
   min-width: 90px;
 }
 
+/* Valor prediligenciado por el motor de aprendizaje (machine learning) */
+.ml-pred {
+  border-color: #9b59b6 !important;
+  background: rgba(155,89,182,.08);
+}
+
 /* Pill tipo comprobante */
 .pill-111 { background:rgba(39,174,96,.2);  color:#2ecc71; }
 .pill-112 { background:rgba(231,76,60,.2);  color:#e74c3c; }
@@ -346,13 +352,15 @@
                 <input type="text"
                        name="cuenta_{{ m.idx }}"
                        id="cuenta-{{ m.idx }}"
-                       class="input-cuenta banco-cuenta-ac"
+                       class="input-cuenta banco-cuenta-ac{% if m.cuenta_pred %} ml-pred{% endif %}"
                        value="{{ m.cuenta_auto }}"
                        placeholder="ej. 51050501"
                        autocomplete="off"
                        {% if subdividido %}disabled{% endif %}
                        {% if m.es_4x1000 and m.idx_padre is none %}
                          title="4x1000 huérfano — cuenta sugerida: {{ cuenta_4x1000 }}"
+                       {% elif m.cuenta_pred %}
+                         title="✨ Prediligenciada por aprendizaje ({{ (m.cuenta_pred.confianza * 100) | round | int }}% de confianza, {{ m.cuenta_pred.usos }} confirmación(es) previas). Corrígela si no aplica."
                        {% endif %}>
                 <button type="button" class="btn-subdividir"
                         title="Subdividir la contrapartida en varias cuentas"
@@ -390,13 +398,14 @@
             <div class="nit-wrapper">
               <input type="text"
                      name="nit_{{ m.idx }}"
-                     class="input-nit banco-nit-ac"
+                     class="input-nit banco-nit-ac{% if m.nit_pred %} ml-pred{% endif %}"
                      value="{{ m.nit_auto }}"
                      placeholder="NIT o nombre"
                      autocomplete="off"
                      data-idx="{{ m.idx }}"
                      {% if m.es_bancario %}data-bancario="1"{% endif %}
-                     {% if m.es_bancario and nit_banco %}title="Auto-asignado al banco ({{ nit_banco }})"{% endif %}>
+                     {% if m.es_bancario and nit_banco %}title="Auto-asignado al banco ({{ nit_banco }})"
+                     {% elif m.nit_pred %}title="✨ Prediligenciado por aprendizaje ({{ (m.nit_pred.confianza * 100) | round | int }}% de confianza). Corrígelo si no aplica."{% endif %}>
               <span class="nit-nombre-badge" id="nit-nombre-{{ m.idx }}">
                 {%- if m.es_bancario and nit_banco -%}
                   <span style="color:#9b59b6; font-size:0.7rem">🏦 banco</span>
