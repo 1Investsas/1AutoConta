@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cuenta.name }} — {{ period.name }}{% endblock %}
+{% block page_title %}🔀 {{ cuenta.name }} — {{ period.name }}{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">
+  <a href="{{ url_for('web.mixto_cuenta', account_id=cuenta.id) }}" class="link-more">← {{ cuenta.name }}</a>
+  {% if cuenta.account_code %} · <code>{{ cuenta.account_code }}</code>{% endif %}
+  · {{ period.rango_texto }}
+  · Estado: <span class="pill">{{ period.estado_label }}</span>
+  {% if period.responsible %} · Responsable: {{ period.responsible }}{% endif %}
+</p>{% endblock %}
+
+{% block content %}
+
+<div class="form-section">
+  <!-- ── Barra de acciones ── -->
+  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between">
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+      <div class="form-group" style="margin:0; min-width:200px">
+        <label for="openingBalance" style="font-size:0.78rem">Saldo inicial del flujo</label>
+        <input type="number" id="openingBalance" step="any" min="0"
+               value="{{ period.opening_balance }}" {% if not period.editable %}disabled{% endif %}
+               style="font-family:monospace; font-weight:600">
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end">
+      <a href="{{ url_for('web.mixto_flujo_plantilla', period_id=period.id) }}" class="btn btn-secondary btn-sm">⬇ Plantilla vacía</a>
+      <a href="{{ url_for('web.mixto_flujo_plantilla_pre', period_id=period.id) }}" class="btn btn-secondary btn-sm">⬇ Prediligenciada</a>
+      {% if period.editable %}
+      <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('importBox').classList.toggle('hidden')">⬆ Importar Excel</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if period.editable %}
+  <!-- ── Importar plantilla ── -->
+  <form id="importBox" class="hidden" method="POST" enctype="multipart/form-data"
+        action="{{ url_for('web.mixto_flujo_importar', period_id=period.id) }}"
+        style="margin-top:16px; padding:14px; border:1px dashed var(--border); border-radius:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p class="muted small" style="margin:0 0 10px">
+      Sube la plantilla diligenciada. El sistema valida cada fila y recalcula el saldo
+      (no confía en el saldo digitado en Excel). Si hay errores, no se guarda nada.
+    </p>
+    <input type="file" name="archivo" accept=".xlsx,.xls" required>
+    <button type="submit" class="btn btn-primary btn-sm" style="margin-left:10px">Importar y validar</button>
+  </form>
+  {% endif %}
+</div>
+
+<!-- ── Resumen de saldos ── -->
+<div class="stats-grid" style="margin:20px 0">
+  <div class="card">
+    <div class="card-title">Total entradas</div>
+    <div class="card-value" id="sumEntradas" style="color:var(--success)">0</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Total salidas</div>
+    <div class="card-value" id="sumSalidas" style="color:var(--danger)">0</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Saldo final</div>
+    <div class="card-value" id="saldoFinal">0</div>
+  </div>
+</div>
+
+<!-- ── Tabla de movimientos ── -->
+<div class="panel">
+  <div class="panel-head">
+    <h2>Movimientos de efectivo</h2>
+    {% if period.editable %}
+    <button type="button" class="btn btn-primary btn-sm" id="btnAgregar">＋ Agregar movimiento</button>
+    {% endif %}
+  </div>
+
+  <div class="table-wrapper">
+    <table id="tablaCaja">
+      <thead>
+        <tr>
+          <th style="width:120px">Fecha</th>
+          <th style="width:150px">Tipo comprobante</th>
+          <th>Concepto</th>
+          <th style="width:120px">NIT tercero</th>
+          <th>Nombre tercero</th>
+          <th style="width:120px">Centro costo</th>
+          <th style="width:130px">Contrapartida</th>
+          <th style="width:120px; text-align:right">Entrada</th>
+          <th style="width:120px; text-align:right">Salida</th>
+          <th style="width:130px; text-align:right">Saldo</th>
+          <th>Observaciones</th>
+          {% if period.editable %}<th style="width:40px"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody id="cajaBody"></tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+    {% if period.editable %}
+    <form method="POST" action="{{ url_for('web.mixto_flujo_guardar', period_id=period.id) }}"
+          id="formGuardar" data-loading="true" style="display:contents">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="movimientos_json" id="movimientosJson">
+      <input type="hidden" name="opening_balance" id="openingBalanceHidden">
+      <button type="submit" class="btn btn-primary">💾 Guardar avance (borrador)</button>
+    </form>
+    {% endif %}
+
+    {# Generar SIIGO: igual que en Caja General. Genera el Excel de importación a
+       SIIGO de los movimientos ya GUARDADOS del flujo. #}
+    <form method="POST" action="{{ url_for('web.mixto_flujo_exportar_siigo', period_id=period.id) }}"
+          onsubmit="descargaConOverlay(this, 'Generando archivo SIIGO…')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-gold">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+        Generar SIIGO
+      </button>
+    </form>
+  </div>
+  {% if period.editable %}
+  <p class="muted small" style="margin-top:8px">
+    El archivo SIIGO usa los movimientos <strong>guardados</strong>. Guarda el avance antes de generarlo si hiciste cambios.
+  </p>
+  {% endif %}
+</div>
+
+<!-- ── Estados del flujo ── -->
+<div class="form-section" style="margin-top:22px">
+  <h2>Estado del flujo</h2>
+  <p class="muted small">Flujo: Borrador → En revisión → Aprobado → Cerrado. Un flujo cerrado no se modifica sin reapertura.</p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px">
+    {% macro accion(slug, etiqueta, clase) %}
+      <form method="POST" action="{{ url_for('web.mixto_flujo_estado', period_id=period.id, accion=slug) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn {{ clase }}">{{ etiqueta }}</button>
+      </form>
+    {% endmacro %}
+
+    {% if period.status in ['borrador', 'reabierto'] %}
+      {{ accion('enviar-revision', 'Enviar a revisión', 'btn-secondary') }}
+      {{ accion('cerrar', 'Cerrar flujo', 'btn-primary') }}
+    {% elif period.status == 'en_revision' %}
+      {{ accion('aprobar', 'Aprobar', 'btn-primary') }}
+      {{ accion('devolver', 'Devolver a borrador', 'btn-secondary') }}
+      {{ accion('cerrar', 'Cerrar flujo', 'btn-secondary') }}
+    {% elif period.status == 'aprobado' %}
+      {{ accion('cerrar', 'Cerrar flujo', 'btn-primary') }}
+      {{ accion('devolver', 'Devolver a borrador', 'btn-secondary') }}
+    {% elif period.status == 'cerrado' %}
+      <p class="muted">Flujo cerrado{% if period.closed_by %} por {{ period.closed_by }}{% endif %}.</p>
+      {{ accion('reabrir', 'Reabrir flujo', 'btn-secondary') }}
+    {% endif %}
+  </div>
+</div>
+
+<datalist id="dlTerceros"></datalist>
+<datalist id="dlCuentasCaja"></datalist>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<style>
+  #tablaCaja input, #tablaCaja select { width:100%; box-sizing:border-box; padding:5px 6px; font-size:0.82rem; }
+  #tablaCaja td { padding:4px 5px; vertical-align:middle; }
+  #tablaCaja .saldo-cell { font-family:monospace; text-align:right; font-weight:600; white-space:nowrap; }
+  #tablaCaja .saldo-neg { color:var(--danger); }
+  .num-input { text-align:right; font-family:monospace; }
+  .btn-del { background:transparent; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; line-height:1; }
+  .hidden{ display:none; }
+</style>
+<script>
+(function () {
+  const EDITABLE = {{ 'true' if period.editable else 'false' }};
+  const datos = {{ movimientos | tojson }};
+  const COMPROBANTES = {{ comprobantes | tojson }};
+  const COMP_INGRESO = '{{ comp_ingreso }}';
+  const COMP_EGRESO = '{{ comp_egreso }}';
+  const body = document.getElementById('cajaBody');
+  const dl = document.getElementById('dlTerceros');
+  const dlCuentas = document.getElementById('dlCuentasCaja');
+  const openingInput = document.getElementById('openingBalance');
+
+  // Cache para autocompletar NIT ↔ nombre y cuentas contables.
+  const porNit = {};
+  const porNombre = {};
+
+  const fmt = (n) => (isNaN(n) ? 0 : n).toLocaleString('es-CO', {maximumFractionDigits: 0});
+  const num = (v) => { const x = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(x) ? 0 : x; };
+
+  function opcionesComprobante(sel) {
+    sel = String(sel || '');
+    return COMPROBANTES.map(c =>
+      `<option value="${c.codigo}" ${String(c.codigo) === sel ? 'selected' : ''}>${c.label}</option>`
+    ).join('');
+  }
+
+  function nuevaFila(m) {
+    m = m || {};
+    const tr = document.createElement('tr');
+    const ro = EDITABLE ? '' : 'readonly';
+    const dis = EDITABLE ? '' : 'disabled';
+    // Comprobante: el guardado o, si no hay, el automático según entrada/salida.
+    let comp = m.comprobante || '';
+    if (!comp) comp = num(m.inflow_amount) > 0 ? COMP_INGRESO : (num(m.outflow_amount) > 0 ? COMP_EGRESO : COMP_INGRESO);
+    tr.innerHTML = `
+      <td><input type="date" class="f-fecha" value="${m.movement_date || ''}" ${ro}></td>
+      <td><select class="f-comprobante" data-auto="${m.comprobante ? '0' : '1'}" ${dis}>${opcionesComprobante(comp)}</select></td>
+      <td><input type="text" class="f-concepto" value="${escAttr(m.concept)}" ${ro}></td>
+      <td><input type="text" class="f-nit" list="dlTerceros" value="${escAttr(m.third_party_nit)}" ${ro}></td>
+      <td><input type="text" class="f-nombre" value="${escAttr(m.third_party_name)}" ${ro}></td>
+      <td><input type="text" class="f-centro" value="${escAttr(m.cost_center)}" ${ro}></td>
+      <td><input type="text" class="f-contrapartida" list="dlCuentasCaja" value="${escAttr(m.contrapartida)}" ${ro} style="font-family:monospace"></td>
+      <td><input type="number" step="any" min="0" class="f-entrada num-input" value="${m.inflow_amount && num(m.inflow_amount) ? num(m.inflow_amount) : ''}" ${ro}></td>
+      <td><input type="number" step="any" min="0" class="f-salida num-input" value="${m.outflow_amount && num(m.outflow_amount) ? num(m.outflow_amount) : ''}" ${ro}></td>
+      <td class="saldo-cell">0</td>
+      <td><input type="text" class="f-obs" value="${escAttr(m.observations)}" ${ro}></td>
+      ${EDITABLE ? '<td><button type="button" class="btn-del" title="Eliminar">✕</button></td>' : ''}
+    `;
+    body.appendChild(tr);
+
+    if (EDITABLE) {
+      tr.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('input', recalc);
+        el.addEventListener('change', recalc);
+      });
+      // El usuario fijó el comprobante manualmente → no auto-cambiarlo.
+      const compSel = tr.querySelector('.f-comprobante');
+      compSel.addEventListener('change', () => { compSel.dataset.auto = '0'; });
+
+      const entEl = tr.querySelector('.f-entrada');
+      const salEl = tr.querySelector('.f-salida');
+      // Entrada y salida son excluyentes; al llenar una se limpia la otra y se
+      // ajusta el comprobante por defecto (si no fue fijado a mano).
+      entEl.addEventListener('input', () => { if (num(entEl.value) > 0) { salEl.value = ''; autoComprobante(tr, true); } });
+      salEl.addEventListener('input', () => { if (num(salEl.value) > 0) { entEl.value = ''; autoComprobante(tr, false); } });
+
+      const delBtn = tr.querySelector('.btn-del');
+      if (delBtn) delBtn.addEventListener('click', () => { tr.remove(); recalc(); });
+
+      const nitEl = tr.querySelector('.f-nit');
+      const nomEl = tr.querySelector('.f-nombre');
+      nitEl.addEventListener('input', () => buscarTerceros(nitEl.value));
+      nitEl.addEventListener('change', () => { if (porNit[nitEl.value.trim()] && !nomEl.value) nomEl.value = porNit[nitEl.value.trim()]; });
+      nomEl.addEventListener('input', () => buscarTerceros(nomEl.value));
+      nomEl.addEventListener('change', () => { const k = nomEl.value.trim(); if (porNombre[k] && !nitEl.value) nitEl.value = porNombre[k]; });
+
+      const cpEl = tr.querySelector('.f-contrapartida');
+      cpEl.addEventListener('input', () => buscarCuentas(cpEl.value));
+    }
+    return tr;
+  }
+
+  function autoComprobante(tr, esEntrada) {
+    const sel = tr.querySelector('.f-comprobante');
+    if (sel.dataset.auto === '0') return;  // fijado a mano
+    sel.value = esEntrada ? COMP_INGRESO : COMP_EGRESO;
+  }
+
+  let buscarTimer = null;
+  function buscarTerceros(q) {
+    q = (q || '').trim();
+    if (q.length < 2) return;
+    clearTimeout(buscarTimer);
+    buscarTimer = setTimeout(() => {
+      fetch('{{ url_for("web.api_terceros") }}?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(items => {
+          dl.innerHTML = '';
+          items.forEach(it => {
+            porNit[it.nit] = it.nombre;
+            porNombre[it.nombre] = it.nit;
+            const opt = document.createElement('option');
+            opt.value = it.nit;
+            opt.label = it.nombre;
+            dl.appendChild(opt);
+          });
+        }).catch(() => {});
+    }, 220);
+  }
+
+  let buscarCuentasTimer = null;
+  function buscarCuentas(q) {
+    q = (q || '').trim();
+    if (q.length < 2) return;
+    clearTimeout(buscarCuentasTimer);
+    buscarCuentasTimer = setTimeout(() => {
+      fetch('{{ url_for("web.api_cuentas") }}?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(items => {
+          dlCuentas.innerHTML = '';
+          items.forEach(it => {
+            const opt = document.createElement('option');
+            opt.value = it.codigo;
+            opt.label = it.nombre;
+            dlCuentas.appendChild(opt);
+          });
+        }).catch(() => {});
+    }, 220);
+  }
+
+  function recalc() {
+    const opening = num(openingInput ? openingInput.value : {{ period.opening_balance }});
+    const filas = Array.from(body.querySelectorAll('tr'));
+    // Orden cronológico para el saldo (igual que el servidor); empate por orden actual.
+    const indexadas = filas.map((tr, i) => ({tr, i, fecha: tr.querySelector('.f-fecha').value || '9999-12-31'}));
+    indexadas.sort((a, b) => a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.i - b.i);
+
+    let saldo = opening, totEnt = 0, totSal = 0;
+    indexadas.forEach(({tr}) => {
+      const ent = num(tr.querySelector('.f-entrada').value);
+      const sal = num(tr.querySelector('.f-salida').value);
+      totEnt += ent; totSal += sal;
+      saldo += ent - sal;
+      const cell = tr.querySelector('.saldo-cell');
+      cell.textContent = fmt(saldo);
+      cell.classList.toggle('saldo-neg', saldo < 0);
+    });
+    document.getElementById('sumEntradas').textContent = fmt(totEnt);
+    document.getElementById('sumSalidas').textContent = fmt(totSal);
+    const sf = document.getElementById('saldoFinal');
+    sf.textContent = fmt(opening + totEnt - totSal);
+    sf.style.color = (opening + totEnt - totSal) < 0 ? 'var(--danger)' : '';
+  }
+
+  function escAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  // Pintar filas existentes.
+  datos.forEach(nuevaFila);
+  if (EDITABLE && datos.length === 0) nuevaFila({});
+  recalc();
+  if (openingInput) openingInput.addEventListener('input', recalc);
+
+  if (EDITABLE) {
+    document.getElementById('btnAgregar').addEventListener('click', () => { nuevaFila({}); recalc(); });
+
+    document.getElementById('formGuardar').addEventListener('submit', (e) => {
+      const filas = Array.from(body.querySelectorAll('tr'));
+      const movs = filas.map(tr => ({
+        movement_date: tr.querySelector('.f-fecha').value,
+        comprobante: tr.querySelector('.f-comprobante').value,
+        concept: tr.querySelector('.f-concepto').value,
+        third_party_nit: tr.querySelector('.f-nit').value,
+        third_party_name: tr.querySelector('.f-nombre').value,
+        cost_center: tr.querySelector('.f-centro').value,
+        contrapartida: tr.querySelector('.f-contrapartida').value,
+        inflow_amount: num(tr.querySelector('.f-entrada').value),
+        outflow_amount: num(tr.querySelector('.f-salida').value),
+        observations: tr.querySelector('.f-obs').value,
+      }));
+      document.getElementById('movimientosJson').value = JSON.stringify(movs);
+      document.getElementById('openingBalanceHidden').value = openingInput ? openingInput.value : '{{ period.opening_balance }}';
+    });
+  }
+})();
+</script>
+{% endblock %}

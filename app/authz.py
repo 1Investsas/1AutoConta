@@ -47,6 +47,12 @@ PERMISOS: dict[str, str] = {
     "caja.exportar":          "Descargar plantillas de caja (vacía y prediligenciada)",
     "caja.aprobar":           "Enviar a revisión y aprobar períodos de caja",
     "caja.cerrar":            "Cerrar y reabrir períodos de caja",
+    "mixto.ver":              "Ver el módulo de Flujos Mixtos y sus flujos",
+    "mixto.gestionar":        "Crear y editar cuentas de flujos mixtos",
+    "mixto.procesar":         "Crear flujos, registrar movimientos e importar plantillas",
+    "mixto.exportar":         "Descargar plantillas de flujos mixtos (vacía y prediligenciada)",
+    "mixto.aprobar":          "Enviar a revisión y aprobar flujos mixtos",
+    "mixto.cerrar":           "Cerrar y reabrir flujos mixtos",
     "importaciones.ver":      "Ver el listado de importaciones",
     "importaciones.gestionar": "Retomar, corregir, anular y descargar importaciones",
     "analitica.ver":          "Ver analíticas y reportes",
@@ -61,7 +67,7 @@ PERMISOS: dict[str, str] = {
 
 # Permisos de solo lectura (compartidos por todos los roles operativos).
 _VER = (
-    "dashboard.ver", "radian.ver", "banco.ver", "caja.ver",
+    "dashboard.ver", "radian.ver", "banco.ver", "caja.ver", "mixto.ver",
     "importaciones.ver", "analitica.ver", "ml.ver", "empresas.ver",
     "terceros.ver",
 )
@@ -81,6 +87,8 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "banco.procesar", "banco.exportar",
             "caja.gestionar", "caja.procesar", "caja.exportar",
             "caja.aprobar", "caja.cerrar",
+            "mixto.gestionar", "mixto.procesar", "mixto.exportar",
+            "mixto.aprobar", "mixto.cerrar",
             "importaciones.gestionar", "auditoria.ver",
             "terceros.gestionar",
         ),
@@ -91,13 +99,14 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "radian.procesar", "radian.editar", "radian.auto",
             "banco.procesar",
             "caja.gestionar", "caja.procesar", "caja.exportar",
+            "mixto.gestionar", "mixto.procesar", "mixto.exportar",
             "importaciones.gestionar",
             "terceros.gestionar",
         ),
     ),
     "consulta": (
         "Visualización — solo lectura",
-        _VER + ("caja.exportar",),
+        _VER + ("caja.exportar", "mixto.exportar"),
     ),
 }
 

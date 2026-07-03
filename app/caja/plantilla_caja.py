@@ -118,6 +118,7 @@ def generar_plantilla(
     responsable: str = "",
     movimientos: Optional[list[dict]] = None,
     terceros: Optional[list[dict]] = None,
+    titulo: str = "CAJA GENERAL — MOVIMIENTOS DE EFECTIVO",
 ) -> bytes:
     """Construye la plantilla Excel y la retorna como bytes (.xlsx).
 
@@ -133,6 +134,10 @@ def generar_plantilla(
                         estos movimientos (lista de dicts a_dict()). Si es None
                         o vacía, genera la plantilla VACÍA para diligenciar.
         terceros:       Lista de {'nit','nombre'} para la hoja auxiliar Terceros.
+        titulo:         Título del encabezado. Por defecto el de Caja General;
+                        el módulo Flujos Mixtos pasa el suyo. Cuando ``anio``/
+                        ``mes`` van vacíos (flujo continuo) las filas Mes/Año
+                        quedan en blanco y no se aplica validación de período.
 
     Returns:
         Contenido del archivo .xlsx en bytes.
@@ -146,7 +151,7 @@ def generar_plantilla(
         cuenta_contable_txt = f"{cuenta_contable} — {cuenta_contable_nombre}"
 
     _escribir_encabezado(ws, empresa, cuenta_caja, cuenta_contable_txt,
-                         anio, mes, saldo_inicial, responsable)
+                         anio, mes, saldo_inicial, responsable, titulo)
     _escribir_tabla_header(ws)
     n_filas = _escribir_movimientos(ws, movimientos or [])
     _aplicar_validaciones(ws, anio, mes)
@@ -161,9 +166,10 @@ def generar_plantilla(
 
 
 def _escribir_encabezado(ws, empresa, cuenta_caja, cuenta_contable,
-                         anio, mes, saldo_inicial, responsable):
+                         anio, mes, saldo_inicial, responsable,
+                         titulo_texto="CAJA GENERAL — MOVIMIENTOS DE EFECTIVO"):
     """Escribe el bloque de información general del período."""
-    titulo = ws.cell(row=FILA_TITULO, column=1, value="CAJA GENERAL — MOVIMIENTOS DE EFECTIVO")
+    titulo = ws.cell(row=FILA_TITULO, column=1, value=titulo_texto)
     titulo.font = Font(bold=True, size=14, color=_AZUL)
 
     mes_txt = f"{mes} — {MESES_ES[mes]}" if mes and 1 <= mes <= 12 else ""
