@@ -44,6 +44,13 @@ CATEGORIAS: dict[str, dict] = {
                 "icono": '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/>'
                          '<path d="M3.5 12a8.5 8.5 0 0 1 14.5-6"/><path d="M20.5 12a8.5 8.5 0 0 1-14.5 6"/>',
             },
+            {
+                "nombre": "Flujos mixtos",
+                "descripcion": "Movimientos de efectivo sin límite de período (de corrido)",
+                "endpoint": "web.flujos_mixtos",
+                "icono": '<path d="M7 4v13"/><path d="m3.5 13.5 3.5 3.5 3.5-3.5"/>'
+                         '<path d="M17 20V7"/><path d="m13.5 10.5 3.5-3.5 3.5 3.5"/>',
+            },
         ],
     },
     "flujos-directos": {
@@ -62,6 +69,13 @@ CATEGORIAS: dict[str, dict] = {
                 "endpoint": "web.caja",
                 "icono": '<rect x="2" y="6" width="20" height="13" rx="2"/>'
                          '<path d="M2 10h20"/><circle cx="16" cy="14" r="1.4"/>',
+            },
+            {
+                "nombre": "Flujos mixtos",
+                "descripcion": "Movimientos de efectivo sin límite de período (de corrido)",
+                "endpoint": "web.flujos_mixtos",
+                "icono": '<path d="M7 4v13"/><path d="m3.5 13.5 3.5 3.5 3.5-3.5"/>'
+                         '<path d="M17 20V7"/><path d="m13.5 10.5 3.5-3.5 3.5 3.5"/>',
             },
             {
                 "nombre": "Cruces de saldos",
