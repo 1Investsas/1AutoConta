@@ -90,6 +90,8 @@ contable-auto/
 │   ├── database.py          # ⭐ BD: SQLite/Azure SQL, esquema, CRUD, analítica
 │   ├── storage.py           # Abstracción de archivos (local vs Azure Blob)
 │   ├── sugerencias.py       # Motor de sugerencias (Fase 2, aprende del historial)
+│   ├── aprendizaje.py       # ⭐ Motor de aprendizaje generalizado (ML: exacto + Naive Bayes)
+│   ├── aprendizaje_importador.py # Entrenamiento con archivos externos (SIIGO u otras fuentes)
 │   ├── empresas.py          # Gestión multi-empresa
 │   ├── web/                 # ── Aplicación Flask (Fase 2/4) ──
 │   │   ├── __init__.py      # Application factory create_app()
@@ -242,6 +244,50 @@ y la guarda en la tabla `historial_cuentas` (UPSERT, incrementa `usos`).
 - `tipo_linea` se deriva del concepto de la línea vía `_CONCEPTO_A_TIPO` (p. ej. "Base
   gravable" → `base`, "IVA" → `iva`, "Rete Renta" → `rete_renta`).
 - Confirmación manual desde la web: `POST /confirmar`.
+- Si el historial exacto no conoce la tripleta (tercero nuevo), cae al **motor de
+  aprendizaje generalizado** (§6.7) que predice por texto (clasificación + nombre del
+  tercero) e incluye el conocimiento importado de fuentes externas.
+
+### 6.7 Motor de aprendizaje generalizado (`aprendizaje.py`, machine learning)
+
+Aprende de CUALQUIER texto digitado en el sistema y **prediligencia** campos en los
+módulos. Dos memorias por empresa, ambas con contador de usos:
+
+1. **Patrones exactos** (`patrones_aprendidos`): texto normalizado completo → valor.
+   Normalización: mayúsculas sin tildes, sin signos, sin grupos de solo dígitos
+   (números de factura/fechas varían por documento).
+2. **Clasificador de texto** (`tokens_aprendidos`): Naive Bayes multinomial sobre
+   tokens (sin stopwords). Generaliza a textos nunca vistos; la confianza es el
+   posterior × cobertura de tokens y solo se sugiere si supera `UMBRAL_CONFIANZA`
+   (0.40). Sin dependencias nuevas (puro Python).
+
+El conocimiento se guarda por **módulo** ('banco', 'caja', 'radian') y **campo**
+('cuenta', 'nit_tercero', 'cuenta_<tipo_linea>' en RADIAN). El módulo especial
+**`general`** recibe lo importado de archivos externos y es *fallback* de todos.
+Orden de `predecir()`: exacto(módulo) → exacto(general) → texto(módulo) → texto(general).
+
+**Dónde aprende** (todo best-effort, nunca rompe el flujo):
+- Bancos: al exportar a SIIGO (descripción → cuenta/NIT de cada asignación no subdividida).
+- Caja general y Flujos mixtos: al guardar la hoja o importar la plantilla
+  (concepto → contrapartida/NIT; comparten el módulo 'caja').
+- RADIAN: en `registrar_lote_confirmaciones` y `POST /confirmar`
+  (clasificación + nombre tercero → cuenta por tipo de línea).
+- Entrenamiento con **archivos externos** (`aprendizaje_importador.py`): Excel/CSV del
+  programa de contabilidad (p. ej. movimiento contable SIIGO) o cualquier fuente.
+  Detecta la fila de encabezados y las columnas (Descripción/Detalle/Concepto/Nombre,
+  Cuenta contable, NIT) automáticamente; cada fila alimenta el motor por lotes.
+
+**Dónde prediligencia**:
+- Bancos (`/banco/previsualizar` y Retomar): cuenta contrapartida y NIT vacíos se
+  rellenan y marcan en morado (clase CSS `.ml-pred`, tooltip con % de confianza).
+- Caja/Mixto: al digitar el concepto, la hoja llama a `GET /api/aprendizaje/sugerir`
+  y rellena contrapartida/NIT vacíos (marcados `.ml-pred`; se desmarcan al editar).
+- RADIAN: fallback de `enriquecer_con_sugerencias` (§6.6).
+
+**UI**: página `/aprendizaje` (menú Empresas → Machine learning): estadísticas,
+patrones aprendidos (filtro/búsqueda/eliminación) y formulario de entrenamiento con
+archivos externos (histórico en `importaciones_conocimiento`). Permisos: `ml.ver`
+(consultar/API) y `ml.entrenar` (entrenar/eliminar patrones; roles admin y contador).
 
 ---
 
@@ -337,6 +383,9 @@ Diccionario `_GENERADORES` mapea clasificación → función generadora de líne
 | `importaciones` | Registro persistente de cada proceso RADIAN + **snapshot editable durable** (`preasientos_json`) con ciclo de estados (`procesando/procesada/corregida/exportada/error/anulada`). «Abrir» recupera el estado guardado con las correcciones; «Regenerar» reprocesa desde cero |
 | `procesos_banco` | Histórico del módulo Bancos: cada extracto previsualizado/exportado (archivo, cuenta, NIT banco, nº movimientos, estado `procesando`/`completada`/`error`) |
 | `cuentas_bancarias_tercero` | Cuentas bancarias de un tercero importadas del **certificado bancario** (Bancolombia, PJ y PN). Único por (`nit_tercero`, `numero_cuenta`); guarda banco, tipo de producto, fecha de apertura y estado. Lo alimenta el módulo Terceros |
+| `patrones_aprendidos` | Motor de aprendizaje generalizado (§6.7): contexto exacto normalizado → valor, por módulo/campo. Único por (modulo, campo, contexto, valor) |
+| `tokens_aprendidos` | Frecuencias token→valor del clasificador de texto (Naive Bayes) del motor de aprendizaje. Único por (modulo, campo, token, valor) |
+| `importaciones_conocimiento` | Histórico de entrenamientos del ML con archivos externos (archivo, módulo destino, filas, observaciones, estado) |
 
 CRUD de procesos de banco: `registrar_proceso_banco` (al previsualizar, estado
 `procesando`), `actualizar_proceso_banco` (a `completada`/`error` al exportar) y
@@ -415,6 +464,10 @@ Contexto global inyectado en todas las plantillas: empresa actual, empresas disp
 | `/descargar` | GET | Descarga el Excel generado |
 | `/confirmar` | POST | Registra una cuenta confirmada en el historial (aprendizaje) |
 | `/historial` | GET | Tabla de cuentas aprendidas (motor de sugerencias) |
+| `/aprendizaje` | GET | Centro de Machine learning: estadísticas, patrones aprendidos y entrenamiento |
+| `/aprendizaje/entrenar` | POST | Entrena el ML con un archivo externo (Excel/CSV de SIIGO u otra fuente) |
+| `/aprendizaje/patron/<id>/eliminar` | POST | Elimina un patrón aprendido incorrecto |
+| `/api/aprendizaje/sugerir` | GET | Predice campos para un texto (prediligenciamiento en vivo de Caja/Mixto) |
 | `/importaciones` | GET | Lista de importaciones persistidas (con estado y acciones) |
 | `/importaciones/<id>/abrir` | POST | Carga el snapshot durable en la sesión (retomar **conservando correcciones**), sin reprocesar |
 | `/importaciones/<id>/reprocesar` | POST | Regenera: reprocesa el RADIAN original desde cero (pierde correcciones manuales) |
@@ -570,7 +623,9 @@ Containers o Container Apps sin `/home` persistente). Ver `database.py` §7.
 documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módulo:
 `test_clasificador`, `test_terceros`, `test_impuestos`, `test_preasiento`, `test_validaciones`,
 `test_sugerencias`, `test_empresas`, `test_storage`, `test_siigo_mapeador`, `test_procesos_banco`,
-`test_certificado_bancario` (lector PJ/PN), `test_cuentas_bancarias_db` (CRUD cuentas de terceros).
+`test_certificado_bancario` (lector PJ/PN), `test_cuentas_bancarias_db` (CRUD cuentas de terceros),
+`test_aprendizaje` (motor ML: normalización, predicción exacta/por texto, fallback general,
+importador de conocimiento externo, integración RADIAN).
 
 > Los tests corren en CI antes de cada despliegue: **mantenerlos verdes es requisito para deploy**.
 
@@ -624,6 +679,7 @@ documento, `df_terceros`, `df_cuentas`, `df_comprobantes`). Cobertura por módul
 | Configurar cuentas/bancos de una empresa (varias cuentas o bancos) | `app/empresas.py` (`Empresa.cuentas_banco`, `bancos`, métodos `*_efectivas()`) + `templates/empresas.html` + `_parse_empresa_form` en `routes.py` |
 | Tocar la pantalla principal del módulo Bancos (selector, guía, actividad) | `templates/banco_upload.html` + `web.banco` en `routes.py` |
 | Añadir/ver el histórico de un módulo de Automatizaciones | tabla propia en `app/database.py` + helpers `registrar_/actualizar_/listar_*` (ver `procesos_banco`) + parcial `banco_actividad_items.html` |
+| Tocar el motor de aprendizaje / prediligenciamiento (ML) | `app/aprendizaje.py` (motor), `app/aprendizaje_importador.py` (entrenamiento externo), rutas `aprendizaje*` y `api_aprendizaje_sugerir` en `routes.py`, plantilla `aprendizaje.html` |
 | Añadir un endpoint web | `app/web/routes.py` (+ plantilla en `templates/`) |
 | Tocar el esquema de BD | `app/database.py` (`_create_tables_sqlite` y `_create_tables_mssql`) |
 | Añadir validaciones | `app/validaciones.py` |

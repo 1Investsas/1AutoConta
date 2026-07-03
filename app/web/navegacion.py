@@ -165,8 +165,8 @@ CATEGORIAS: dict[str, dict] = {
             },
             {
                 "nombre": "Machine learning",
-                "descripcion": "Reglas aprendidas del motor de sugerencias",
-                "endpoint": "web.historial",
+                "descripcion": "Conocimiento aprendido y entrenamiento del sistema",
+                "endpoint": "web.aprendizaje",
                 "icono": '<path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a3 3 0 0 0 6 0M12 5a3 3 0 0 1 3 3 '
                          '3 3 0 0 1 1 5.8V16a3 3 0 0 1-6 0M12 5V3"/>',
             },

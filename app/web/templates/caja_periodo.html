@@ -195,6 +195,8 @@
   .num-input { text-align:right; font-family:monospace; }
   .btn-del { background:transparent; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; line-height:1; }
   .hidden{ display:none; }
+  /* Valor prediligenciado por el motor de aprendizaje (machine learning) */
+  #tablaCaja input.ml-pred { border-color:#9b59b6 !important; background:rgba(155,89,182,.08); }
   /* Contrapartida: input + botón dividir, o chip cuando está subdividida */
   .cp-cell .cp-single { display:flex; align-items:center; gap:4px; }
   .cp-split { background:transparent; border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:2px 5px; color:var(--text-dim); line-height:1; }
@@ -305,6 +307,10 @@
 
       const cpEl = tr.querySelector('.f-contrapartida');
       cpEl.addEventListener('input', () => buscarCuentas(cpEl.value));
+
+      // Al terminar de digitar el concepto, prediligenciar contrapartida y
+      // NIT con el motor de aprendizaje (machine learning).
+      tr.querySelector('.f-concepto').addEventListener('change', () => sugerirDesdeConcepto(tr));
     }
     return tr;
   }
@@ -313,6 +319,41 @@
     const sel = tr.querySelector('.f-comprobante');
     if (sel.dataset.auto === '0') return;  // fijado a mano
     sel.value = esEntrada ? COMP_INGRESO : COMP_EGRESO;
+  }
+
+  // ── Prediligenciamiento por aprendizaje (machine learning) ───────────────
+  function marcarPred(el, pred, etiqueta) {
+    el.value = pred.valor;
+    el.classList.add('ml-pred');
+    el.title = '✨ ' + etiqueta + ' prediligenciado por aprendizaje (' +
+               Math.round(pred.confianza * 100) + '% de confianza). Corrígelo si no aplica.';
+    const limpiar = () => { el.classList.remove('ml-pred'); el.title = ''; el.removeEventListener('input', limpiar); };
+    el.addEventListener('input', limpiar);
+  }
+
+  function sugerirDesdeConcepto(tr) {
+    const texto = tr.querySelector('.f-concepto').value.trim();
+    if (texto.length < 3) return;
+    const cpEl = tr.querySelector('.f-contrapartida');
+    const nitEl = tr.querySelector('.f-nit');
+    const faltaCuenta = cpEl && !cpEl.value.trim() && !partesFila(tr).length;
+    const faltaNit = nitEl && !nitEl.value.trim();
+    if (!faltaCuenta && !faltaNit) return;
+    fetch('{{ url_for("web.api_aprendizaje_sugerir") }}?modulo=caja&texto=' + encodeURIComponent(texto))
+      .then(r => r.json())
+      .then(pred => {
+        if (faltaCuenta && pred.cuenta && !cpEl.value.trim()) marcarPred(cpEl, pred.cuenta, 'Contrapartida');
+        if (faltaNit && pred.nit_tercero && !nitEl.value.trim()) {
+          marcarPred(nitEl, pred.nit_tercero, 'NIT');
+          buscarTerceros(nitEl.value);  // completa el nombre si está en el maestro
+          setTimeout(() => {
+            const nomEl = tr.querySelector('.f-nombre');
+            const k = nitEl.value.trim();
+            if (porNit[k] && nomEl && !nomEl.value) nomEl.value = porNit[k];
+          }, 600);
+        }
+        recalc();
+      }).catch(() => {});
   }
 
   // ── Subdivisión de la contrapartida ──────────────────────────────────────

@@ -129,6 +129,16 @@ def registrar_confirmacion(
     )
 
 
+def _texto_aprendizaje(preasiento) -> str:
+    """Texto que describe el documento para el motor de aprendizaje por texto.
+
+    Combina la clasificación y el nombre del tercero: así el motor puede
+    generalizar a terceros NUNCA vistos con nombres similares (p. ej. dos
+    empresas de "TRANSPORTES ..." suelen ir a la misma cuenta de fletes).
+    """
+    return f"{preasiento.clasificacion} {preasiento.tercero_nombre or ''}"
+
+
 def enriquecer_con_sugerencias(
     preasientos: list,
     db_path: str = DB_PATH,
@@ -141,6 +151,11 @@ def enriquecer_con_sugerencias(
     tripleta (clasificacion, tercero_nit, tipo_linea), reemplaza la cuenta
     '[PENDIENTE]' por la cuenta sugerida y marca la línea como es_sugerida=True.
 
+    Si el historial exacto no conoce la tripleta (tercero nuevo), consulta el
+    motor de aprendizaje generalizado (app/aprendizaje.py), que predice por
+    similitud de texto sobre la clasificación y el nombre del tercero e incluye
+    el conocimiento importado de fuentes externas.
+
     Las líneas que NO tienen cuenta pendiente NO son modificadas.
 
     Args:
@@ -150,6 +165,8 @@ def enriquecer_con_sugerencias(
     Returns:
         La misma lista de preasientos, con las líneas pendientes enriquecidas.
     """
+    from app import aprendizaje
+
     total_sugeridas = 0
 
     for preasiento in preasientos:
@@ -164,6 +181,16 @@ def enriquecer_con_sugerencias(
                 tipo_linea=tipo_linea,
                 db_path=db_path,
             )
+
+            if not cuenta:
+                # Fallback: motor de aprendizaje generalizado (predice por texto
+                # para terceros nuevos y usa el conocimiento importado).
+                pred = aprendizaje.predecir(
+                    "radian", f"cuenta_{tipo_linea}",
+                    _texto_aprendizaje(preasiento), db_path,
+                )
+                if pred:
+                    cuenta = pred.valor
 
             if cuenta:
                 linea.cuenta = cuenta
@@ -203,7 +230,9 @@ def registrar_lote_confirmaciones(
     Registra en el historial todas las líneas con cuenta real (no pendiente,
     no sugerida) de la lista de preasientos.
 
-    Esto "alimenta" el motor con cada procesamiento exitoso.
+    Esto "alimenta" el motor con cada procesamiento exitoso: tanto el
+    historial exacto (tabla historial_cuentas) como el motor de aprendizaje
+    generalizado (texto de clasificación + nombre del tercero → cuenta).
 
     Args:
         preasientos: Lista de PreasientoContable ya procesados.
@@ -212,7 +241,10 @@ def registrar_lote_confirmaciones(
     Returns:
         Número de confirmaciones registradas.
     """
+    from app import aprendizaje
+
     total = 0
+    observaciones = []
     for preasiento in preasientos:
         for linea in preasiento.lineas:
             # Solo registrar cuentas reales (no pendientes, no sugeridas)
@@ -229,7 +261,19 @@ def registrar_lote_confirmaciones(
                 cuenta=linea.cuenta,
                 db_path=db_path,
             )
+            observaciones.append({
+                "modulo": "radian",
+                "campo": f"cuenta_{tipo_linea}",
+                "texto": _texto_aprendizaje(preasiento),
+                "valor": linea.cuenta,
+            })
             total += 1
+
+    if observaciones:
+        try:
+            aprendizaje.aprender_lote(observaciones, db_path)
+        except Exception:
+            logger.exception("No se pudo alimentar el motor de aprendizaje.")
 
     logger.info("Historial actualizado con %d confirmación(es).", total)
     return total

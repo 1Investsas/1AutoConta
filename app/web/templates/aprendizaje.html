@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}Machine learning — contable-auto{% endblock %}
+{% block page_title %}🧠 Machine learning{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">
+  El sistema aprende de lo que digitas en cada módulo y prediligencia cuentas y
+  terceros. Aquí puedes ver lo aprendido y acelerar el aprendizaje con archivos externos.
+</p>{% endblock %}
+
+{% block content %}
+
+<!-- ── Resumen del conocimiento ── -->
+<div class="stats-grid" style="margin-bottom:20px">
+  <div class="card">
+    <div class="card-title">Patrones aprendidos</div>
+    <div class="card-value">{{ stats.total_patrones }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Confirmaciones acumuladas</div>
+    <div class="card-value">{{ stats.total_confirmaciones }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Vocabulario (palabras con señal)</div>
+    <div class="card-value">{{ stats.vocabulario }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Módulos con conocimiento</div>
+    <div class="card-value">{{ stats.por_modulo | length }}</div>
+  </div>
+</div>
+
+<!-- ── Entrenar con archivos externos ── -->
+{% if puede_entrenar %}
+<div class="form-section" style="margin-bottom:22px">
+  <h2>⚡ Acelerar el aprendizaje con datos externos</h2>
+  <p class="muted small" style="margin:6px 0 14px">
+    Sube un Excel o CSV del programa de contabilidad (p. ej. el <strong>movimiento
+    contable de SIIGO</strong>) o de cualquier otra fuente. El sistema detecta
+    automáticamente las columnas de <strong>Descripción / Detalle / Concepto</strong>,
+    <strong>Cuenta contable</strong> y <strong>NIT</strong>, y aprende de cada fila
+    como si la hubieras digitado tú.
+  </p>
+  <form method="POST" action="{{ url_for('web.aprendizaje_entrenar') }}"
+        enctype="multipart/form-data" data-loading="true"
+        style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label style="font-size:0.8rem; color:var(--text-dim); display:block; margin-bottom:4px">
+        Archivo (.xlsx, .xls o .csv)
+      </label>
+      <input type="file" name="archivo" accept=".xlsx,.xls,.csv" required>
+    </div>
+    <div>
+      <label for="moduloDestino" style="font-size:0.8rem; color:var(--text-dim); display:block; margin-bottom:4px">
+        Aplicar el conocimiento a
+      </label>
+      <select name="modulo" id="moduloDestino">
+        {% for clave, nombre in modulos.items() %}
+        <option value="{{ clave }}">{{ nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">🧠 Entrenar</button>
+  </form>
+
+  {% if entrenamientos %}
+  <details style="margin-top:14px">
+    <summary class="muted small" style="cursor:pointer">Últimos entrenamientos ({{ entrenamientos | length }})</summary>
+    <div class="table-wrapper" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Fecha</th><th>Archivo</th><th>Destino</th>
+              <th class="text-right">Filas útiles</th>
+              <th class="text-right">Observaciones</th><th>Estado</th></tr>
+        </thead>
+        <tbody>
+          {% for e in entrenamientos %}
+          <tr>
+            <td class="text-dim">{{ e.fecha_fmt }}</td>
+            <td>{{ e.archivo_nombre }}</td>
+            <td>{{ modulos.get(e.modulo, e.modulo) }}</td>
+            <td class="text-right">{{ e.filas }}</td>
+            <td class="text-right">{{ e.aprendidos }}</td>
+            <td>
+              {% if e.estado == 'completada' %}
+              <span class="pill pill-ok" style="font-size:0.68rem">Completado</span>
+              {% else %}
+              <span class="pill" style="font-size:0.68rem; background:rgba(231,76,60,.2); color:#e74c3c"
+                    title="{{ e.detalle }}">Error</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ── Dónde aprende y prediligencia ── -->
+<div class="form-section" style="margin-bottom:22px">
+  <h2>¿Cómo funciona?</h2>
+  <p class="muted small" style="margin:6px 0 0">
+    Cada vez que confirmas una cuenta o un tercero en <strong>Bancos</strong>,
+    <strong>Caja general</strong>, <strong>Flujos mixtos</strong> o
+    <strong>RADIAN</strong>, el sistema lo memoriza. La próxima vez que aparezca
+    un texto igual, aplica el valor exacto aprendido; si el texto es nuevo pero
+    parecido (comparte palabras clave), lo predice por similitud y lo marca en
+    <span style="color:#9b59b6; font-weight:600">morado ✨</span> para que lo revises.
+    El conocimiento del destino «General» sirve de respaldo para todos los módulos.
+    Las reglas exactas de RADIAN por tercero se consultan en
+    <a href="{{ url_for('web.historial') }}" class="link-more">Motor de sugerencias RADIAN</a>.
+  </p>
+</div>
+
+<!-- ── Patrones aprendidos ── -->
+<div class="panel">
+  <div class="panel-head">
+    <h2>Conocimiento aprendido</h2>
+    <form method="GET" action="{{ url_for('web.aprendizaje') }}"
+          style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+      <select name="modulo" onchange="this.form.submit()">
+        <option value="">Todos los módulos</option>
+        {% for clave, nombre in modulos.items() %}
+        <option value="{{ clave }}" {% if filtro_modulo == clave %}selected{% endif %}>{{ nombre }}</option>
+        {% endfor %}
+        {% if filtro_modulo and filtro_modulo not in modulos %}
+        <option value="{{ filtro_modulo }}" selected>{{ filtro_modulo }}</option>
+        {% endif %}
+      </select>
+      <input type="text" name="q" value="{{ filtro_q }}" placeholder="Buscar texto o cuenta…"
+             style="min-width:200px">
+      <button type="submit" class="btn btn-secondary btn-sm">Buscar</button>
+    </form>
+  </div>
+
+  {% if patrones %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Módulo</th>
+          <th>Campo</th>
+          <th>Cuando el texto dice…</th>
+          <th>Prediligenciar</th>
+          <th class="text-right">Usos</th>
+          <th>Última vez</th>
+          {% if puede_entrenar %}<th style="width:40px"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in patrones %}
+        <tr>
+          <td><span class="pill pill-ok" style="font-size:0.68rem">{{ modulos.get(p.modulo, p.modulo) }}</span></td>
+          <td class="text-dim" style="font-size:0.8rem">{{ campos.get(p.campo, p.campo) }}</td>
+          <td style="max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+              title="{{ p.contexto }}">{{ p.contexto }}</td>
+          <td><code style="font-size:0.8rem; color:var(--success)">{{ p.valor }}</code></td>
+          <td class="text-right"><strong>{{ p.usos }}</strong></td>
+          <td class="text-dim">{{ (p.ultima_vez or '')[:10] or '—' }}</td>
+          {% if puede_entrenar %}
+          <td>
+            <form method="POST" action="{{ url_for('web.aprendizaje_patron_eliminar', patron_id=p.id) }}"
+                  onsubmit="return confirm('¿Eliminar este patrón aprendido?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn-icon" title="Eliminar patrón"
+                      style="background:transparent; border:none; color:var(--danger); cursor:pointer">✕</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center; padding:50px; color:var(--text-dim)">
+    <div style="font-size:3rem; margin-bottom:12px">🧠</div>
+    <p>Aún no hay conocimiento aprendido{% if filtro_modulo or filtro_q %} con ese filtro{% endif %}.</p>
+    <p style="font-size:0.85rem; margin-top:8px">
+      Digita movimientos en Bancos, Caja o RADIAN, o entrena con un archivo externo.
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
