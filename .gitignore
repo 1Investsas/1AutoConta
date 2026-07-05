@@ -24,3 +24,4 @@ uploads/
 web_sessions/
 .azure/
 *.tmp
+app/output/

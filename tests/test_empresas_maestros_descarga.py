@@ -31,7 +31,7 @@ def client(tmp_path, monkeypatch):
     # Aísla los archivos maestros: subida y descarga deben coincidir en la misma
     # raíz temporal (de lo contrario escribiríamos dentro del repo).
     monkeypatch.setattr(store, "_PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(routes, "_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr(routes.base, "_project_root", lambda: str(tmp_path))
     emp_mod._sistema_listo.clear()
     authn.reset_estado()
     app = create_app()
