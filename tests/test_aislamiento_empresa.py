@@ -119,7 +119,7 @@ class TestSqlAzureScoping:
 
     def test_cufe_existe_filtra_por_empresa(self, monkeypatch):
         conn = _RecConn(is_sqlite=False, one=None)
-        monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+        monkeypatch.setattr(db.core, "get_connection", lambda p=None: conn)
         db.cufe_existe("CUFE-X", db_path="db/contable_acme.db")
         sql, params = conn.calls[0]
         assert "WHERE cufe = ? AND empresa_id = ?" in sql
@@ -127,7 +127,7 @@ class TestSqlAzureScoping:
 
     def test_listar_importaciones_filtra_por_empresa(self, monkeypatch):
         conn = _RecConn(is_sqlite=False, rows=[])
-        monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+        monkeypatch.setattr(db.core, "get_connection", lambda p=None: conn)
         db.listar_importaciones(db_path="db/contable_acme.db")
         sql, params = conn.calls[0]
         assert "WHERE empresa_id = ?" in sql
@@ -136,7 +136,7 @@ class TestSqlAzureScoping:
 
     def test_registrar_documento_incluye_empresa(self, monkeypatch):
         conn = _RecConn(is_sqlite=False)
-        monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+        monkeypatch.setattr(db.core, "get_connection", lambda p=None: conn)
         db.registrar_documento(
             "CUFE-Y", "Factura", "FACTURA_COMPRA", "1", "",
             "900", "Prov", "901", "Cli", 100.0, None, "a.xlsx",
@@ -247,7 +247,7 @@ class TestTenantAwareAzure:
 
     def test_inicializar_db_azure_crea_indices(self, monkeypatch):
         conn = _RecConn(is_sqlite=False)
-        monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+        monkeypatch.setattr(db.core, "get_connection", lambda p=None: conn)
         db.inicializar_db("db/contable_acme.db")
         sqls = [sql for sql, _ in conn.calls]
         # La inicialización en modo Azure debe emitir los CREATE INDEX tenant-aware.
