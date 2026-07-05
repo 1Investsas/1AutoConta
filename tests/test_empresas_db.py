@@ -125,7 +125,7 @@ class _RecConn:
 
 def test_guardar_mssql_merge_param_count(monkeypatch):
     conn = _RecConn(is_sqlite=False)
-    monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+    monkeypatch.setattr(db.core, "get_connection", lambda p=None: conn)
     db.guardar_empresa_registro({
         "id": "acme", "nit": "900", "nombre": "ACME", "sigla": "ACM",
         "cuentas_contraparte": {"a": "1"},
@@ -141,7 +141,7 @@ def test_guardar_mssql_merge_param_count(monkeypatch):
 def test_listar_mssql_sin_filtro_empresa(monkeypatch):
     """La tabla `empresas` es el catálogo: NO se filtra por empresa_id."""
     conn = _RecConn(is_sqlite=False)
-    monkeypatch.setattr(db, "get_connection", lambda p=None: conn)
+    monkeypatch.setattr(db.core, "get_connection", lambda p=None: conn)
     db.listar_empresas_registro("ignorado")
     sql, _ = conn.calls[0]
     assert "empresa_id" not in sql
