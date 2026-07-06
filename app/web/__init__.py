@@ -1,5 +1,5 @@
 """
-Interfaz web del sistema contable-auto (FASE 2).
+Interfaz web del sistema 1ContaBot (FASE 2).
 
 Punto de entrada — Flask application factory.
 """

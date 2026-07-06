@@ -133,7 +133,7 @@ class TestCabecerasNavegador:
         cli = dc.DianClient()
         ua = cli.session.headers["User-Agent"]
         assert "Mozilla/5.0" in ua and "Chrome/" in ua
-        assert "contable-auto" not in ua          # ya no se anuncia como bot
+        assert "1contabot" not in ua.lower()      # ya no se anuncia como bot
         assert cli.session.headers["sec-ch-ua-mobile"] == "?0"
         assert cli.session.headers["Accept-Language"].startswith("es-CO")
 

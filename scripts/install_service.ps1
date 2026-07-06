@@ -1,5 +1,5 @@
 # ===========================================================================
-# install_service.ps1 — Instala contable-auto como Servicio de Windows
+# install_service.ps1 — Instala 1ContaBot como Servicio de Windows
 #
 # REQUISITOS:
 #   1. Ejecutar como Administrador
@@ -9,8 +9,8 @@
 # ===========================================================================
 
 param (
-    [string]$ServiceName = "contable-auto",
-    [string]$DisplayName = "contable-auto — Sistema Contable 1INVEST",
+    [string]$ServiceName = "1ContaBot",
+    [string]$DisplayName = "1ContaBot — Sistema Contable 1INVEST",
     [string]$Port = "5000"
 )
 
@@ -55,7 +55,7 @@ Write-Host "Instalando servicio '$ServiceName'..." -ForegroundColor Cyan
 # Configuración del servicio
 & $NssmPath set $ServiceName AppDirectory      $ProjectDir
 & $NssmPath set $ServiceName DisplayName       $DisplayName
-& $NssmPath set $ServiceName Description       "Servidor WSGI de producción para el sistema contable-auto de 1INVEST SAS"
+& $NssmPath set $ServiceName Description       "Servidor WSGI de producción para el sistema 1ContaBot de 1INVEST SAS"
 & $NssmPath set $ServiceName Start             SERVICE_AUTO_START
 & $NssmPath set $ServiceName AppStdout         (Join-Path $LogDir "service.log")
 & $NssmPath set $ServiceName AppStderr         (Join-Path $LogDir "service_error.log")

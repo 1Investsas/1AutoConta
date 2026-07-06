@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Optimizador de logo para 1CONTIGO.
+Optimizador de logo para 1ContaBot.
 
 Toma el logo original (alta resolución, normalmente con fondo blanco) y genera
 las versiones que usa la WebApp:
 
-  - logo-1contigo.png  → versión recortada y optimizada para el SIDEBAR oscuro
+  - logo-1contabot.png  → versión recortada y optimizada para el SIDEBAR oscuro
                          (fondo transparente, márgenes recortados, alto fijo).
   - favicon.png        → ícono cuadrado para la pestaña del navegador.
 
 Uso típico
 ----------
-1. Sube tu logo en alta a:  assets/branding/logo-1contigo-source.png
+1. Sube tu logo en alta a:  assets/branding/logo-1contabot-source.png
 2. Ejecuta:                 python scripts/optimizar_logo.py
 3. Listo: el sidebar usará automáticamente el logo optimizado.
 
@@ -22,7 +22,7 @@ Opciones
 
 `ORIGEN` puede ser cualquier ruta (.png/.jpg/.webp). Si se omite, se busca en
 assets/branding/ y luego en app/web/static/img/, en este orden:
-logo-1contigo-source, logo-1contigo-original, logo-1contigo.
+logo-1contabot-source, logo-1contabot-original, logo-1contabot.
 
 Requisito (solo para esta herramienta, no para la app): pip install pillow
 """
@@ -45,11 +45,11 @@ IMG_DIR = _RAIZ / "app" / "web" / "static" / "img"
 # El logo original en alta vive FUERA de static/ para que no se sirva al
 # navegador ni engorde el paquete de despliegue (pesa varios MB).
 SOURCE_DIR = _RAIZ / "assets" / "branding"
-SALIDA_DEFAULT = IMG_DIR / "logo-1contigo.png"
+SALIDA_DEFAULT = IMG_DIR / "logo-1contabot.png"
 FAVICON_DEFAULT = IMG_DIR / "favicon.png"
 
 EXTS = (".png", ".webp", ".jpg", ".jpeg")
-CANDIDATOS = ("logo-1contigo-source", "logo-1contigo-original", "logo-1contigo")
+CANDIDATOS = ("logo-1contabot-source", "logo-1contabot-original", "logo-1contabot")
 
 
 def _buscar_origen() -> Path | None:
@@ -118,7 +118,7 @@ def detectar_corte_isotipo(img: Image.Image, recorte_vertical: float) -> int:
     """Calcula la fila Y donde termina el isotipo (la marca) y empieza el wordmark.
 
     Busca la banda de filas "vacías" (casi sin píxeles opacos) más ancha en la
-    mitad inferior del logo —el espacio entre la marca y el texto "1CONTIGO"— y
+    mitad inferior del logo —el espacio entre la marca y el texto "1ContaBot"— y
     corta justo ahí. El análisis se hace sobre una copia en baja resolución por
     velocidad. Si no encuentra una separación clara, usa `recorte_vertical` como
     fracción del alto (default 0.65 = se queda con el 65% superior).
@@ -190,7 +190,7 @@ def generar_favicon(img: Image.Image, tam: int = 64) -> Image.Image:
               help=f"Ruta del PNG optimizado (default: {SALIDA_DEFAULT}).")
 @click.option("--solo-isotipo", is_flag=True, default=False,
               help="Recorta SOLO la marca (el '1' con la flecha) para el sidebar "
-                   "y guarda el lockup completo como logo-1contigo-full.png.")
+                   "y guarda el lockup completo como logo-1contabot-full.png.")
 @click.option("--recorte-vertical", default=0.65, show_default=True, type=float,
               help="Fracción superior a conservar como isotipo si no se detecta "
                    "una separación clara con el wordmark (0-1).")
@@ -209,7 +209,7 @@ def main(origen, altura, fondo, umbral, salida, solo_isotipo,
             click.echo(
                 "✗ No encontré ningún logo de origen en "
                 f"{IMG_DIR}\n"
-                "  Sube tu logo como 'logo-1contigo-source.png' (recomendado) "
+                "  Sube tu logo como 'logo-1contabot-source.png' (recomendado) "
                 "y vuelve a ejecutar, o pasa la ruta como argumento.",
                 err=True,
             )
@@ -221,7 +221,7 @@ def main(origen, altura, fondo, umbral, salida, solo_isotipo,
     # Si el único origen es el propio archivo de salida, conservamos el original
     # como '-source' para no perder la alta resolución en futuras ejecuciones.
     if origen == salida:
-        backup = IMG_DIR / "logo-1contigo-source.png"
+        backup = IMG_DIR / "logo-1contabot-source.png"
         if not backup.exists():
             shutil.copy2(origen, backup)
             click.echo(f"• Copia del original guardada en: {backup.name}")
@@ -244,7 +244,7 @@ def main(origen, altura, fondo, umbral, salida, solo_isotipo,
     if solo_isotipo:
         # 1) Lockup completo (para login / pantalla de carga).
         full = redimensionar_alto(img, altura_full)
-        ruta_full = salida.parent / "logo-1contigo-full.png"
+        ruta_full = salida.parent / "logo-1contabot-full.png"
         full.save(ruta_full, "PNG", optimize=True)
         kb_full = ruta_full.stat().st_size / 1024
         click.echo(f"✓ Lockup completo: {ruta_full.name}  "

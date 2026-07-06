@@ -1,5 +1,5 @@
 /* ============================================================
-   1CONTIGO — Sistema de diseño (Fase 1: capa visual)
+   1ContaBot — Sistema de diseño (Fase 1: capa visual)
    Tema claro · Sidebar oscuro · Acentos dorados
    Tipografía: Inter (Google Fonts)
    ------------------------------------------------------------
@@ -607,7 +607,7 @@ button { font-family: inherit; }
 .auto-cat { font-size: 0.74rem; color: var(--text-dim); margin-top: 1px; }
 
 /* ============================================================
-   BADGES DE ESTADO (diseño 1CONTIGO)
+   BADGES DE ESTADO (diseño 1ContaBot)
    ============================================================ */
 .badge {
   display: inline-flex;

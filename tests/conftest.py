@@ -1,5 +1,5 @@
 """
-Fixtures de pytest para el sistema contable-auto.
+Fixtures de pytest para el sistema 1ContaBot.
 
 Proporciona DataFrames y objetos de ejemplo que replican
 la estructura real de los archivos RADIAN y maestros.

@@ -1,5 +1,5 @@
 """
-Módulo de almacenamiento para contable-auto.
+Módulo de almacenamiento para 1ContaBot.
 
 Proporciona una capa de abstracción para operaciones de archivos:
 - Cuando AZURE_STORAGE_CONNECTION_STRING está configurada → Azure Blob Storage.

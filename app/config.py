@@ -1,5 +1,5 @@
 """
-Configuración central del sistema contable-auto.
+Configuración central del sistema 1ContaBot.
 
 Contiene todas las constantes, rutas por defecto, mapeos de comprobantes,
 cuentas de impuestos y demás parámetros de configuración del sistema.
@@ -87,7 +87,7 @@ DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
 # Azure Blob Storage (empty = use local filesystem)
 AZURE_STORAGE_CONNECTION_STRING: str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
-AZURE_STORAGE_CONTAINER: str = os.getenv("AZURE_STORAGE_CONTAINER", "contable-auto")
+AZURE_STORAGE_CONTAINER: str = os.getenv("AZURE_STORAGE_CONTAINER", "1contabot")
 
 # ---------------------------------------------------------------------------
 # Autenticación y autorización (Fase 3 / Fase 4)

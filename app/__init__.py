@@ -1,5 +1,5 @@
 """
-Paquete principal de contable-auto.
+Paquete principal de 1ContaBot.
 
 Sistema de automatización contable para 1 INVEST SAS.
 Procesa facturación electrónica descargada del portal RADIAN de la DIAN.

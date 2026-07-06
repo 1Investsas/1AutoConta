@@ -1,8 +1,8 @@
-"""Instalación del paquete contable-auto."""
+"""Instalación del paquete 1ContaBot."""
 from setuptools import setup, find_packages
 
 setup(
-    name="contable-auto",
+    name="1contabot",
     version="1.0.0",
     description="Automatización contable de facturación electrónica colombiana para 1 INVEST SAS",
     author="1 INVEST SAS",
@@ -18,7 +18,7 @@ setup(
     python_requires=">=3.11",
     entry_points={
         "console_scripts": [
-            "contable-auto=main:cli",
+            "1contabot=main:cli",
         ],
     },
 )

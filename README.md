@@ -1,4 +1,4 @@
-# contable-auto
+# 1ContaBot
 
 Sistema de automatización contable para **1 INVEST SAS** (NIT 901.331.657-7).
 
@@ -14,8 +14,8 @@ Procesa reportes de facturación electrónica descargados desde el portal RADIAN
 ## Instalación
 
 ```bash
-git clone <repo-url>
-cd contable-auto
+git clone <repo-url> 1contabot
+cd 1contabot
 pip install -r requirements.txt
 ```
 
@@ -140,7 +140,7 @@ Cada empresa tiene sus propias cuentas, períodos y movimientos de caja
 ## Estructura de carpetas
 
 ```
-contable-auto/
+1ContaBot/
 ├── app/                  # Módulos del sistema
 │   ├── config.py         # Constantes y configuración central
 │   ├── importador.py     # Lectura de RADIAN y archivos maestros

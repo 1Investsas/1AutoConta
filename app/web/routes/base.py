@@ -85,7 +85,7 @@ def _allowed_csv(filename: str) -> bool:
 
 
 def _project_root() -> str:
-    """Retorna la ruta raíz del proyecto (contable-auto/)."""
+    """Retorna la ruta raíz del proyecto (1ContaBot/)."""
     # routes.py vive en &lt;root&gt;/app/web/routes.py → 3 niveles arriba
     return os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
