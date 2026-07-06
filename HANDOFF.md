@@ -3,7 +3,7 @@
 > **Cómo usar este archivo:** súbelo (o pégalo) al iniciar un chat nuevo. Es autocontenido: explica el proyecto, el plan por fases, **lo que ya se hizo**, **el siguiente paso**, y la orientación mínima del código para que una IA pueda continuar sin re-explorar todo.
 >
 > **Prompt sugerido para el chat nuevo:**
-> *"Continúa el proyecto `1ContaBot` según este handoff. Trabaja en la rama `claude/charming-lovelace-myhcez`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
+> *"Continúa el proyecto `1ContaBot` según este handoff. Trabaja en la rama que tenga asignada la sesión. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
 
 ---
 
@@ -99,7 +99,7 @@ Rediseño gráfico, dashboard ejecutivo/operativo, analítica de errores, audito
 
 ## 4. Lo que YA se hizo (estado actual)
 
-> **Rama de trabajo actual: `claude/charming-lovelace-myhcez`.** Parte de `main` (que ya incluye Fases 1–2 vía PRs #21–#24). **No hay PR abierta** por ahora (los commits van a la rama; abrir PR solo si el usuario lo pide).
+> **La Fase 3 ya está en `main`** (la rama `claude/charming-lovelace-myhcez` se fusionó vía PR #25). Desde entonces `main` también incorporó módulos posteriores (PRs #26–#50 y siguientes: terceros/RUT, caja general, flujos mixtos, ML de prediligenciamiento, refactor de `app/database.py` y `app/web/routes.py` en paquetes, y el rename a **1ContaBot**). Cada sesión nueva trabaja en su propia rama `claude/*` a partir de `main`.
 
 ### ✅ Fase 3 — RBAC + autorización + multi-tenencia (con stub de auth dev)
 El bloqueante #1 (cualquiera podía fijar `session["empresa_id"]` y ver otra empresa) queda resuelto: ahora hay identidad, permisos por rol y validación de acceso a empresa.
@@ -167,18 +167,17 @@ Antes, los preasientos vivían **solo en la sesión** (server-side, efímeros) y
 - **`app/database.py`**: helper idempotente `_asegurar_indices_mssql` (invocado desde `inicializar_db` solo en Azure SQL) que crea índices `IF NOT EXISTS` (chequeo por `name` + `object_id`): `ix_importaciones_empresa(empresa_id,id)`, `ix_procesos_banco_empresa(empresa_id,id)`, `ix_documentos_empresa_clasif(empresa_id,clasificacion)`. Las tablas con `UNIQUE(empresa_id,…)` (documentos/historial/correcciones) ya tenían índice que cubre el filtro; `bitacora` solo se escribe, así que no se indexa.
 - **Tests**: `TestTenantAwareAzure` en `tests/test_aislamiento_empresa.py` (4 casos: DDL con `empresa_id` en las 6 tablas, índices idempotentes y por `empresa_id`, que `inicializar_db` los emite en Azure y NO en SQLite).
 
-**Verificación global:** `pytest` → **253/253 OK** (236 previos + 17 de RBAC).
+**Verificación global:** `pytest` → **437/437 OK** (la suite creció con los módulos posteriores a la Fase 3: terceros/RUT, caja general, flujos mixtos, ML).
 
 ---
 
 ## 5. Siguiente paso
 
-**Fase 3 CERRADA.** RBAC + autorización + multi-tenencia con stub de auth dev (el **bloqueante #1** queda resuelto) — ver §4. `pytest` 253/253.
+**Fase 3 CERRADA** (fusionada a `main` vía PR #25). RBAC + autorización + multi-tenencia con stub de auth dev (el **bloqueante #1** queda resuelto) — ver §4. `pytest` 437/437.
 
 Siguiente hito: **★ MIGRACIÓN a cuentas oficiales (punto híbrido) ★** y luego **Fase 4 — Autenticación real con Entra + endurecimiento Azure**. El código ya está listo para Entra: poner `AUTH_MODE=entra` y configurar App Service Authentication (la identidad llega en `X-MS-CLIENT-PRINCIPAL-NAME`); `BOOTSTRAP_ADMIN_EMAIL` da el primer admin. Ejecutar el **Checklist de migración** (§2): parametrizar `azure-setup.sh`, crear recursos oficiales, OIDC, App Settings, Key Vault, RLS.
 
 Opciones rápidas si el usuario lo pide:
-- **Abrir PR** de esta rama (`claude/charming-lovelace-myhcez`) para revisar la Fase 3 completa.
 - **Granularidad/roles**: ajustar el catálogo de permisos o los roles seed (`app/authz.py`) si el equipo administrativo necesita otra separación de funciones.
 - **Aislamiento de blobs** de `output` y `web_sessions` por empresa (hoy solo `uploads` está aislado; §9).
 - **Llevar la división y el modelo durable a Bancos** (hoy el durable es solo RADIAN; Bancos usa su propio `procesos_banco` sin snapshot editable).
@@ -209,7 +208,7 @@ Opciones rápidas si el usuario lo pide:
 ```bash
 pip install --ignore-installed blinker -r requirements.txt   # deps (el flag evita conflicto con blinker del sistema)
 pip install pytest                                           # si no está
-python -m pytest tests/ -q                                   # 253 tests
+python -m pytest tests/ -q                                   # 437 tests
 # Auth: por defecto AUTH_MODE=dev → autologin de un admin local (DEV_AUTH_EMAIL).
 # Para probar roles: /logout y luego /login eligiendo otro usuario en /usuarios.
 # Smoke: arrancar app y render del índice
@@ -220,7 +219,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 
 ## 8. Notas de entorno y git
 
-- **Rama de trabajo:** `claude/charming-lovelace-myhcez` (parte de `main`, que ya incluye Fases 1–2 vía PRs #21–#24). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Último incremento: **Fase 3 — RBAC + autorización**.
+- **Rama de trabajo:** cada sesión usa su propia rama `claude/*` a partir de `main`. `main` ya incluye Fases 1–3 (la Fase 3 se fusionó vía PR #25) y los módulos posteriores (PRs #26–#50+). **No abrir PR salvo que el usuario lo pida** (push a la rama la prepara).
 - **Cuentas actuales: de PRUEBA** (GitHub `1investsas/1autoconta` + Azure de prueba). La migración a cuentas oficiales se hace en el punto híbrido (§2).
 - **Entorno remoto efímero:** todo lo que valga la pena debe quedar **commiteado y pusheado**. Este handoff vive en el repo como `HANDOFF.md`.
 
