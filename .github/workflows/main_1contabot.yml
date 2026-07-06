@@ -38,9 +38,24 @@ jobs:
       # y la app no arrancaba (ModuleNotFoundError). Instalándolas en ./vendor
       # y añadiéndolas al sys.path (ver application.py) el despliegue es
       # autocontenido y no depende de la build del servidor.
+      #
+      # IMPORTANTE: los wheels se eligen para la PLATAFORMA DE DESTINO, no para
+      # este runner. ubuntu-latest trae una glibc más nueva que la imagen de
+      # App Service; sin --platform, pip elegía wheels manylinux para la glibc
+      # del runner que en el servidor fallaban al importar con
+      # "GLIBC_2.33 not found" (visto con cryptography → Azure Blob roto).
       - name: Bundle dependencies for deployment
         run: |
-          python -m pip install -r requirements.txt --target=vendor
+          python -m pip install -r requirements.txt --target=vendor \
+              --only-binary=:all: \
+              --implementation cp --python-version 3.11 \
+              --abi cp311 --abi abi3 --abi none \
+              --platform manylinux_2_28_x86_64 \
+              --platform manylinux_2_24_x86_64 \
+              --platform manylinux_2_17_x86_64 \
+              --platform manylinux2014_x86_64 \
+              --platform manylinux2010_x86_64 \
+              --platform manylinux1_x86_64
 
       # Recortar el paquete: nada de esto se usa en runtime y engorda el zip
       # que se sube a wwwroot (SMB), alargando despliegues y arranques en frío.
