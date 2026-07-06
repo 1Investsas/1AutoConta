@@ -7,6 +7,13 @@
 # o en una terminal con Azure CLI instalado y autenticado (az login).
 #
 # IMPORTANTE: Revisa y ajusta las variables antes de ejecutar.
+#
+# ⚠️  NO reejecutes el script COMPLETO sobre un entorno ya configurado:
+#    - La sección 2 RESETEA la contraseña del admin SQL al valor de
+#      SQL_ADMIN_PASS (az sql server create hace PUT sobre el server existente).
+#    - Las secciones 5 y 7 PISAN los App Settings con los valores de las
+#      variables de arriba (incluido BOOTSTRAP_ADMIN_EMAIL).
+#    Para completar una parte que falló, copia y ejecuta SOLO esa sección.
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ----- Variables — AJUSTAR SEGÚN TU ENTORNO -----
@@ -214,6 +221,10 @@ az webapp config appsettings set \
 # credenciales adicionales. Sección idempotente: puede reejecutarse.
 echo "🔑 Configurando Key Vault + Managed Identity..."
 
+# Algunas suscripciones no tienen registrado el proveedor de Key Vault; sin
+# esto, az keyvault create falla con MissingSubscriptionRegistration.
+az provider register --namespace Microsoft.KeyVault --wait
+
 az keyvault create \
     --name $KEYVAULT_NAME \
     --resource-group $RESOURCE_GROUP \
@@ -222,6 +233,12 @@ az keyvault create \
 
 KV_ID=$(az keyvault show --name $KEYVAULT_NAME \
     --resource-group $RESOURCE_GROUP --query id -o tsv)
+if [ -z "$KV_ID" ]; then
+    echo "❌ El Key Vault '$KEYVAULT_NAME' no existe tras intentar crearlo."
+    echo "   No se continúa con la sección 8 (evita errores en cascada)."
+    echo "   Causas típicas: nombre tomado globalmente o falta de permisos."
+    exit 1
+fi
 
 # Managed Identity del App Service (system-assigned) + permiso de LECTURA de
 # secretos sobre el vault.
