@@ -35,9 +35,11 @@ def health():
 def login():
     """Inicio de sesión.
 
-    En modo Entra (Fase 4) la identidad la provee App Service Authentication y
-    esta página solo redirige. En modo dev es un stub: permite elegir el usuario
-    para probar roles.
+    En modo Entra (Fase 4) la identidad la provee App Service Authentication:
+    esta página ofrece el botón «Continuar con Microsoft» (/.auth/login/aad) y,
+    si la cuenta Entra existe pero no tiene acceso (desactivada o de un tenant
+    no permitido), lo explica sin entrar en un bucle de redirecciones. En modo
+    dev es un stub: permite elegir el usuario para probar roles.
     """
     from app.config import AUTH_MODE
     # Sanea `next` para evitar open-redirect: solo rutas internas (una sola '/').
@@ -48,6 +50,21 @@ def login():
     # Si ya hay sesión válida, no mostrar el login.
     if authn.usuario_actual() is not None and request.method == "GET":
         return redirect(destino)
+
+    if AUTH_MODE == "entra":
+        # Identidad Entra presente pero sin acceso a la app (cuenta desactivada,
+        # sin provisionar o tenant rechazado): se muestra el aviso en la página.
+        principal = authn.principal_entra() if request.method == "GET" else None
+        entra_email = (principal or {}).get("email", "")
+        if entra_email:
+            audit.registrar("login", detalle=f"email={entra_email}",
+                            resultado="denegado")
+        return render_template(
+            "login.html", usuarios=[], modo=AUTH_MODE, next=destino,
+            entra_email=entra_email,
+            url_login_entra=authn.url_login_entra(destino),
+            url_logout_entra=authn.url_logout_entra(),
+        )
 
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
@@ -60,13 +77,11 @@ def login():
         flash(f"Bienvenido, {usuario['nombre'] or usuario['email']}.", "success")
         return redirect(destino)
 
-    usuarios = []
-    if AUTH_MODE != "entra":
-        from app.database import listar_usuarios
-        from app.config import SYSTEM_DB_PATH
-        # Asegura que el esquema/seed existan antes de listar.
-        authn._asegurar_auth()
-        usuarios = listar_usuarios(SYSTEM_DB_PATH)
+    from app.database import listar_usuarios
+    from app.config import SYSTEM_DB_PATH
+    # Asegura que el esquema/seed existan antes de listar.
+    authn._asegurar_auth()
+    usuarios = listar_usuarios(SYSTEM_DB_PATH)
     return render_template(
         "login.html", usuarios=usuarios, modo=AUTH_MODE, next=destino,
     )
@@ -75,12 +90,18 @@ def login():
 @bp.route("/logout", methods=["GET", "POST"])
 def logout():
     """Cierra la sesión del usuario."""
+    from app.config import AUTH_MODE
+
     audit.registrar("logout")
     authn.cerrar_sesion()
     # Limpiar el contexto de trabajo de la sesión.
     session.pop(KEY_EMPRESA, None)
     session_store.eliminar(KEY_RESULTADO)
     session_store.eliminar(KEY_BANCO)
+    if AUTH_MODE == "entra":
+        # Cerrar también la sesión de App Service Authentication; de lo
+        # contrario la siguiente petición volvería a entrar autenticada.
+        return redirect(authn.url_logout_entra())
     flash("Sesión cerrada.", "success")
     return redirect(url_for("web.login"))
 

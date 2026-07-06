@@ -1,5 +1,5 @@
 """
-Autenticación — Fase 3 (con stub de desarrollo, listo para Entra en Fase 4).
+Autenticación — Fase 4 (Microsoft Entra ID vía App Service Authentication).
 
 Resuelve *quién* es el usuario de la petición actual. Dos modos (config.AUTH_MODE):
 
@@ -8,9 +8,15 @@ Resuelve *quién* es el usuario de la petición actual. Dos modos (config.AUTH_M
             autoprovisiona con rol de administrador global. La UI permite
             "iniciar sesión" como otro usuario para probar roles, y "cerrar
             sesión" suprime el autologin hasta el próximo login.
-- "entra" : la identidad llega en la cabecera X-MS-CLIENT-PRINCIPAL-NAME que
-            inyecta App Service Authentication. El usuario se resuelve/crea en
-            la tabla `usuarios`; los roles los asigna un administrador.
+- "entra" : la identidad la provee App Service Authentication (Easy Auth) con
+            Microsoft Entra ID. La plataforma valida el token OIDC y le inyecta
+            a la app las cabeceras X-MS-CLIENT-PRINCIPAL* (que además ELIMINA
+            de cualquier petición externa, por lo que dentro de App Service son
+            de confianza). De ahí se extraen email, nombre, objeto (oid) y
+            tenant (tid); el usuario se resuelve/autoprovisiona en la tabla
+            `usuarios` y los roles los asigna un administrador. El login lo
+            inicia /login redirigiendo a /.auth/login/aad y el logout cierra
+            también la sesión de Easy Auth (/.auth/logout).
 
 La autorización (qué puede hacer) vive en `app/authz.py`; el aislamiento por
 empresa (a qué empresas accede) en `app/tenancy.py`.
@@ -18,8 +24,11 @@ empresa (a qué empresas accede) en `app/tenancy.py`.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import threading
+from urllib.parse import quote
 
 from flask import g, has_request_context, redirect, request, session, url_for
 
@@ -33,9 +42,30 @@ logger = logging.getLogger(__name__)
 SESSION_EMAIL_KEY = "auth_email"
 # Bandera que suprime el autologin del stub dev tras cerrar sesión.
 SESSION_LOGOUT_KEY = "auth_logout"
+# Email cuyo último acceso ya quedó registrado en esta sesión (modo entra):
+# evita un UPDATE a `usuarios` en cada petición.
+SESSION_ACCESO_KEY = "auth_acceso"
 
-# Cabecera que App Service Authentication inyecta con el email del usuario Entra.
+# Cabeceras que App Service Authentication inyecta con la identidad Entra.
+# X-MS-CLIENT-PRINCIPAL trae el principal completo (claims en JSON base64);
+# las otras dos son el fallback si por configuración no llegara el principal.
+_HEADER_ENTRA_PRINCIPAL = "X-MS-CLIENT-PRINCIPAL"
 _HEADER_ENTRA_EMAIL = "X-MS-CLIENT-PRINCIPAL-NAME"
+_HEADER_ENTRA_OID = "X-MS-CLIENT-PRINCIPAL-ID"
+
+# Tipos de claim aceptados por dato. Easy Auth entrega según configuración los
+# nombres cortos del token v2 (preferred_username, oid, tid…) o los URIs largos
+# de WS-Fed; se aceptan ambos, en orden de preferencia.
+_CLAIMS_EMAIL = (
+    "preferred_username",
+    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    "email",
+    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn",
+    "upn",
+)
+_CLAIMS_NOMBRE = ("name", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")
+_CLAIMS_OID = ("http://schemas.microsoft.com/identity/claims/objectidentifier", "oid")
+_CLAIMS_TID = ("http://schemas.microsoft.com/identity/claims/tenantid", "tid")
 
 # Endpoints accesibles sin sesión iniciada (además de los estáticos).
 # `web.radian_auto_cron` se protege con su propio token compartido, no por sesión.
@@ -86,15 +116,66 @@ def _provisionar_admin(email: str, nombre: str, path: str) -> dict:
     return usuario
 
 
-def _email_solicitado() -> str | None:
-    """Email del usuario para esta petición, según el modo de autenticación."""
-    if _modo_entra():
-        # En producción Entra la identidad SOLO sale de la cabecera de confianza
-        # que inyecta App Service Authentication (no de la sesión, que el cliente
-        # podría manipular).
-        return (request.headers.get(_HEADER_ENTRA_EMAIL) or "").strip().lower() or None
+def _primer_claim(claims: dict[str, str], tipos: tuple[str, ...]) -> str:
+    """Primer valor no vacío entre los tipos de claim dados."""
+    for t in tipos:
+        val = (claims.get(t) or "").strip()
+        if val:
+            return val
+    return ""
 
-    # Modo dev: usuario elegido en la sesión, o el admin local por defecto
+
+def principal_entra() -> dict | None:
+    """Identidad Entra de la petición, según App Service Authentication.
+
+    Decodifica la cabecera X-MS-CLIENT-PRINCIPAL (JSON base64 con los claims
+    del token) y retorna ``{"email", "nombre", "oid", "tid"}``. Si el principal
+    no llega, cae a las cabeceras simples X-MS-CLIENT-PRINCIPAL-NAME/-ID.
+
+    Retorna None si no hay identidad o si el tenant no es el permitido
+    (config.ENTRA_TENANT_ID, cuando está definido).
+    """
+    email = (request.headers.get(_HEADER_ENTRA_EMAIL) or "").strip().lower()
+    nombre = ""
+    oid = (request.headers.get(_HEADER_ENTRA_OID) or "").strip()
+    tid = ""
+
+    b64 = (request.headers.get(_HEADER_ENTRA_PRINCIPAL) or "").strip()
+    if b64:
+        try:
+            # Easy Auth usa base64 sin padding garantizado; se completa.
+            payload = json.loads(base64.b64decode(b64 + "=" * (-len(b64) % 4)))
+            claims: dict[str, str] = {}
+            for c in payload.get("claims", []):
+                claims.setdefault(c.get("typ") or "", c.get("val") or "")
+            email = (_primer_claim(claims, _CLAIMS_EMAIL) or email).lower()
+            nombre = _primer_claim(claims, _CLAIMS_NOMBRE)
+            oid = _primer_claim(claims, _CLAIMS_OID) or oid
+            tid = _primer_claim(claims, _CLAIMS_TID).lower()
+        except (ValueError, TypeError):
+            logger.warning(
+                "Cabecera %s ilegible; se usa el fallback de cabeceras simples",
+                _HEADER_ENTRA_PRINCIPAL,
+            )
+
+    if not email:
+        return None
+
+    # Con tenant configurado se exige el claim `tid` y que coincida: una
+    # identidad de otro tenant (o sin tenant verificable) no entra.
+    if config.ENTRA_TENANT_ID and tid != config.ENTRA_TENANT_ID:
+        logger.warning(
+            "Identidad Entra rechazada por tenant no permitido: %s (tid=%s)",
+            email, tid or "?",
+        )
+        return None
+
+    return {"email": email, "nombre": nombre, "oid": oid, "tid": tid}
+
+
+def _email_solicitado_dev() -> str | None:
+    """Email del usuario para esta petición en modo dev (stub)."""
+    # Usuario elegido en la sesión, o el admin local por defecto
     # (salvo que se haya cerrado sesión explícitamente).
     elegido = session.get(SESSION_EMAIL_KEY)
     if elegido:
@@ -102,6 +183,36 @@ def _email_solicitado() -> str | None:
     if not session.get(SESSION_LOGOUT_KEY):
         return config.DEV_AUTH_EMAIL
     return None
+
+
+def _resolver_usuario_entra(principal: dict, path: str) -> dict | None:
+    """Resuelve/autoprovisiona el usuario Entra y sincroniza nombre/oid.
+
+    El usuario nuevo se crea SIN roles (los asigna un administrador después),
+    salvo el admin de bootstrap que maneja `usuario_actual`.
+    """
+    usuario = _db.obtener_usuario_por_email(principal["email"], db_path=path)
+    if usuario is None:
+        _db.crear_usuario(
+            principal["email"], nombre=principal["nombre"],
+            entra_oid=principal["oid"], db_path=path,
+        )
+        usuario = _db.obtener_usuario_por_email(principal["email"], db_path=path)
+        logger.info("Usuario Entra autoprovisionado (sin roles): %s", principal["email"])
+    else:
+        # Entra es la fuente de verdad del nombre y el oid: si trae valores
+        # nuevos (o el registro aún no los tenía), se sincronizan.
+        nombre = principal["nombre"] or None
+        oid = principal["oid"] or None
+        if (nombre and nombre != usuario["nombre"]) or (oid and oid != usuario["entra_oid"]):
+            _db.actualizar_usuario(usuario["id"], nombre=nombre, entra_oid=oid, db_path=path)
+            usuario = _db.obtener_usuario_por_email(principal["email"], db_path=path)
+
+    # Último acceso: una sola vez por sesión (no un UPDATE por petición).
+    if usuario and usuario["activo"] and session.get(SESSION_ACCESO_KEY) != usuario["email"]:
+        _db.registrar_acceso_usuario(usuario["id"], db_path=path)
+        session[SESSION_ACCESO_KEY] = usuario["email"]
+    return usuario
 
 
 def usuario_actual() -> dict | None:
@@ -114,23 +225,26 @@ def usuario_actual() -> dict | None:
 
     _asegurar_auth()
     path = _system_db_path()
-    email = _email_solicitado()
     usuario: dict | None = None
 
-    if email:
-        usuario = _db.obtener_usuario_por_email(email, db_path=path)
-        # En Entra el usuario puede no existir aún: se autoprovisiona (sin roles,
-        # salvo que sea el admin de bootstrap configurado).
-        if usuario is None and _modo_entra():
-            nombre = (request.headers.get("X-MS-CLIENT-PRINCIPAL-ID") or "").strip()
-            _db.crear_usuario(email, nombre=nombre, db_path=path)
+    if _modo_entra():
+        # En producción Entra la identidad SOLO sale de las cabeceras de
+        # confianza que inyecta App Service Authentication (no de la sesión,
+        # que el cliente podría manipular).
+        principal = principal_entra()
+        if principal:
+            usuario = _resolver_usuario_entra(principal, path)
+    else:
+        email = _email_solicitado_dev()
+        if email:
             usuario = _db.obtener_usuario_por_email(email, db_path=path)
-        if usuario and config.BOOTSTRAP_ADMIN_EMAIL and \
-                email == config.BOOTSTRAP_ADMIN_EMAIL:
-            rid = _db.obtener_o_crear_rol(authz.ROL_ADMIN, db_path=path)
-            _db.asignar_rol_global(usuario["id"], rid, db_path=path)
-        if usuario and not usuario["activo"]:
-            usuario = None  # cuenta desactivada → sin acceso
+
+    if usuario and config.BOOTSTRAP_ADMIN_EMAIL and \
+            usuario["email"] == config.BOOTSTRAP_ADMIN_EMAIL:
+        rid = _db.obtener_o_crear_rol(authz.ROL_ADMIN, db_path=path)
+        _db.asignar_rol_global(usuario["id"], rid, db_path=path)
+    if usuario and not usuario["activo"]:
+        usuario = None  # cuenta desactivada → sin acceso
 
     if has_request_context():
         g.usuario_actual = usuario
@@ -138,10 +252,14 @@ def usuario_actual() -> dict | None:
 
 
 def iniciar_sesion(email: str) -> dict | None:
-    """Marca a `email` como el usuario activo de la sesión (login).
+    """Marca a `email` como el usuario activo de la sesión (login, SOLO modo dev).
 
-    Retorna el usuario si existe y está activo; None en caso contrario.
+    En modo entra el login lo hace App Service Authentication; elegir usuario
+    por formulario queda deshabilitado. Retorna el usuario si existe y está
+    activo; None en caso contrario.
     """
+    if _modo_entra():
+        return None
     _asegurar_auth()
     email = (email or "").strip().lower()
     usuario = _db.obtener_usuario_por_email(email, db_path=_system_db_path())
@@ -158,9 +276,23 @@ def iniciar_sesion(email: str) -> dict | None:
 def cerrar_sesion() -> None:
     """Cierra la sesión del usuario (y suprime el autologin del stub dev)."""
     session.pop(SESSION_EMAIL_KEY, None)
+    session.pop(SESSION_ACCESO_KEY, None)
     session[SESSION_LOGOUT_KEY] = True
     if has_request_context():
         g.pop("usuario_actual", None)
+
+
+def url_login_entra(destino: str = "/") -> str:
+    """URL de Easy Auth que inicia el login con Entra y vuelve a `destino`."""
+    if not destino.startswith("/") or destino.startswith("//"):
+        destino = "/"
+    return f"{config.ENTRA_LOGIN_PATH}?post_login_redirect_uri={quote(destino, safe='')}"
+
+
+def url_logout_entra() -> str:
+    """URL de Easy Auth que cierra la sesión Entra y aterriza en /login."""
+    destino = quote(url_for("web.login"), safe="")
+    return f"{config.ENTRA_LOGOUT_PATH}?post_logout_redirect_uri={destino}"
 
 
 def redirigir_login():

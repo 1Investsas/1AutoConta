@@ -81,7 +81,8 @@ Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de
 Ejecutar el **Checklist de migración** (§2).
 
 ### Fase 4 — Autenticación real + endurecimiento Azure (en oficial)
-App Service Authentication con **Entra ID**; resolver/crear usuario en `dbo.usuarios`. **Key Vault + Managed Identity**. **Row-Level Security** en Azure SQL + `sp_set_session_context` por conexión. Observabilidad (App Insights, alertas, budgets).
+- ✅ **Autenticación con Entra ID (lado app)**: parseo completo del principal de App Service Authentication (`X-MS-CLIENT-PRINCIPAL`: email/nombre/oid/tid), autoprovisión con sincronización de nombre/`entra_oid`, validación opcional de tenant (`ENTRA_TENANT_ID`), login vía `/.auth/login/aad`, logout que cierra también Easy Auth, página de "cuenta sin acceso" sin bucles, y sección 7 de `azure-setup.sh` (app registration + `az webapp auth`). **HECHO** (ver §4).
+- ⏳ Ejecutar la configuración en el entorno oficial (correr `azure-setup.sh` §7 tras la migración). **Key Vault + Managed Identity**. **Row-Level Security** en Azure SQL + `sp_set_session_context` por conexión. Observabilidad (App Insights, alertas, budgets).
 
 ### Fase 5 — Pruebas de aislamiento y primer go-live
 Pruebas por rol y de acceso prohibido entre empresas; end-to-end RADIAN/banco→SIIGO por empresa; auditoría; rollback. **Onboarding equipo administrativo. GO-LIVE.**
@@ -100,6 +101,14 @@ Rediseño gráfico, dashboard ejecutivo/operativo, analítica de errores, audito
 ## 4. Lo que YA se hizo (estado actual)
 
 > **La Fase 3 ya está en `main`** (la rama `claude/charming-lovelace-myhcez` se fusionó vía PR #25). Desde entonces `main` también incorporó módulos posteriores (PRs #26–#50 y siguientes: terceros/RUT, caja general, flujos mixtos, ML de prediligenciamiento, refactor de `app/database.py` y `app/web/routes.py` en paquetes, y el rename a **1ContaBot**). Cada sesión nueva trabaja en su propia rama `claude/*` a partir de `main`.
+
+### ✅ Fase 4 (parte 1) — Autenticación real con Microsoft Entra ID (lado app)
+Todo lo que depende del código para la auth real quedó implementado y probado; lo que falta de la Fase 4 es de infraestructura (ejecutar `azure-setup.sh` §7 en el entorno oficial, Key Vault, RLS, observabilidad).
+- **`app/authn.py`**: `principal_entra()` decodifica la cabecera **`X-MS-CLIENT-PRINCIPAL`** (JSON base64 con los claims del token: email `preferred_username`/`emailaddress`/`upn`, `name`, `oid`, `tid`; acepta nombres cortos v2 y URIs WS-Fed) con fallback a `X-MS-CLIENT-PRINCIPAL-NAME`/`-ID`. Con **`ENTRA_TENANT_ID`** definido se exige que el claim `tid` coincida (identidades de otro tenant no entran ni se provisionan). `_resolver_usuario_entra()` autoprovisiona el usuario **sin roles** y sincroniza nombre/`entra_oid` cuando Entra trae valores nuevos (antes el "nombre" se tomaba por error del GUID `X-MS-CLIENT-PRINCIPAL-ID`); el último acceso se registra una vez por sesión. `url_login_entra()`/`url_logout_entra()` construyen las URLs de Easy Auth. `iniciar_sesion()` queda deshabilitado en modo entra (el formulario dev no puede suplantar identidades).
+- **Rutas (`auth_admin.py`)**: en modo entra `/login` muestra el botón **«Continuar con Microsoft»** (`/.auth/login/aad?post_login_redirect_uri=…`) y, si llega una identidad Entra válida pero **sin acceso** (cuenta desactivada o sin provisionar), responde 200 con el aviso y un enlace "cambiar de cuenta" — sin bucle de redirecciones — y audita el intento; `/logout` limpia la sesión Flask y redirige a **`/.auth/logout`** para cerrar también la sesión de Easy Auth. `/health` y `/radian/auto/cron` siguen públicos.
+- **Config**: `ENTRA_TENANT_ID`, `ENTRA_LOGIN_PATH`, `ENTRA_LOGOUT_PATH` (`app/config.py`, `.env.example`).
+- **`azure-setup.sh` §7**: crea el app registration single-tenant con la callback de Easy Auth, activa `az webapp auth` (authV2, **AllowAnonymous** porque la compuerta la aplica la app) y fija `AUTH_MODE=entra`, `ENTRA_TENANT_ID` y `BOOTSTRAP_ADMIN_EMAIL` (vaciar tras el primer login del admin).
+- **Tests**: `tests/test_authn_entra.py` (17 casos: decodificación del principal y claims alternos, autoprovisión + sincronización, bootstrap admin, tenant correcto/ajeno/sin `tid`, principal corrupto, gate → login → Microsoft, cuenta desactivada sin bucle + auditoría, logout Easy Auth, POST de login deshabilitado, `/health` público, y que el modo dev **ignora** las cabeceras Entra).
 
 ### ✅ Fase 3 — RBAC + autorización + multi-tenencia (con stub de auth dev)
 El bloqueante #1 (cualquiera podía fijar `session["empresa_id"]` y ver otra empresa) queda resuelto: ahora hay identidad, permisos por rol y validación de acceso a empresa.
@@ -173,9 +182,9 @@ Antes, los preasientos vivían **solo en la sesión** (server-side, efímeros) y
 
 ## 5. Siguiente paso
 
-**Fase 3 CERRADA** (fusionada a `main` vía PR #25). RBAC + autorización + multi-tenencia con stub de auth dev (el **bloqueante #1** queda resuelto) — ver §4. `pytest` 437/437.
+**Fase 3 CERRADA** (fusionada a `main` vía PR #25) y **Fase 4 (parte 1) — autenticación real con Entra ID — implementada en el código** (ver §4): principal completo de Easy Auth, validación de tenant, login/logout Entra, autoprovisión con nombre/oid y `azure-setup.sh` §7. `pytest` 453/453.
 
-Siguiente hito: **★ MIGRACIÓN a cuentas oficiales (punto híbrido) ★** y luego **Fase 4 — Autenticación real con Entra + endurecimiento Azure**. El código ya está listo para Entra: poner `AUTH_MODE=entra` y configurar App Service Authentication (la identidad llega en `X-MS-CLIENT-PRINCIPAL-NAME`); `BOOTSTRAP_ADMIN_EMAIL` da el primer admin. Ejecutar el **Checklist de migración** (§2): parametrizar `azure-setup.sh`, crear recursos oficiales, OIDC, App Settings, Key Vault, RLS.
+Siguiente hito: **★ MIGRACIÓN a cuentas oficiales (punto híbrido) ★** y luego cerrar la **Fase 4 en infraestructura**: ejecutar el **Checklist de migración** (§2), correr `azure-setup.sh` (incluida la sección 7 de Entra: app registration + `az webapp auth` + `AUTH_MODE=entra`/`ENTRA_TENANT_ID`/`BOOTSTRAP_ADMIN_EMAIL`), y después Key Vault + Managed Identity, RLS en Azure SQL y observabilidad. Tras el primer login del admin real, vaciar `BOOTSTRAP_ADMIN_EMAIL`.
 
 Opciones rápidas si el usuario lo pide:
 - **Granularidad/roles**: ajustar el catálogo de permisos o los roles seed (`app/authz.py`) si el equipo administrativo necesita otra separación de funciones.
@@ -187,7 +196,7 @@ Opciones rápidas si el usuario lo pide:
 
 ## 6. Orientación del código (para no re-explorar)
 
-**Stack:** Python 3.11 + Flask, Gunicorn en Azure App Service Linux. SQLite (local/dev: un archivo por empresa `contable_<id>.db`) **o** Azure SQL vía `pyodbc` (`USE_SQLITE=false`, tablas con columna `empresa_id`). Storage local **o** Azure Blob. **Auth/RBAC propios** (sin librería externa): stub de dev + Entra-ready vía App Service Authentication (ver §4).
+**Stack:** Python 3.11 + Flask, Gunicorn en Azure App Service Linux. SQLite (local/dev: un archivo por empresa `contable_<id>.db`) **o** Azure SQL vía `pyodbc` (`USE_SQLITE=false`, tablas con columna `empresa_id`). Storage local **o** Azure Blob. **Auth/RBAC propios** (sin librería externa): stub de dev + Entra ID vía App Service Authentication (ver §4).
 
 **Archivos clave:**
 - **Web/rutas:** `app/web/routes.py` (~28 rutas; `_empresa_actual()`, `_ejecutar_pipeline()`, `_deserializar_preasientos()`, `_resolver_tercero()`, `_recalcular_preasiento()`, `_persistir_importacion()` (snapshot durable), `_actividad_radian()`/`_actividad_banco()`, endpoints `/radian`, `/confirmar`, `/corregir-tercero`, `/dividir-linea`, `/exportar-siigo`, `/importaciones/<id>/{abrir,reprocesar,anular,descargar}`, `/banco/*`), `app/web/__init__.py` (factory `create_app`, `FLASK_SECRET_KEY`, CSRF flask-wtf), `app/web/session_store.py` (copia de trabajo server-side; claves `resultado_ref`, `banco_ref`, `empresa_id`; la copia **durable** del resultado vive en `importaciones.preasientos_json`).
@@ -196,7 +205,7 @@ Opciones rápidas si el usuario lo pide:
 - **Dominio:** `app/importador.py` (RADIAN), `app/clasificador.py`, `app/terceros.py` (`identificar_tercero`, `cruzar_tercero`, `procesar_terceros_lote`, **`aplicar_correcciones_lote`**), `app/preasiento.py` (genera `LineaContable`/`PreasientoContable`), `app/models.py` (`PreasientoContable` con `tercero_nit_original`/`tercero_corregido`, `LineaContable`, `MovimientoBanco`), `app/sugerencias.py` (motor de cuentas por historial), `app/validaciones.py`.
 - **SIIGO:** `app/siigo/mapeador.py` (27 columnas; **Descripción=referencia del doc, Observaciones vacía**), `app/siigo/exportador_siigo.py`, `app/siigo/api_client.py`.
 - **Banco:** `app/banco/{importador_banco,mapeador_banco,exportador_banco}.py` (consolida intereses, enlaza 4x1000; su `Descripción`/`Observaciones` siguen su propia convención).
-- **Auth/RBAC (Fase 3):** `app/authn.py` (identidad: stub dev + Entra-ready; `gate()` before_request), `app/authz.py` (catálogo permisos/roles, `seed_rbac`, `require_permission`), `app/tenancy.py` (acceso a empresas: `empresa_actual` validada, `puede_acceder_empresa`), `app/audit.py` (`registrar`). Tablas RBAC en la BD de sistema (`app/database.py`). Plantillas `login.html`/`usuarios.html`/`auditoria.html`.
+- **Auth/RBAC (Fases 3-4):** `app/authn.py` (identidad: stub dev + Entra ID vía Easy Auth — `principal_entra()`, `url_login_entra`/`url_logout_entra`; `gate()` before_request), `app/authz.py` (catálogo permisos/roles, `seed_rbac`, `require_permission`), `app/tenancy.py` (acceso a empresas: `empresa_actual` validada, `puede_acceder_empresa`), `app/audit.py` (`registrar`). Tablas RBAC en la BD de sistema (`app/database.py`). Plantillas `login.html`/`usuarios.html`/`auditoria.html`.
 - **Infra/deploy:** `application.py`, `startup.sh` (instala ODBC 18 si `USE_SQLITE=false`; gunicorn), `azure-setup.sh`, `.github/workflows/main_1contabot.yml` (CI test + deploy OIDC), `app/config.py` (incluye `AUTH_MODE`/`DEV_AUTH_*`/`BOOTSTRAP_ADMIN_EMAIL`), `.env.example`. Docs: `CONTEXTO_IA.md`, `docs/arquitectura.md`.
 
 **Rutas que aceptan IDs de objeto:** `/importaciones/<imp_id>/{abrir,reprocesar,anular,descargar}` se aíslan por la BD de la empresa activa (un id de otra empresa no aparece en la BD activa). `/empresas/<empresa_id>/...` exige `empresas.gestionar` (hoy solo el admin global). La empresa activa siempre se valida en `tenancy.empresa_actual`.

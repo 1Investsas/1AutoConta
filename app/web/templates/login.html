@@ -36,10 +36,23 @@
       {% endwith %}
 
       {% if modo == 'entra' %}
-      <p class="muted">
-        La autenticación se gestiona con tu cuenta corporativa (Microsoft Entra ID).
-        Si ves esta página, vuelve a <a href="{{ url_for('web.index') }}">la aplicación</a>.
-      </p>
+        {% if entra_email %}
+        <div class="flash error" style="margin-bottom:14px">
+          La cuenta <strong>{{ entra_email }}</strong> no tiene acceso a la
+          aplicación (está desactivada o aún no ha sido habilitada).
+          Contacta al administrador.
+        </div>
+        <a href="{{ url_logout_entra }}" class="btn" style="width:100%; justify-content:center;">
+          Cambiar de cuenta
+        </a>
+        {% else %}
+        <a href="{{ url_login_entra }}" class="btn btn-gold" style="width:100%; justify-content:center;">
+          Continuar con Microsoft
+        </a>
+        <div class="dev-note">
+          Inicia sesión con tu cuenta corporativa (Microsoft Entra ID).
+        </div>
+        {% endif %}
       {% else %}
       <form method="POST" action="{{ url_for('web.login') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

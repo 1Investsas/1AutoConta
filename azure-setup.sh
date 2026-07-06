@@ -24,6 +24,9 @@ SQL_ADMIN_PASS="CambiarEstaContraseña!2026"   # ⚠️ CAMBIAR antes de ejecuta
 STORAGE_ACCOUNT="st1contabot"         # Solo letras minúsculas y números, 3-24 chars
 STORAGE_CONTAINER="1contabot"
 
+# Autenticación Entra (sección 7 — Fase 4)
+BOOTSTRAP_ADMIN_EMAIL="admin@tuempresa.com"   # ⚠️ CAMBIAR: 1er admin global (cuenta Entra)
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. GRUPO DE RECURSOS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -144,7 +147,59 @@ az webapp config set \
     --always-on true
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 7. RESUMEN
+# 7. AUTENTICACIÓN — Microsoft Entra ID vía App Service Authentication (Fase 4)
+# ═══════════════════════════════════════════════════════════════════════════
+# Easy Auth valida el token OIDC en la plataforma e inyecta la identidad a la
+# app en las cabeceras X-MS-CLIENT-PRINCIPAL* (app/authn.py, AUTH_MODE=entra).
+# Se deja la acción para no-autenticados en AllowAnonymous porque /health y
+# /radian/auto/cron deben seguir siendo públicos: la compuerta de login la
+# aplica la propia app (redirige a /.auth/login/aad desde /login).
+echo "🔐 Configurando autenticación con Microsoft Entra ID..."
+
+TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# App registration (single-tenant) con la URI de callback de Easy Auth.
+ENTRA_CLIENT_ID=$(az ad app create \
+    --display-name "${APP_NAME}-auth" \
+    --sign-in-audience AzureADMyOrg \
+    --web-redirect-uris "https://${APP_NAME}.azurewebsites.net/.auth/login/aad/callback" \
+    --enable-id-token-issuance true \
+    --query appId -o tsv)
+
+# Secreto de cliente (rotarlo antes de que caduque; por defecto dura 1 año).
+ENTRA_CLIENT_SECRET=$(az ad app credential reset \
+    --id $ENTRA_CLIENT_ID \
+    --display-name "easyauth" \
+    --query password -o tsv)
+
+# Activar App Service Authentication (authV2) con Entra como proveedor.
+az webapp auth microsoft update \
+    --name $APP_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --client-id $ENTRA_CLIENT_ID \
+    --client-secret "$ENTRA_CLIENT_SECRET" \
+    --issuer "https://login.microsoftonline.com/${TENANT_ID}/v2.0" \
+    --yes
+
+az webapp auth update \
+    --name $APP_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --enabled true \
+    --unauthenticated-client-action AllowAnonymous
+
+# La app pasa a modo entra; ENTRA_TENANT_ID añade la validación de tenant y
+# BOOTSTRAP_ADMIN_EMAIL da rol de admin global al primer administrador real
+# (vaciar esta variable después del primer inicio de sesión).
+az webapp config appsettings set \
+    --name $APP_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --settings \
+        AUTH_MODE="entra" \
+        ENTRA_TENANT_ID="$TENANT_ID" \
+        BOOTSTRAP_ADMIN_EMAIL="$BOOTSTRAP_ADMIN_EMAIL"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 8. RESUMEN
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
@@ -155,6 +210,9 @@ echo "  🌐 Web App:     https://${APP_NAME}.azurewebsites.net"
 echo "  🗄️ SQL Server:  ${SQL_SERVER_NAME}.database.windows.net"
 echo "  📊 Base datos:   ${SQL_DB_NAME}"
 echo "  📁 Storage:      ${STORAGE_ACCOUNT}"
+echo "  🔐 Entra auth:   app registration ${APP_NAME}-auth (tenant ${TENANT_ID})"
+echo "                   Admin inicial: ${BOOTSTRAP_ADMIN_EMAIL} — tras su primer"
+echo "                   login, vacía BOOTSTRAP_ADMIN_EMAIL en App Settings."
 echo ""
 echo "  📋 PRÓXIMOS PASOS:"
 echo "  1. Sube el código a GitHub"
