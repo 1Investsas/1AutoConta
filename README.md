@@ -338,10 +338,12 @@ Los archivos maestros, el registro de empresas y los Excel generados persisten e
 Para mayor concurrencia/robustez puedes migrar a Azure SQL (`USE_SQLITE=false` +
 `DATABASE_URL`). Ver `azure-setup.sh`.
 
-> ⚠️ Pendiente conocido: en modo Azure SQL todas las empresas comparten las mismas
-> tablas (la separación por empresa hoy depende de archivos SQLite distintos). Si se
-> habilita Azure SQL con varias empresas, hay que añadir antes una columna
-> discriminadora por empresa.
+> ℹ️ Multiempresa en Azure SQL: todas las empresas comparten las mismas tablas,
+> pero cada tabla lleva la columna discriminadora `empresa_id`, todas las consultas
+> filtran por ella y existen índices tenant-aware (`ix_importaciones_empresa`,
+> `ix_procesos_banco_empresa`, `ix_documentos_empresa_clasif`). En modo SQLite el
+> aislamiento es por archivo (`contable_<id>.db`). Ver `app/database/`
+> (`_and_empresa`/`_where_empresa`) y `HANDOFF.md` §4.
 
 ---
 
