@@ -1,5 +1,5 @@
 """
-Validaciones del sistema contable-auto.
+Validaciones del sistema 1ContaBot.
 
 Verifica la integridad y coherencia de los datos antes de exportar:
 - Cuadre débito = crédito por preasiento.

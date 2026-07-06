@@ -1,5 +1,5 @@
 """
-Modelos de datos del sistema contable-auto.
+Modelos de datos del sistema 1ContaBot.
 
 Define los dataclasses usados internamente para representar documentos,
 terceros, cuentas, comprobantes, líneas contables y registros de bitácora.

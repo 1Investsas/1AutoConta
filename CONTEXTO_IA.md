@@ -1,4 +1,4 @@
-# CONTEXTO_IA.md — Mapa completo del repositorio `contable-auto`
+# CONTEXTO_IA.md — Mapa completo del repositorio `1ContaBot`
 
 > **Propósito de este archivo.** Documento único y autocontenido para que una IA (o una
 > persona nueva) entienda **cómo funciona todo el sistema sin tener que leer el repositorio
@@ -10,7 +10,7 @@
 
 ## 1. Qué es y para qué sirve
 
-`contable-auto` es un **sistema de automatización contable** para la empresa colombiana
+`1ContaBot` es un **sistema de automatización contable** para la empresa colombiana
 **1 INVEST SAS** (NIT 901.331.657-7), extensible a múltiples empresas.
 
 Toma el reporte de **facturación electrónica RADIAN** descargado del portal de la **DIAN**
@@ -51,14 +51,14 @@ El sistema funciona de dos formas:
 - **Tests:** `pytest`.
 
 Dependencias completas en `requirements.txt`. El paquete se instala con `pip install -e .`
-(ver `setup.py`, que expone el comando de consola `contable-auto=main:cli`).
+(ver `setup.py`, que expone el comando de consola `1ContaBot=main:cli`).
 
 ---
 
 ## 3. Estructura del repositorio
 
 ```
-contable-auto/
+1ContaBot/
 ├── main.py                  # CLI principal (click): comandos `procesar` e `historial`
 ├── application.py           # Entry point WSGI para Azure (app = create_app())
 ├── web_server.py            # Servidor de DESARROLLO (Werkzeug, debug opcional)
@@ -582,7 +582,7 @@ Plantilla en `.env.example`. Las más importantes:
 | `DB_DIR`, `DB_PATH`, `DB_JOURNAL_MODE` | db / db/contable.db / WAL | BD SQLite (en Azure: `/home/data/db` y `DELETE` automáticos) |
 | `USE_SQLITE` | true | `false` → Azure SQL (requiere `DATABASE_URL`) |
 | `DATABASE_URL` | (vacío) | Cadena ODBC de Azure SQL |
-| `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER` | (vacío) / contable-auto | Azure Blob (vacío = disco local) |
+| `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER` | (vacío) / 1ContaBot | Azure Blob (vacío = disco local) |
 | `SIIGO_USERNAME`, `SIIGO_ACCESS_KEY`, `SIIGO_API_URL` | (vacío) / api.siigo.com | API SIIGO |
 | `LOG_LEVEL` | INFO | DEBUG/INFO/WARNING/ERROR |
 
@@ -608,8 +608,8 @@ Containers o Container Apps sin `/home` persistente). Ver `database.py` §7.
 
 ## 14. Despliegue y CI/CD
 
-- **GitHub Actions** (`.github/workflows/main_contable-auto.yml`): en push a `main` instala
-  dependencias, **corre `pytest`**, y si pasa, despliega a **Azure Web App `contable-auto`**
+- **GitHub Actions** (`.github/workflows/main_1contabot.yml`): en push a `main` instala
+  dependencias, **corre `pytest`**, y si pasa, despliega a **Azure Web App `1ContaBot`**
   (slot Production) vía OIDC. Oryx instala `requirements.txt` en el servidor.
 - `azure-setup.sh`: aprovisionamiento inicial de recursos en Azure.
 - `scripts/`: utilidades Windows (`install_service.ps1`, `start.ps1`, `uninstall_service.ps1`)
@@ -683,5 +683,5 @@ importador de conocimiento externo, integración RADIAN).
 | Añadir un endpoint web | `app/web/routes.py` (+ plantilla en `templates/`) |
 | Tocar el esquema de BD | `app/database.py` (`_create_tables_sqlite` y `_create_tables_mssql`) |
 | Añadir validaciones | `app/validaciones.py` |
-| Configurar despliegue | `.github/workflows/main_contable-auto.yml`, `startup.sh`, `azure-setup.sh` |
+| Configurar despliegue | `.github/workflows/main_1contabot.yml`, `startup.sh`, `azure-setup.sh` |
 ```

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════
-# Azure Infrastructure Setup — contable-auto (1Contigo)
+# Azure Infrastructure Setup — 1ContaBot
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # Ejecuta estos comandos en Azure Cloud Shell (https://shell.azure.com)
@@ -10,19 +10,19 @@
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ----- Variables — AJUSTAR SEGÚN TU ENTORNO -----
-RESOURCE_GROUP="rg-1contigo"
+RESOURCE_GROUP="rg-1contabot"
 LOCATION="eastus"                    # Región más cercana a Colombia
-APP_NAME="1Contigo"                  # → https://1contigo.azurewebsites.net
-APP_SERVICE_PLAN="plan-1contigo"
+APP_NAME="1contabot"                  # → https://1contabot.azurewebsites.net
+APP_SERVICE_PLAN="plan-1contabot"
 SKU="B1"                             # Basic tier (~$13/mes)
 
-SQL_SERVER_NAME="sql-1contigo"       # → sql-1contigo.database.windows.net
+SQL_SERVER_NAME="sql-1contabot"       # → sql-1contabot.database.windows.net
 SQL_DB_NAME="contabledb"
 SQL_ADMIN_USER="contable_admin"
 SQL_ADMIN_PASS="CambiarEstaContraseña!2026"   # ⚠️ CAMBIAR antes de ejecutar
 
-STORAGE_ACCOUNT="st1contigo"         # Solo letras minúsculas y números, 3-24 chars
-STORAGE_CONTAINER="contable-auto"
+STORAGE_ACCOUNT="st1contabot"         # Solo letras minúsculas y números, 3-24 chars
+STORAGE_CONTAINER="1contabot"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. GRUPO DE RECURSOS

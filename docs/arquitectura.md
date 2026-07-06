@@ -1,4 +1,4 @@
-# Arquitectura del sistema contable-auto
+# Arquitectura del sistema 1ContaBot
 
 ## Resumen
 

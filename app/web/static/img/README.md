@@ -1,4 +1,4 @@
-# Assets de imagen — 1CONTIGO
+# Assets de imagen — 1ContaBot
 
 ## Logo
 
@@ -6,22 +6,22 @@ La WebApp usa estos archivos (servidos desde `static/img/`):
 
 | Archivo | Uso | Cómo se genera |
 |---|---|---|
-| `logo-1contigo.png` | Logo del **sidebar** (alto 46 px) | Manual u optimizado por script |
-| `logo-1contigo-full.png` | **Lockup completo** (login / pantalla de carga) | Script, modo `--solo-isotipo` |
+| `logo-1contabot.png` | Logo del **sidebar** (alto 46 px) | Manual u optimizado por script |
+| `logo-1contabot-full.png` | **Lockup completo** (login / pantalla de carga) | Script, modo `--solo-isotipo` |
 | `favicon.png` | Ícono de la pestaña del navegador | Optimizado por script |
 
 > ⚠️ **Mantén estos PNG pequeños** (el del sidebar ~35 KB, alto ≤140 px): se
 > descargan en **cada página**. Un logo de 1–2 MB aquí hace que toda la app se
 > sienta lenta en el navegador.
 
-El logo **original en alta** vive en `assets/branding/logo-1contigo-source.png`
+El logo **original en alta** vive en `assets/branding/logo-1contabot-source.png`
 (fuera de `static/` para que no se sirva al navegador ni engorde el despliegue).
 
 ### Opción A — Rápida (sin script)
 Sube tu logo con **exactamente** este nombre:
 
 ```
-app/web/static/img/logo-1contigo.png
+app/web/static/img/logo-1contabot.png
 ```
 
 - PNG con **fondo transparente** (recomendado para el sidebar oscuro).
@@ -33,7 +33,7 @@ una versión nítida + el favicon:
 
 ```bash
 # 1) Sube tu logo en alta resolución como:
-#    assets/branding/logo-1contigo-source.png   (puede tener fondo blanco)
+#    assets/branding/logo-1contabot-source.png   (puede tener fondo blanco)
 
 # 2) Instala Pillow (solo para esta herramienta, no para la app):
 pip install pillow
@@ -43,7 +43,7 @@ python scripts/optimizar_logo.py
 ```
 
 Esto genera automáticamente:
-- `logo-1contigo.png` → recortado, fondo transparente, alto 140 px, optimizado.
+- `logo-1contabot.png` → recortado, fondo transparente, alto 140 px, optimizado.
 - `favicon.png` → ícono cuadrado 64×64.
 
 Opciones útiles:
@@ -57,8 +57,8 @@ python scripts/optimizar_logo.py --no-favicon          # no generar favicon
 
 ### Solo el isotipo en el sidebar (recomendado para este logo) ⭐
 
-El logo de 1CONTIGO trae el isotipo (el "1" con la flecha) arriba y el
-wordmark "1CONTIGO" + eslogan debajo. A 46 px de alto el texto quedaría
+El logo de 1ContaBot trae el isotipo (el "1" con la flecha) arriba y el
+wordmark "1ContaBot" + eslogan debajo. A 46 px de alto el texto quedaría
 diminuto, así que conviene usar **solo la marca** en el sidebar:
 
 ```bash
@@ -67,8 +67,8 @@ python scripts/optimizar_logo.py --solo-isotipo
 
 Esto:
 - Detecta automáticamente el espacio entre la marca y el wordmark y recorta
-  **solo el isotipo** → `logo-1contigo.png` (sidebar).
-- Guarda el **lockup completo** → `logo-1contigo-full.png` (para login/carga).
+  **solo el isotipo** → `logo-1contabot.png` (sidebar).
+- Guarda el **lockup completo** → `logo-1contabot-full.png` (para login/carga).
 - Genera el `favicon.png` a partir de la marca (cuadrada, ideal para el ícono).
 
 Si la detección no acierta, ajusta cuánto conservar desde arriba:
@@ -81,8 +81,8 @@ python scripts/optimizar_logo.py --solo-isotipo --altura-full 260   # alto del l
 ## Referencia en plantillas
 
 ```jinja
-<img src="{{ url_for('static', filename='img/logo-1contigo.png') }}" alt="1CONTIGO">
+<img src="{{ url_for('static', filename='img/logo-1contabot.png') }}" alt="1ContaBot">
 ```
 
 Mientras el archivo no exista, el sidebar muestra un **fallback textual**
-"1CONTIGO" (la app nunca se ve rota). En cuanto exista el PNG, aparece solo.
+"1ContaBot" (la app nunca se ve rota). En cuanto exista el PNG, aparece solo.

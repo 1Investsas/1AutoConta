@@ -1,15 +1,15 @@
-# Handoff — Plan, estado y siguiente paso · `contable-auto`
+# Handoff — Plan, estado y siguiente paso · `1ContaBot`
 
 > **Cómo usar este archivo:** súbelo (o pégalo) al iniciar un chat nuevo. Es autocontenido: explica el proyecto, el plan por fases, **lo que ya se hizo**, **el siguiente paso**, y la orientación mínima del código para que una IA pueda continuar sin re-explorar todo.
 >
 > **Prompt sugerido para el chat nuevo:**
-> *"Continúa el proyecto `contable-auto` según este handoff. Trabaja en la rama `claude/charming-lovelace-myhcez`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
+> *"Continúa el proyecto `1ContaBot` según este handoff. Trabaja en la rama `claude/charming-lovelace-myhcez`. Retoma desde la sección 'Siguiente paso'. No abras una PR salvo que yo lo pida: los commits van a esa rama."*
 
 ---
 
 ## 0. Resumen ejecutivo
 
-`contable-auto` es una app **Flask** de automatización contable colombiana: importa **RADIAN** y **extractos bancarios**, clasifica movimientos y genera **archivos para SIIGO**. Hoy corre en **cuentas de PRUEBA** (GitHub + Azure) y se quiere habilitar para el **equipo administrativo** en las **cuentas OFICIALES** de la empresa.
+`1ContaBot` es una app **Flask** de automatización contable colombiana: importa **RADIAN** y **extractos bancarios**, clasifica movimientos y genera **archivos para SIIGO**. Hoy corre en **cuentas de PRUEBA** (GitHub + Azure) y se quiere habilitar para el **equipo administrativo** en las **cuentas OFICIALES** de la empresa.
 
 El trabajo está definido por dos documentos fuente:
 - **Handoff multiempresa/Azure**: convertir la app en multi-tenant seguro (RBAC, autenticación, auditoría, aislamiento de datos/archivos, Azure SQL, Key Vault, Managed Identity, RLS).
@@ -41,10 +41,10 @@ El trabajo está definido por dos documentos fuente:
 - **El punto híbrido** permite iterar barato en prueba y configurar **una sola vez** sobre el entorno real lo atado al tenant (Entra, Key Vault, Managed Identity, RLS, alertas). Antes de ese punto no hay datos reales que perder.
 
 **Checklist de migración (se ejecuta entre Fase 3 y Fase 4):**
-- Parametrizar `azure-setup.sh` (hoy nombres de prueba `1Contigo`/`rg-1contigo`/`sql-1contigo`/`st1contigo`) → variables por entorno.
+- Parametrizar `azure-setup.sh` (hoy nombres de prueba `1contabot`/`rg-1contabot`/`sql-1contabot`/`st1contabot`) → variables por entorno.
 - Crear recursos en la suscripción oficial con el script idempotente: RG, App Service, Azure SQL, Storage, Application Insights, Log Analytics, **Key Vault**.
 - Mover/duplicar el repo a la organización GitHub oficial.
-- Crear **service principal + OIDC trust** entre el repo oficial y el tenant oficial; actualizar los 3 secretos en `.github/workflows/main_contable-auto.yml` (hoy apuntan a UUIDs del tenant de prueba) y `app-name`/`resource-group`.
+- Crear **service principal + OIDC trust** entre el repo oficial y el tenant oficial; actualizar los 3 secretos en `.github/workflows/main_1contabot.yml` (hoy apuntan a UUIDs del tenant de prueba) y `app-name`/`resource-group`.
 - App Settings oficiales: `USE_SQLITE=false`, `DATABASE_URL`, `AZURE_STORAGE_*`, `FLASK_SECRET_KEY` fijo, `NIT/NOMBRE/SIGLA_EMPRESA`.
 - Backups/rollback: export App Settings, backup Azure SQL, tag del commit.
 
@@ -198,7 +198,7 @@ Opciones rápidas si el usuario lo pide:
 - **SIIGO:** `app/siigo/mapeador.py` (27 columnas; **Descripción=referencia del doc, Observaciones vacía**), `app/siigo/exportador_siigo.py`, `app/siigo/api_client.py`.
 - **Banco:** `app/banco/{importador_banco,mapeador_banco,exportador_banco}.py` (consolida intereses, enlaza 4x1000; su `Descripción`/`Observaciones` siguen su propia convención).
 - **Auth/RBAC (Fase 3):** `app/authn.py` (identidad: stub dev + Entra-ready; `gate()` before_request), `app/authz.py` (catálogo permisos/roles, `seed_rbac`, `require_permission`), `app/tenancy.py` (acceso a empresas: `empresa_actual` validada, `puede_acceder_empresa`), `app/audit.py` (`registrar`). Tablas RBAC en la BD de sistema (`app/database.py`). Plantillas `login.html`/`usuarios.html`/`auditoria.html`.
-- **Infra/deploy:** `application.py`, `startup.sh` (instala ODBC 18 si `USE_SQLITE=false`; gunicorn), `azure-setup.sh`, `.github/workflows/main_contable-auto.yml` (CI test + deploy OIDC), `app/config.py` (incluye `AUTH_MODE`/`DEV_AUTH_*`/`BOOTSTRAP_ADMIN_EMAIL`), `.env.example`. Docs: `CONTEXTO_IA.md`, `docs/arquitectura.md`.
+- **Infra/deploy:** `application.py`, `startup.sh` (instala ODBC 18 si `USE_SQLITE=false`; gunicorn), `azure-setup.sh`, `.github/workflows/main_1contabot.yml` (CI test + deploy OIDC), `app/config.py` (incluye `AUTH_MODE`/`DEV_AUTH_*`/`BOOTSTRAP_ADMIN_EMAIL`), `.env.example`. Docs: `CONTEXTO_IA.md`, `docs/arquitectura.md`.
 
 **Rutas que aceptan IDs de objeto:** `/importaciones/<imp_id>/{abrir,reprocesar,anular,descargar}` se aíslan por la BD de la empresa activa (un id de otra empresa no aparece en la BD activa). `/empresas/<empresa_id>/...` exige `empresas.gestionar` (hoy solo el admin global). La empresa activa siempre se valida en `tenancy.empresa_actual`.
 
@@ -221,7 +221,7 @@ USE_SQLITE=true FLASK_SECRET_KEY=dev python -c "from app.web import create_app; 
 ## 8. Notas de entorno y git
 
 - **Rama de trabajo:** `claude/charming-lovelace-myhcez` (parte de `main`, que ya incluye Fases 1–2 vía PRs #21–#24). **No hay PR abierta** (abrir solo si el usuario lo pide; push a la rama la prepara). Último incremento: **Fase 3 — RBAC + autorización**.
-- **Cuentas actuales: de PRUEBA** (GitHub `JuanCamiloVergara/contable-auto` + Azure de prueba). La migración a cuentas oficiales se hace en el punto híbrido (§2).
+- **Cuentas actuales: de PRUEBA** (GitHub `1investsas/1autoconta` + Azure de prueba). La migración a cuentas oficiales se hace en el punto híbrido (§2).
 - **Entorno remoto efímero:** todo lo que valga la pena debe quedar **commiteado y pusheado**. Este handoff vive en el repo como `HANDOFF.md`.
 
 ---

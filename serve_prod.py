@@ -1,5 +1,5 @@
 """
-Servidor de producción — contable-auto.
+Servidor de producción — 1ContaBot.
 
 Usa Waitress (WSGI server de producción para Windows) en lugar del servidor
 de desarrollo de Flask.
@@ -59,7 +59,7 @@ def _setup_logging(level: str) -> None:
 @click.option("--threads", default=4, show_default=True,
               help="Número de hilos Waitress.")
 def serve(host: str, port: int, threads: int) -> None:
-    """Arranca contable-auto con Waitress (servidor de producción)."""
+    """Arranca 1ContaBot con Waitress (servidor de producción)."""
     from waitress import serve as waitress_serve
     from app.web import create_app
 
@@ -69,7 +69,7 @@ def serve(host: str, port: int, threads: int) -> None:
 
     app = create_app()
 
-    print(f"\n  contable-auto — Servidor de PRODUCCIÓN (Waitress)")
+    print(f"\n  1ContaBot — Servidor de PRODUCCIÓN (Waitress)")
     print(f"  Escuchando en  http://{host}:{port}")
     print(f"  Hilos          {threads}")
     print(f"  Ctrl+C para detener\n")

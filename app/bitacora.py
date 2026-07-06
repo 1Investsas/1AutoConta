@@ -1,5 +1,5 @@
 """
-Bitácora del sistema contable-auto.
+Bitácora del sistema 1ContaBot.
 
 Registra todas las acciones relevantes tanto en consola (con rich)
 como en la base de datos SQLite, para trazabilidad y auditoría.

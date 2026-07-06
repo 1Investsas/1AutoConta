@@ -1,5 +1,5 @@
 """
-Gestión de la base de datos del sistema contable-auto.
+Gestión de la base de datos del sistema 1ContaBot.
 
 Soporta dos backends según la variable de entorno USE_SQLITE:
 - SQLite  (local, desarrollo) — comportamiento original.

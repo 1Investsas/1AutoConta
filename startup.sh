@@ -1,5 +1,5 @@
 #!/bin/bash
-# Azure App Service startup script for contable-auto
+# Azure App Service startup script for 1ContaBot
 # Python dependencies are bundled into ./vendor during the GitHub Actions
 # deployment and added to sys.path in application.py (no server-side build).
 

@@ -1,11 +1,11 @@
 # ===========================================================================
-# uninstall_service.ps1 — Desinstala el servicio de Windows contable-auto
+# uninstall_service.ps1 — Desinstala el servicio de Windows 1ContaBot
 #
 # REQUISITO: Ejecutar como Administrador
 # ===========================================================================
 
 param (
-    [string]$ServiceName = "contable-auto"
+    [string]$ServiceName = "1ContaBot"
 )
 
 $NssmPath = "C:\tools\nssm\nssm.exe"

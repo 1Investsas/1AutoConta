@@ -1,5 +1,5 @@
 """
-Punto de entrada CLI del sistema contable-auto.
+Punto de entrada CLI del sistema 1ContaBot.
 
 Uso básico:
     python main.py procesar --radian input/RADIAN.xlsx
@@ -41,7 +41,7 @@ def _configurar_logging(nivel: str) -> None:
 
 
 @click.group()
-@click.version_option("1.0.0", prog_name="contable-auto")
+@click.version_option("1.0.0", prog_name="1ContaBot")
 def cli():
     """
     Sistema de automatización contable para 1 INVEST SAS.
@@ -122,7 +122,7 @@ def procesar(radian, terceros, cuentas, comprobantes, output, db,
         f"[bold blue]{NOMBRE_EMPRESA}[/bold blue]\n"
         f"NIT: [cyan]{NIT_EMPRESA}[/cyan]\n"
         f"Sistema de automatización contable v1.0",
-        title="contable-auto",
+        title="1ContaBot",
         expand=False,
     ))
 
