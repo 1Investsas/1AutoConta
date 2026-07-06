@@ -109,6 +109,16 @@ DEV_AUTH_NOMBRE: str = os.getenv("DEV_AUTH_NOMBRE", "Administrador (dev)")
 # (bootstrap del primer admin real en Entra). Vacío = desactivado.
 BOOTSTRAP_ADMIN_EMAIL: str = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
 
+# Tenant de Entra permitido (GUID). Si se define, solo se aceptan identidades
+# cuyo claim `tid` coincida (defensa extra si el app registration quedara
+# multi-tenant por error). Vacío = no se valida el tenant.
+ENTRA_TENANT_ID: str = os.getenv("ENTRA_TENANT_ID", "").strip().lower()
+
+# Rutas de login/logout de App Service Authentication (Easy Auth). Solo habría
+# que cambiarlas si Azure moviera los endpoints /.auth (no es lo normal).
+ENTRA_LOGIN_PATH: str = os.getenv("ENTRA_LOGIN_PATH", "/.auth/login/aad")
+ENTRA_LOGOUT_PATH: str = os.getenv("ENTRA_LOGOUT_PATH", "/.auth/logout")
+
 # ---------------------------------------------------------------------------
 # Clasificaciones de documento
 # ---------------------------------------------------------------------------
