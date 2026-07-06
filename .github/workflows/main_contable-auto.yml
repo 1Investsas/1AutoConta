@@ -58,6 +58,6 @@ jobs:
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'contable-auto'
+          app-name: '1contabot'
           slot-name: 'Production'
           package: '.'
