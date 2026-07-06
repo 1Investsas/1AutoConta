@@ -359,6 +359,36 @@ def init_app(app) -> None:
     app.teardown_appcontext(_cerrar_conexiones_peticion)
 
 
+def _aplicar_journal_mode(conn) -> None:
+    """Aplica PRAGMA journal_mode tolerando la carrera del arranque multi-worker.
+
+    Cambiar el modo de journal exige un lock exclusivo y, cuando varios workers
+    de gunicorn abren la misma BD a la vez (cada arranque en App Service lanza
+    2), SQLite puede responder "database is locked" DE INMEDIATO —sin esperar
+    el busy_timeout— para no crear un deadlock entre locks compartidos. Ese
+    error tumbaba el worker en el boot ("Worker failed to boot" → página
+    ":( Application Error" en Azure). Se reintenta con una espera corta y, si
+    la BD sigue ocupada, se continúa sin cambiar el modo: WAL es un atributo
+    persistente del archivo (ya lo fijó quien ganó la carrera) y DELETE es el
+    modo por defecto de SQLite, así que operar con el modo actual es seguro.
+    """
+    import sqlite3
+    import time
+
+    for intento in range(5):
+        try:
+            conn.execute(f"PRAGMA journal_mode={DB_JOURNAL_MODE}")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+            time.sleep(0.2 * (intento + 1))
+    logger.warning(
+        "BD ocupada: no se pudo fijar journal_mode=%s; se continúa con el modo actual.",
+        DB_JOURNAL_MODE,
+    )
+
+
 def _abrir_conexion(db_path: str = DB_PATH):
     """Abre una conexión NUEVA, sin pasar por el caché por-petición."""
     if USE_SQLITE:
@@ -370,12 +400,13 @@ def _abrir_conexion(db_path: str = DB_PATH):
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(path), timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute(f"PRAGMA journal_mode={DB_JOURNAL_MODE}")
-        conn.execute("PRAGMA foreign_keys=ON")
         # Espera (en ms) si otra conexión tiene la BD bloqueada, en vez de
         # fallar de inmediato con "database is locked". Relevante con varios
-        # workers de gunicorn sobre el mismo archivo SQLite.
-        conn.execute("PRAGMA busy_timeout=5000")
+        # workers de gunicorn sobre el mismo archivo SQLite. Debe fijarse
+        # ANTES del PRAGMA journal_mode, que compite por un lock exclusivo.
+        conn.execute("PRAGMA busy_timeout=30000")
+        _aplicar_journal_mode(conn)
+        conn.execute("PRAGMA foreign_keys=ON")
         return DbConnection(conn, is_sqlite=True, db_path=str(path))
     else:
         import pyodbc
