@@ -13,6 +13,9 @@ gunicorn>=21.0
 python-dateutil>=2.8
 requests>=2.31
 azure-storage-blob>=12.0
+# Telemetría de Application Insights (Fase 4). Solo se activa cuando
+# APPLICATIONINSIGHTS_CONNECTION_STRING está definida (ver app/web/__init__.py).
+azure-monitor-opentelemetry>=1.6
 fsspec>=2023.0
 # Solo se importa cuando USE_SQLITE=false (Azure SQL). Se incluye aquí para que
 # quede empaquetado en ./vendor durante el despliegue y no haya que descargarlo

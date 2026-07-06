@@ -81,8 +81,9 @@ Parametrizar recursos/entornos en `azure-setup.sh` y `.env.example`; baseline de
 Ejecutar el **Checklist de migración** (§2).
 
 ### Fase 4 — Autenticación real + endurecimiento Azure (en oficial)
-- ✅ **Autenticación con Entra ID (lado app)**: parseo completo del principal de App Service Authentication (`X-MS-CLIENT-PRINCIPAL`: email/nombre/oid/tid), autoprovisión con sincronización de nombre/`entra_oid`, validación opcional de tenant (`ENTRA_TENANT_ID`), login vía `/.auth/login/aad`, logout que cierra también Easy Auth, página de "cuenta sin acceso" sin bucles, y sección 7 de `azure-setup.sh` (app registration + `az webapp auth`). **HECHO** (ver §4).
-- ⏳ Ejecutar la configuración en el entorno oficial (correr `azure-setup.sh` §7 tras la migración). **Key Vault + Managed Identity**. **Row-Level Security** en Azure SQL + `sp_set_session_context` por conexión. Observabilidad (App Insights, alertas, budgets).
+- ✅ **Autenticación con Entra ID (lado app)**: parseo completo del principal de App Service Authentication (`X-MS-CLIENT-PRINCIPAL`: email/nombre/oid/tid), autoprovisión con sincronización de nombre/`entra_oid`, validación opcional de tenant (`ENTRA_TENANT_ID`), login vía `/.auth/login/aad`, logout que cierra también Easy Auth, página de "cuenta sin acceso" sin bucles, y sección 7 de `azure-setup.sh` (app registration + `az webapp auth`). **HECHO** (ver §4). **Configurado y funcionando en el entorno oficial.**
+- ✅ **Endurecimiento (lado código/scripts)**: **RLS** en Azure SQL (`sp_set_session_context` por conexión + política automática al arrancar), secciones §8 (**Key Vault + Managed Identity**) y §9 (**App Insights + alertas + budget**) de `azure-setup.sh`, SDK de telemetría en la app. **HECHO** (ver §4).
+- ⏳ **Ejecutar en el entorno oficial**: correr `azure-setup.sh` §8 y §9, redesplegar (el deploy aplica la política RLS al arrancar) y verificar con `scripts/verificar_azure.sh`. Vaciar `BOOTSTRAP_ADMIN_EMAIL` tras el primer login del admin.
 
 ### Fase 5 — Pruebas de aislamiento y primer go-live
 Pruebas por rol y de acceso prohibido entre empresas; end-to-end RADIAN/banco→SIIGO por empresa; auditoría; rollback. **Onboarding equipo administrativo. GO-LIVE.**
@@ -99,6 +100,16 @@ Rediseño gráfico, dashboard ejecutivo/operativo, analítica de errores, audito
 ---
 
 ## 4. Lo que YA se hizo (estado actual)
+
+### ✅ Fase 4 (parte 2) — Endurecimiento: RLS + Key Vault + observabilidad (lado código/scripts)
+La migración a cuentas oficiales ya se ejecutó y Easy Auth/Entra quedó funcionando. Esta parte cierra el código y los scripts del endurecimiento; falta solo ejecutarlos en Azure (ver §5).
+- **Row-Level Security (Azure SQL)** — defensa en profundidad bajo el filtro explícito `empresa_id = ?`:
+  - `app/database/core.py`: `_cond_empresa()` anota la empresa en la conexión y `DbConnection._aplicar_contexto_rls()` emite `EXEC sp_set_session_context N'empresa_id', ?` justo antes de la consulta que lo necesita, solo cuando la empresa cambia (la conexión se comparte por petición y puede tocar más de una empresa).
+  - `app/database/schema.py`: `_asegurar_rls_mssql()` (llamado desde `inicializar_db` solo en Azure SQL) crea idempotentemente el esquema `rls`, la función de predicado `rls.fn_filtro_empresa` (compara `empresa_id` contra `SESSION_CONTEXT(N'empresa_id')`) y la `SECURITY POLICY rls.politica_empresa` con FILTER PREDICATE sobre las **16 tablas de datos** (`_TABLAS_RLS`); anexa tablas nuevas en reejecuciones. Sin BLOCK PREDICATE (hay escrituras legítimas antes de cualquier lectura, p. ej. `bitacora`). Excluye deliberadamente `empresas`, tablas RBAC y `audit_log` (transversales). Best-effort: sin permiso de DDL solo se loguea; el filtro explícito sigue siendo la barrera primaria.
+  - **Tests**: `tests/test_rls.py` (12 casos: contexto por conexión/cambio de empresa/una sola emisión, SQLite sin contexto, DDL idempotente, cobertura de las 16 tablas, exclusión de tablas de sistema, error no tumba el arranque).
+- **Key Vault + Managed Identity** — `azure-setup.sh` §8: crea el vault (RBAC), asigna identidad administrada al App Service con rol *Key Vault Secrets User*, migra los valores actuales de `DATABASE_URL`/`AZURE_STORAGE_CONNECTION_STRING`/`FLASK_SECRET_KEY` a secretos y reemplaza los App Settings por referencias `@Microsoft.KeyVault(SecretUri=…)` sin versión (rotación sin tocar config). Idempotente (detecta si ya son referencias).
+- **Observabilidad** — `azure-setup.sh` §9: Log Analytics + Application Insights (workspace-based) + `APPLICATIONINSIGHTS_CONNECTION_STRING` en la app; action group al correo del admin; alertas de métricas (5xx > 5 en 5 min, respuesta > 5 s, CPU del plan > 85%) y budget mensual (best-effort). En la app: `azure-monitor-opentelemetry` en `requirements.txt` y `_configurar_app_insights()` en `app/web/__init__.py` (instrumenta Flask ANTES de crear la app; sin la variable, la telemetría queda desactivada y no cambia nada).
+- **`scripts/verificar_azure.sh`**: verificación de solo lectura (Cloud Shell) de App Settings, Easy Auth, Key Vault/MI, RLS (imprime el T-SQL de chequeo) y observabilidad.
 
 > **La Fase 3 ya está en `main`** (la rama `claude/charming-lovelace-myhcez` se fusionó vía PR #25). Desde entonces `main` también incorporó módulos posteriores (PRs #26–#50 y siguientes: terceros/RUT, caja general, flujos mixtos, ML de prediligenciamiento, refactor de `app/database.py` y `app/web/routes.py` en paquetes, y el rename a **1ContaBot**). Cada sesión nueva trabaja en su propia rama `claude/*` a partir de `main`.
 
@@ -182,9 +193,15 @@ Antes, los preasientos vivían **solo en la sesión** (server-side, efímeros) y
 
 ## 5. Siguiente paso
 
-**Fase 3 CERRADA** (fusionada a `main` vía PR #25) y **Fase 4 (parte 1) — autenticación real con Entra ID — implementada en el código** (ver §4): principal completo de Easy Auth, validación de tenant, login/logout Entra, autoprovisión con nombre/oid y `azure-setup.sh` §7. `pytest` 453/453.
+**Estado**: la **migración a cuentas oficiales ya se ejecutó** (recursos + repo/OIDC + App Settings verificados con `scripts/verificar_azure.sh`) y **Easy Auth/Entra está funcionando**. La **Fase 4 (parte 2) — RLS + Key Vault + observabilidad — quedó implementada en código/scripts** (ver §4).
 
-Siguiente hito: **★ MIGRACIÓN a cuentas oficiales (punto híbrido) ★** y luego cerrar la **Fase 4 en infraestructura**: ejecutar el **Checklist de migración** (§2), correr `azure-setup.sh` (incluida la sección 7 de Entra: app registration + `az webapp auth` + `AUTH_MODE=entra`/`ENTRA_TENANT_ID`/`BOOTSTRAP_ADMIN_EMAIL`), y después Key Vault + Managed Identity, RLS en Azure SQL y observabilidad. Tras el primer login del admin real, vaciar `BOOTSTRAP_ADMIN_EMAIL`.
+Siguiente hito: **ejecutar el endurecimiento en Azure**:
+1. Correr `azure-setup.sh` **§8** (Key Vault + Managed Identity) y **§9** (App Insights + alertas + budget) en Cloud Shell — son idempotentes y migran los secretos actuales sin regenerarlos.
+2. **Redesplegar** la app (push a `main`): el arranque contra Azure SQL aplica la política RLS automáticamente y activa la telemetría.
+3. Verificar con `scripts/verificar_azure.sh` (incluye el T-SQL para confirmar la política RLS).
+4. **Vaciar `BOOTSTRAP_ADMIN_EMAIL`** en App Settings (el primer login del admin ya ocurrió).
+
+Después: **Fase 5** — pruebas de aislamiento por rol/empresa, end-to-end por empresa, rollback y onboarding del equipo → **GO-LIVE**.
 
 Opciones rápidas si el usuario lo pide:
 - **Granularidad/roles**: ajustar el catálogo de permisos o los roles seed (`app/authz.py`) si el equipo administrativo necesita otra separación de funciones.

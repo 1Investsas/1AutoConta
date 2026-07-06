@@ -67,10 +67,12 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
             # Subdivisión de la contrapartida en varias cuentas (JSON).
             _asegurar_columna(conn, "cash_movements", "contrapartidas_json",
                               "TEXT", "NVARCHAR(MAX)")
-            # Índices tenant-aware: solo en Azure SQL (tablas compartidas). En SQLite
-            # cada empresa tiene su propio archivo y no hay columna empresa_id.
+            # Índices tenant-aware y Row-Level Security: solo en Azure SQL
+            # (tablas compartidas). En SQLite cada empresa tiene su propio
+            # archivo y no hay columna empresa_id.
             if not conn.is_sqlite:
                 _asegurar_indices_mssql(conn)
+                _asegurar_rls_mssql(conn)
             conn.commit()
             logger.info("Base de datos inicializada correctamente.")
         finally:
@@ -150,6 +152,87 @@ def _asegurar_indices_mssql(conn: "DbConnection") -> None:
             f"IF NOT EXISTS (SELECT 1 FROM sys.indexes "
             f"WHERE name = '{nombre}' AND object_id = OBJECT_ID('{tabla}')) "
             f"CREATE INDEX {nombre} ON {tabla} ({columnas})"
+        )
+
+
+# Tablas de DATOS compartidas entre empresas, protegidas con Row-Level Security
+# en Azure SQL. Deliberadamente NO incluye las tablas de sistema/control de
+# acceso aunque tengan columna empresa_id: `empresas` es el catálogo,
+# `usuario_empresa_roles` se consulta a través de TODAS las empresas del usuario
+# (antes de fijar la empresa activa) y `audit_log` es la bitácora transversal.
+_TABLAS_RLS = (
+    "documentos_importados", "bitacora", "historial_cuentas", "importaciones",
+    "procesos_banco", "correcciones_tercero", "cuentas_bancarias_tercero",
+    "cash_accounts", "cash_periods", "cash_movements",
+    "mixed_accounts", "mixed_periods", "mixed_movements",
+    "patrones_aprendidos", "tokens_aprendidos", "importaciones_conocimiento",
+)
+
+_RLS_FUNCION = "rls.fn_filtro_empresa"
+_RLS_POLITICA = "politica_empresa"
+
+
+def _asegurar_rls_mssql(conn: "DbConnection") -> None:
+    """Crea/actualiza la política de Row-Level Security en Azure SQL (idempotente).
+
+    Segunda barrera de aislamiento multiempresa (defensa en profundidad): aunque
+    una consulta olvidara el filtro explícito `empresa_id = ?`, el motor solo
+    devuelve las filas cuya empresa coincide con SESSION_CONTEXT('empresa_id'),
+    que la app fija por conexión al construir cada filtro (core._cond_empresa →
+    DbConnection._aplicar_contexto_rls). Sin contexto fijado no se ve ninguna
+    fila.
+
+    Se usa solo FILTER PREDICATE (lectura/actualización/borrado). No se añade
+    BLOCK PREDICATE porque hay escrituras legítimas antes de cualquier lectura
+    filtrada (p. ej. `bitacora`, que solo se escribe) y los INSERT ya llevan el
+    empresa_id explícito.
+
+    Best-effort: si el login no tiene permiso ALTER ANY SECURITY POLICY se
+    registra el error y la app sigue funcionando con el filtro explícito (la
+    barrera primaria) intacto.
+    """
+    try:
+        # Esquema y función de predicado (idempotentes).
+        conn.execute("IF SCHEMA_ID('rls') IS NULL EXEC('CREATE SCHEMA rls')")
+        conn.execute(
+            f"IF OBJECT_ID('{_RLS_FUNCION}', 'IF') IS NULL "
+            f"EXEC('CREATE FUNCTION {_RLS_FUNCION}(@empresa_id NVARCHAR(100)) "
+            "RETURNS TABLE WITH SCHEMABINDING AS RETURN "
+            "SELECT 1 AS autorizado "
+            "WHERE @empresa_id = CONVERT(NVARCHAR(100), "
+            "SESSION_CONTEXT(N''empresa_id''))')"
+        )
+        # Política: crearla con la primera tabla si no existe...
+        existe = conn.execute(
+            "SELECT 1 FROM sys.security_policies WHERE name = ?",
+            (_RLS_POLITICA,),
+        ).fetchone()
+        if not existe:
+            conn.execute(
+                f"CREATE SECURITY POLICY rls.{_RLS_POLITICA} "
+                f"ADD FILTER PREDICATE {_RLS_FUNCION}(empresa_id) "
+                f"ON dbo.{_TABLAS_RLS[0]} "
+                "WITH (STATE = ON, SCHEMABINDING = ON)"
+            )
+        # ...y anexar las tablas que aún no tengan predicado (cubre tablas
+        # nuevas añadidas en versiones posteriores).
+        for tabla in _TABLAS_RLS:
+            tiene = conn.execute(
+                "SELECT 1 FROM sys.security_predicates sp "
+                "JOIN sys.security_policies p ON p.object_id = sp.object_id "
+                "WHERE p.name = ? AND sp.target_object_id = OBJECT_ID(?)",
+                (_RLS_POLITICA, f"dbo.{tabla}"),
+            ).fetchone()
+            if not tiene:
+                conn.execute(
+                    f"ALTER SECURITY POLICY rls.{_RLS_POLITICA} "
+                    f"ADD FILTER PREDICATE {_RLS_FUNCION}(empresa_id) "
+                    f"ON dbo.{tabla}"
+                )
+    except Exception:
+        logger.exception(
+            "No se pudo asegurar la política RLS (el aislamiento por filtro "
+            "explícito empresa_id sigue activo)."
         )
 
 

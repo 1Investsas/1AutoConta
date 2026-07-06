@@ -166,9 +166,9 @@ cat <<'SQL'
     FROM sys.security_policies p
     LEFT JOIN sys.security_predicates sp ON sp.object_id = p.object_id;
 SQL
-echo "  → Si no devuelve filas: RLS NO está configurado."
-echo "  Nota: RLS también requiere código en la app (sp_set_session_context por"
-echo "  conexión en app/database/core.py) — hoy ese código NO existe en el repo."
+echo "  → Si no devuelve filas: RLS NO está configurado. La app crea la política"
+echo "  automáticamente al arrancar contra Azure SQL (app/database/schema.py);"
+echo "  si falta, revisa los logs de arranque (permiso ALTER ANY SECURITY POLICY)."
 
 # ───────────────────────────────────────────────────────────────────────────
 # 5. OBSERVABILIDAD

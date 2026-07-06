@@ -73,6 +73,11 @@ def create_app() -> Flask:
     from app.config import DB_PATH
     from app.database import inicializar_db
 
+    # Telemetría de Application Insights (si está configurada). Debe activarse
+    # ANTES de instanciar Flask: la instrumentación parchea la clase Flask y no
+    # alcanza a las apps creadas previamente.
+    _configurar_app_insights()
+
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
     app.secret_key = _resolver_secret_key()
@@ -111,6 +116,31 @@ def create_app() -> Flask:
     _registrar_manejadores_error(app)
 
     return app
+
+
+def _configurar_app_insights() -> None:
+    """Activa la telemetría de Application Insights (Fase 4 — observabilidad).
+
+    Solo aplica cuando APPLICATIONINSIGHTS_CONNECTION_STRING está definida (la
+    fija azure-setup.sh §9). Instrumenta automáticamente Flask (peticiones,
+    dependencias, excepciones) y exporta logs/métricas vía OpenTelemetry.
+    Best-effort: sin la variable o sin el paquete instalado, la app funciona
+    igual que antes.
+    """
+    from app.config import APPLICATIONINSIGHTS_CONNECTION_STRING
+    if not APPLICATIONINSIGHTS_CONNECTION_STRING:
+        return
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor()
+        logger.info("Telemetría de Application Insights activada.")
+    except ImportError:
+        logger.warning(
+            "APPLICATIONINSIGHTS_CONNECTION_STRING está definida pero el paquete "
+            "azure-monitor-opentelemetry no está instalado; telemetría desactivada."
+        )
+    except Exception:
+        logger.exception("No se pudo inicializar Application Insights.")
 
 
 def _configurar_cache_estaticos(app: Flask) -> None:

@@ -89,6 +89,13 @@ DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 AZURE_STORAGE_CONNECTION_STRING: str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
 AZURE_STORAGE_CONTAINER: str = os.getenv("AZURE_STORAGE_CONTAINER", "1contabot")
 
+# Application Insights (observabilidad — Fase 4). Vacío = telemetría desactivada.
+# La fija azure-setup.sh §9; la SDK (azure-monitor-opentelemetry) también lee
+# esta misma variable de entorno directamente.
+APPLICATIONINSIGHTS_CONNECTION_STRING: str = os.getenv(
+    "APPLICATIONINSIGHTS_CONNECTION_STRING", ""
+)
+
 # ---------------------------------------------------------------------------
 # Autenticación y autorización (Fase 3 / Fase 4)
 # ---------------------------------------------------------------------------

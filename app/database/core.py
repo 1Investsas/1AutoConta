@@ -199,10 +199,18 @@ def _cond_empresa(conn: "DbConnection", db_path: Optional[str]):
     Retorna (condicion_sql, params):
     - SQLite:    ('', ())                        — cada empresa ya tiene su archivo.
     - Azure SQL: ('empresa_id = ?', ('<id>',))   — tablas compartidas.
+
+    En Azure SQL, además, anota la empresa en la conexión para que la próxima
+    consulta fije SESSION_CONTEXT('empresa_id') (ver DbConnection.execute).
+    Ese contexto alimenta las políticas de Row-Level Security (schema.py):
+    segunda barrera de aislamiento por debajo del filtro explícito que retorna
+    esta función.
     """
     if conn.is_sqlite:
         return "", ()
-    return "empresa_id = ?", (_empresa_id_desde_db_path(db_path),)
+    empresa_id = _empresa_id_desde_db_path(db_path)
+    conn._rls_empresa_pendiente = empresa_id
+    return "empresa_id = ?", (empresa_id,)
 
 
 def _and_empresa(conn: "DbConnection", db_path: Optional[str]):
@@ -266,12 +274,35 @@ class DbConnection:
         # (ver get_connection): close() pasa a ser un no-op y el cierre real
         # ocurre en el teardown de la petición.
         self._compartida = False
+        # Row-Level Security (solo Azure SQL): empresa anotada por _cond_empresa
+        # pendiente de fijar en SESSION_CONTEXT, y la ya fijada en la conexión.
+        self._rls_empresa_pendiente: Optional[str] = None
+        self._rls_empresa_actual: Optional[str] = None
+
+    def _aplicar_contexto_rls(self, cursor) -> None:
+        """Fija SESSION_CONTEXT('empresa_id') si la empresa pendiente cambió.
+
+        Las políticas RLS de Azure SQL (ver schema._asegurar_rls_mssql) filtran
+        las tablas compartidas por este contexto de sesión. Se fija justo antes
+        de la consulta que lo necesita —la conexión se comparte durante toda la
+        petición y puede tocar más de una empresa— y solo cuando cambia, para
+        no añadir un round-trip por consulta.
+        """
+        empresa_id = self._rls_empresa_pendiente
+        if empresa_id is None or empresa_id == self._rls_empresa_actual:
+            return
+        cursor.execute(
+            "EXEC sp_set_session_context @key = N'empresa_id', @value = ?",
+            (empresa_id,),
+        )
+        self._rls_empresa_actual = empresa_id
 
     def execute(self, sql, params=None):
         if self.is_sqlite:
             return self._conn.execute(sql, params) if params else self._conn.execute(sql)
         else:
             cursor = self._conn.cursor()
+            self._aplicar_contexto_rls(cursor)
             if params:
                 cursor.execute(sql, params)
             else:
