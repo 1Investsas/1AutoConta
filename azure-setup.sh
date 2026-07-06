@@ -27,6 +27,13 @@ STORAGE_CONTAINER="1contabot"
 # Autenticación Entra (sección 7 — Fase 4)
 BOOTSTRAP_ADMIN_EMAIL="admin@tuempresa.com"   # ⚠️ CAMBIAR: 1er admin global (cuenta Entra)
 
+# Key Vault + observabilidad (secciones 8 y 9 — Fase 4)
+KEYVAULT_NAME="kv-1contabot"          # Nombre GLOBALMENTE único, 3-24 chars
+LOG_WORKSPACE="log-1contabot"
+APPINSIGHTS_NAME="ai-1contabot"
+ALERT_EMAIL="$BOOTSTRAP_ADMIN_EMAIL"  # Destinatario de las alertas
+BUDGET_MENSUAL="60"                   # Presupuesto mensual (USD) para la alerta de costo
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. GRUPO DE RECURSOS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -199,7 +206,172 @@ az webapp config appsettings set \
         BOOTSTRAP_ADMIN_EMAIL="$BOOTSTRAP_ADMIN_EMAIL"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 8. RESUMEN
+# 8. KEY VAULT + MANAGED IDENTITY (Fase 4)
+# ═══════════════════════════════════════════════════════════════════════════
+# Los secretos (cadena de conexión SQL, Storage, clave Flask) salen de los App
+# Settings en texto plano y pasan a Key Vault; la app los lee mediante
+# referencias @Microsoft.KeyVault resueltas con su Managed Identity, sin
+# credenciales adicionales. Sección idempotente: puede reejecutarse.
+echo "🔑 Configurando Key Vault + Managed Identity..."
+
+az keyvault create \
+    --name $KEYVAULT_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --location $LOCATION \
+    --enable-rbac-authorization true
+
+KV_ID=$(az keyvault show --name $KEYVAULT_NAME \
+    --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+# Managed Identity del App Service (system-assigned) + permiso de LECTURA de
+# secretos sobre el vault.
+PRINCIPAL_ID=$(az webapp identity assign \
+    --name $APP_NAME --resource-group $RESOURCE_GROUP \
+    --query principalId -o tsv)
+
+az role assignment create \
+    --assignee-object-id $PRINCIPAL_ID \
+    --assignee-principal-type ServicePrincipal \
+    --role "Key Vault Secrets User" \
+    --scope $KV_ID
+
+# Quien ejecuta el script necesita poder ESCRIBIR los secretos (RBAC del vault).
+YO=$(az ad signed-in-user show --query id -o tsv)
+az role assignment create \
+    --assignee-object-id $YO \
+    --assignee-principal-type User \
+    --role "Key Vault Secrets Officer" \
+    --scope $KV_ID
+
+# Valores actuales: si el App Service ya existe se migran tal cual (no se
+# regeneran), si no, se usan los calculados en las secciones 3 y 5.
+_setting() {
+    az webapp config appsettings list --name $APP_NAME \
+        --resource-group $RESOURCE_GROUP \
+        --query "[?name=='$1'].value | [0]" -o tsv 2>/dev/null
+}
+VAL_DB=$(_setting DATABASE_URL);   VAL_DB="${VAL_DB:-$SQL_CONN}"
+VAL_ST=$(_setting AZURE_STORAGE_CONNECTION_STRING); VAL_ST="${VAL_ST:-$STORAGE_CONN}"
+VAL_FK=$(_setting FLASK_SECRET_KEY); VAL_FK="${VAL_FK:-$(openssl rand -hex 32)}"
+
+# Si los settings ya son referencias @Microsoft.KeyVault (reejecución), no
+# hay nada que migrar: los secretos ya viven en el vault.
+if [[ "$VAL_DB" == @Microsoft.KeyVault* ]]; then
+    echo "   Los App Settings ya usan referencias de Key Vault; secretos sin cambios."
+else
+    az keyvault secret set --vault-name $KEYVAULT_NAME \
+        --name "database-url" --value "$VAL_DB" -o none
+    az keyvault secret set --vault-name $KEYVAULT_NAME \
+        --name "storage-connection-string" --value "$VAL_ST" -o none
+    az keyvault secret set --vault-name $KEYVAULT_NAME \
+        --name "flask-secret-key" --value "$VAL_FK" -o none
+
+    # Reemplazar los App Settings por referencias (sin versión: al rotar un
+    # secreto en el vault la app toma el nuevo valor sin tocar la config).
+    KV_URI="https://${KEYVAULT_NAME}.vault.azure.net"
+    az webapp config appsettings set \
+        --name $APP_NAME \
+        --resource-group $RESOURCE_GROUP \
+        --settings \
+            DATABASE_URL="@Microsoft.KeyVault(SecretUri=${KV_URI}/secrets/database-url/)" \
+            AZURE_STORAGE_CONNECTION_STRING="@Microsoft.KeyVault(SecretUri=${KV_URI}/secrets/storage-connection-string/)" \
+            FLASK_SECRET_KEY="@Microsoft.KeyVault(SecretUri=${KV_URI}/secrets/flask-secret-key/)" \
+        -o none
+fi
+# Nota: la asignación de roles tarda unos minutos en propagarse. Si tras el
+# siguiente reinicio la app no arranca y en Configuración las referencias
+# aparecen con error (icono rojo), espera 5-10 min y reinicia:
+#   az webapp restart --name $APP_NAME --resource-group $RESOURCE_GROUP
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 9. OBSERVABILIDAD — Application Insights + alertas + budget (Fase 4)
+# ═══════════════════════════════════════════════════════════════════════════
+# La telemetría de la app (peticiones, dependencias, excepciones) la envía el
+# SDK azure-monitor-opentelemetry cuando APPLICATIONINSIGHTS_CONNECTION_STRING
+# está definida (ver app/web/__init__.py). Las alertas usan métricas de la
+# plataforma (funcionan aunque el SDK no esté).
+echo "📈 Configurando observabilidad..."
+
+# Permitir que az instale extensiones (application-insights) sin preguntar.
+az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
+
+WS_ID=$(az monitor log-analytics workspace create \
+    --resource-group $RESOURCE_GROUP \
+    --workspace-name $LOG_WORKSPACE \
+    --location $LOCATION \
+    --query id -o tsv)
+
+AI_CONN=$(az monitor app-insights component create \
+    --app $APPINSIGHTS_NAME \
+    --location $LOCATION \
+    --resource-group $RESOURCE_GROUP \
+    --workspace $WS_ID \
+    --query connectionString -o tsv)
+
+az webapp config appsettings set \
+    --name $APP_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --settings APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN" \
+    -o none
+
+# Grupo de acción: a quién avisan las alertas.
+AG_ID=$(az monitor action-group create \
+    --name "ag-${APP_NAME}" \
+    --resource-group $RESOURCE_GROUP \
+    --short-name "1contabot" \
+    --action email admin "$ALERT_EMAIL" \
+    --query id -o tsv)
+
+WEBAPP_ID=$(az webapp show --name $APP_NAME \
+    --resource-group $RESOURCE_GROUP --query id -o tsv)
+PLAN_ID=$(az appservice plan show --name $APP_SERVICE_PLAN \
+    --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+# Errores de servidor: más de 5 respuestas 5xx en 5 minutos.
+az monitor metrics alert create \
+    --name "alerta-http-5xx" \
+    --resource-group $RESOURCE_GROUP \
+    --scopes $WEBAPP_ID \
+    --condition "total Http5xx > 5" \
+    --window-size 5m --evaluation-frequency 5m \
+    --action $AG_ID \
+    --description "1ContaBot responde errores 5xx" -o none
+
+# Lentitud: tiempo de respuesta promedio sobre 5 s durante 15 minutos.
+az monitor metrics alert create \
+    --name "alerta-tiempo-respuesta" \
+    --resource-group $RESOURCE_GROUP \
+    --scopes $WEBAPP_ID \
+    --condition "avg HttpResponseTime > 5" \
+    --window-size 15m --evaluation-frequency 5m \
+    --action $AG_ID \
+    --description "1ContaBot responde lento (promedio > 5 s)" -o none
+
+# Saturación del plan: CPU sobre 85% durante 15 minutos.
+az monitor metrics alert create \
+    --name "alerta-cpu-plan" \
+    --resource-group $RESOURCE_GROUP \
+    --scopes $PLAN_ID \
+    --condition "avg CpuPercentage > 85" \
+    --window-size 15m --evaluation-frequency 5m \
+    --action $AG_ID \
+    --description "Plan de App Service saturado de CPU" -o none
+
+# Budget mensual de costo (best-effort: algunos tipos de suscripción no lo
+# soportan vía CLI; en ese caso créalo en el portal: Cost Management → Budgets).
+az consumption budget create \
+    --budget-name "budget-${APP_NAME}" \
+    --amount $BUDGET_MENSUAL \
+    --category cost \
+    --time-grain monthly \
+    --start-date "$(date +%Y-%m-01)" \
+    --end-date "2030-01-01" \
+    -o none 2>/dev/null \
+    && echo "   Budget mensual de \$${BUDGET_MENSUAL} creado." \
+    || echo "   ⚠️  No se pudo crear el budget vía CLI; créalo en el portal (Cost Management → Budgets)."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10. RESUMEN
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
@@ -213,6 +385,14 @@ echo "  📁 Storage:      ${STORAGE_ACCOUNT}"
 echo "  🔐 Entra auth:   app registration ${APP_NAME}-auth (tenant ${TENANT_ID})"
 echo "                   Admin inicial: ${BOOTSTRAP_ADMIN_EMAIL} — tras su primer"
 echo "                   login, vacía BOOTSTRAP_ADMIN_EMAIL en App Settings."
+echo "  🔑 Key Vault:    ${KEYVAULT_NAME} (secretos: database-url,"
+echo "                   storage-connection-string, flask-secret-key; la app los"
+echo "                   lee con su Managed Identity vía referencias en App Settings)"
+echo "  📈 Observervab.: App Insights ${APPINSIGHTS_NAME} + alertas 5xx/lentitud/CPU"
+echo "                   → ${ALERT_EMAIL}"
+echo "  🛡️ RLS:          la app crea/actualiza la política de Row-Level Security"
+echo "                   automáticamente al arrancar contra Azure SQL (schema.py);"
+echo "                   verifícala con scripts/verificar_azure.sh (sección 4)."
 echo ""
 echo "  📋 PRÓXIMOS PASOS:"
 echo "  1. Sube el código a GitHub"
