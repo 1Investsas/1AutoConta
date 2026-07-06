@@ -102,11 +102,25 @@ echo "  $CFG   (esperado: startup.sh, alwaysOn=true)"
 # ───────────────────────────────────────────────────────────────────────────
 echo ""
 echo "── 2. App Service Authentication (Entra ID) ─────────────────────"
-AUTH=$(az webapp auth show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
-    --query "{enabled:platform.enabled, action:globalValidation.unauthenticatedClientAction, aad:identityProviders.azureActiveDirectory.enabled}" \
-    -o json 2>/dev/null)
-echo "  $AUTH"
-echo "  (esperado: enabled=true, action=AllowAnonymous, aad=true)"
+# Según la versión del CLI, la respuesta viene plana o envuelta en 'properties'.
+az webapp auth show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+    -o json 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+p = d.get('properties', d)
+plat = (p.get('platform') or {}).get('enabled')
+accion = (p.get('globalValidation') or {}).get('unauthenticatedClientAction')
+aad = ((p.get('identityProviders') or {}).get('azureActiveDirectory') or {}).get('enabled')
+if plat is None and accion is None and aad is None:
+    # Respuesta en formato v1 (authV2 no configurado vía este endpoint)
+    plat = p.get('enabled')
+    accion = p.get('unauthenticatedClientAction')
+    prov = (p.get('defaultProvider') or '').lower()
+    aad = ('aad' in prov or 'activedirectory' in prov) or None
+print(f'  {\"✅\" if plat else \"❌\"} Easy Auth habilitado: {plat}')
+print(f'  {\"✅\" if accion == \"AllowAnonymous\" else \"⚠️ \"} Acción no-autenticados: {accion} (esperado: AllowAnonymous)')
+print(f'  {\"✅\" if aad else \"❌\"} Proveedor Entra ID (AAD) activo: {aad}')
+"
 
 # ───────────────────────────────────────────────────────────────────────────
 # 3. KEY VAULT + MANAGED IDENTITY
@@ -162,7 +176,10 @@ echo "  conexión en app/database/core.py) — hoy ese código NO existe en el r
 echo ""
 echo "── 5. Observabilidad ────────────────────────────────────────────"
 
-AI=$(az monitor app-insights component show --resource-group "$RESOURCE_GROUP" \
+# Se consulta como recurso genérico para no depender de la extensión
+# 'application-insights' (en Cloud Shell pide confirmación y bloquea el script).
+AI=$(az resource list --resource-group "$RESOURCE_GROUP" \
+    --resource-type "microsoft.insights/components" \
     --query "[].name" -o tsv 2>/dev/null)
 if [ -n "$AI" ]; then
     echo "$OK Application Insights: $AI"
