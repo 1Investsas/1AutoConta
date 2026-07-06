@@ -11,7 +11,7 @@
 
 # ----- Variables — AJUSTAR SEGÚN TU ENTORNO -----
 RESOURCE_GROUP="rg-1contabot"
-LOCATION="eastus"                    # Región más cercana a Colombia
+LOCATION="westus2"                    # Región más cercana a Colombia
 APP_NAME="1contabot"                  # → https://1contabot.azurewebsites.net
 APP_SERVICE_PLAN="plan-1contabot"
 SKU="B1"                             # Basic tier (~$13/mes)
