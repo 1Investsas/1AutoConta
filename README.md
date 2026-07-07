@@ -137,6 +137,35 @@ Cada empresa tiene sus propias cuentas, períodos y movimientos de caja
 
 ---
 
+## Módulo Sistema Presupuestal (web)
+
+En **Finanzas › Sistema Presupuestal** (ruta `/presupuesto`) se estructura el
+**presupuesto anual de flujo de caja** por empresa y se compara contra la
+ejecución real mes a mes.
+
+Flujo de trabajo:
+
+1. **Crear el presupuesto del año** (saldo inicial de caja y umbrales del
+   semáforo), opcionalmente con la **estructura estándar** de categorías.
+2. **Ajustar la estructura**: categorías de ingreso/egreso, líneas
+   presupuestales y **mapeo de cuentas PUC por prefijo** (p. ej. `4135` captura
+   413501, 413524…).
+3. **Cargar el proyectado** de los 12 meses y **diligenciar el ejecutado** por
+   tres vías: digitación manual, **importación CSV** (balance de prueba o
+   auxiliar) o **sincronización automática** con el software contable
+   (conectores **Siigo Nube** y **Alegra**, extensibles).
+4. **Analizar** en el dashboard: tarjetas de resumen, gráficas de flujo neto y
+   saldo acumulado (proyectado vs ejecutado), análisis con **semáforos**
+   (mensual o acumulado YTD), **alertas** en lenguaje natural y la matriz
+   completa de flujo de caja. Toda sincronización queda en el historial.
+
+La lógica vive en `app/presupuesto/` (motor, análisis, sincronización y
+conectores; ver su `README.md`), con BD propia (`db/presupuesto.db`, tablas
+`pres_*`) y permisos por rol (`presupuesto.ver`, `presupuesto.gestionar`,
+`presupuesto.procesar`). Cada empresa ve solo sus presupuestos.
+
+---
+
 ## Estructura de carpetas
 
 ```

@@ -19,6 +19,7 @@ rutas por funcionalidad, de modo que los endpoints conservan sus nombres
 - ``empresas``       — selección/CRUD de empresas y maestros.
 - ``caja``           — Caja General (efectivo mensual).
 - ``mixtos``         — Flujos Mixtos (efectivo sin límite de período).
+- ``presupuesto``    — Sistema Presupuestal (flujo de caja proyectado vs ejecutado).
 
 Importar este paquete registra todas las rutas en el blueprint.
 """
@@ -51,4 +52,5 @@ from . import (  # noqa: E402, F401
     empresas,
     caja,
     mixtos,
+    presupuesto,
 )

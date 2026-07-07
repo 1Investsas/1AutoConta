@@ -41,6 +41,9 @@ class Empresa(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nombre: Mapped[str] = mapped_column(String(200))
     nit: Mapped[str | None] = mapped_column(String(30))
+    # Id de la empresa en el registro principal de 1ContaBot (app/empresas.py);
+    # vincula cada empresa presupuestal con la empresa activa de la sesión web.
+    ref_externa: Mapped[str | None] = mapped_column(String(80), unique=True, index=True)
     # Conector contable configurado para esta empresa
     conector: Mapped[FuenteDato] = mapped_column(Enum(FuenteDato), default=FuenteDato.MANUAL)
     conector_config: Mapped[str | None] = mapped_column(Text)  # JSON con credenciales/params
