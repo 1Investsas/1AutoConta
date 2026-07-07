@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1ContaBot · Presupuesto</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{--azul:#1a56db;--fondo:#f4f6fb;--borde:#e2e8f0;--texto:#1e293b;--gris:#64748b;
+        --verde:#16a34a;--amarillo:#d97706;--rojo:#dc2626;}
+  *{box-sizing:border-box;margin:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--fondo);color:var(--texto);padding:24px}
+  h1{font-size:1.35rem;margin-bottom:2px}
+  .sub{color:var(--gris);font-size:.85rem;margin-bottom:18px}
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap}
+  select,button{padding:8px 14px;border:1px solid var(--borde);border-radius:8px;background:#fff;font-size:.85rem;cursor:pointer}
+  button.primario{background:var(--azul);color:#fff;border-color:var(--azul)}
+  .tarjetas{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:20px}
+  .tarjeta{background:#fff;border:1px solid var(--borde);border-radius:12px;padding:16px}
+  .tarjeta .lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--gris)}
+  .tarjeta .val{font-size:1.35rem;font-weight:700;margin-top:4px}
+  .tarjeta .det{font-size:.75rem;color:var(--gris);margin-top:4px}
+  .panel{background:#fff;border:1px solid var(--borde);border-radius:12px;padding:18px;margin-bottom:20px}
+  .panel h2{font-size:.95rem;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse;font-size:.78rem}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--borde);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{background:#f8fafc;color:var(--gris);font-weight:600;position:sticky;top:0}
+  tr.categoria td{font-weight:700;background:#f8fafc}
+  tr.total td{font-weight:700;background:#eef2ff}
+  .neg{color:var(--rojo)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  .verde{background:var(--verde)} .amarillo{background:var(--amarillo)} .rojo{background:var(--rojo)} .sin_dato{background:#cbd5e1}
+  .alerta{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:9px 12px;font-size:.8rem;margin-bottom:8px}
+  .scroll{overflow-x:auto}
+  canvas{max-height:300px}
+  .fila-graficas{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:900px){.fila-graficas{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>Sistema Presupuestal · Flujo de Caja</h1>
+<div class="sub" id="empresa">Cargando…</div>
+
+<div class="toolbar">
+  <label>Análisis:</label>
+  <select id="selMes">
+    <option value="">Acumulado (YTD)</option>
+  </select>
+  <button class="primario" onclick="cargarTodo()">Actualizar</button>
+</div>
+
+<div class="tarjetas" id="tarjetas"></div>
+<div id="alertas"></div>
+
+<div class="fila-graficas">
+  <div class="panel"><h2>Flujo neto mensual: proyectado vs ejecutado</h2><canvas id="chFlujo"></canvas></div>
+  <div class="panel"><h2>Saldo de caja acumulado</h2><canvas id="chSaldo"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>Análisis comparativo <span id="alcance" style="color:var(--gris);font-weight:400"></span></h2>
+  <div class="scroll"><table id="tblAnalisis"></table></div>
+</div>
+
+<div class="panel">
+  <h2>Matriz de flujo de caja (P = proyectado · E = ejecutado, cifras en millones)</h2>
+  <div class="scroll"><table id="tblMatriz"></table></div>
+</div>
+
+<script>
+const API = '/api/presupuesto';
+let presupuestoId = null, charts = {};
+
+const fmt = v => (v/1e6).toLocaleString('es-CO',{maximumFractionDigits:1});
+const fmtPeso = v => '$' + v.toLocaleString('es-CO',{maximumFractionDigits:0});
+
+for (let m=1;m<=12;m++){
+  const o=document.createElement('option');
+  o.value=m; o.textContent=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][m-1];
+  document.getElementById('selMes').appendChild(o);
+}
+
+async function api(path){ const r = await fetch(API+path); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+async function cargarTodo(){
+  const presupuestos = await api('/presupuestos');
+  if(!presupuestos.length){ document.getElementById('empresa').textContent='No hay presupuestos.'; return; }
+  presupuestoId = presupuestos[0].id;
+  const empresas = await api('/empresas');
+  document.getElementById('empresa').textContent =
+    `${empresas[0]?.nombre ?? ''} · ${presupuestos[0].nombre} (${presupuestos[0].anio})`;
+
+  const mes = document.getElementById('selMes').value;
+  const [flujo, analisis] = await Promise.all([
+    api(`/presupuestos/${presupuestoId}/flujo-caja`),
+    api(`/presupuestos/${presupuestoId}/analisis${mes?`?mes=${mes}`:''}`),
+  ]);
+  pintarTarjetas(analisis);
+  pintarAlertas(analisis);
+  pintarGraficas(flujo);
+  pintarAnalisis(analisis);
+  pintarMatriz(flujo);
+}
+
+function pintarTarjetas(a){
+  const r = a.resumen;
+  const desviacion = r.desviacion_flujo_neto;
+  document.getElementById('tarjetas').innerHTML = `
+    <div class="tarjeta"><div class="lbl">Ingresos ejecutados</div>
+      <div class="val">${fmtPeso(r.ingresos_ejecutados)}</div>
+      <div class="det">Cumplimiento: ${r.cumplimiento_ingresos_pct ?? '–'}% de ${fmtPeso(r.ingresos_proyectados)}</div></div>
+    <div class="tarjeta"><div class="lbl">Egresos ejecutados</div>
+      <div class="val">${fmtPeso(r.egresos_ejecutados)}</div>
+      <div class="det">Ejecución: ${r.ejecucion_egresos_pct ?? '–'}% de ${fmtPeso(r.egresos_proyectados)}</div></div>
+    <div class="tarjeta"><div class="lbl">Flujo neto ejecutado</div>
+      <div class="val ${r.flujo_neto_ejecutado<0?'neg':''}">${fmtPeso(r.flujo_neto_ejecutado)}</div>
+      <div class="det">Proyectado: ${fmtPeso(r.flujo_neto_proyectado)}</div></div>
+    <div class="tarjeta"><div class="lbl">Desviación del flujo neto</div>
+      <div class="val ${desviacion<0?'neg':''}">${fmtPeso(desviacion)}</div>
+      <div class="det">Último mes con ejecución: ${r.ultimo_mes_ejecutado||'–'}</div></div>`;
+}
+
+function pintarAlertas(a){
+  document.getElementById('alertas').innerHTML =
+    a.alertas.map(x=>`<div class="alerta">⚠ ${x}</div>`).join('');
+}
+
+function grafica(id, cfg){
+  if(charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), cfg);
+}
+
+function pintarGraficas(f){
+  grafica('chFlujo', {type:'bar',
+    data:{labels:f.meses,datasets:[
+      {label:'Proyectado',data:f.flujo_neto_proyectado.map(v=>v/1e6),backgroundColor:'#93c5fd'},
+      {label:'Ejecutado',data:f.flujo_neto_ejecutado.map((v,i)=>i<6?v/1e6:null),backgroundColor:'#1a56db'},
+    ]},
+    options:{plugins:{legend:{position:'bottom'}},scales:{y:{title:{display:true,text:'Millones COP'}}}}});
+  grafica('chSaldo', {type:'line',
+    data:{labels:f.meses,datasets:[
+      {label:'Proyectado',data:f.saldo_acumulado_proyectado.map(v=>v/1e6),borderColor:'#93c5fd',tension:.3},
+      {label:'Ejecutado',data:f.saldo_acumulado_ejecutado.map((v,i)=>i<6?v/1e6:null),borderColor:'#1a56db',tension:.3},
+    ]},
+    options:{plugins:{legend:{position:'bottom'}},scales:{y:{title:{display:true,text:'Millones COP'}}}}});
+}
+
+function pintarAnalisis(a){
+  document.getElementById('alcance').textContent =
+    a.alcance==='mes' ? `· mes ${a.mes}` : '· acumulado YTD';
+  let h = `<tr><th>Concepto</th><th>Categoría</th><th>Proyectado</th><th>Ejecutado</th>
+           <th>Variación</th><th>Var %</th><th>Cumplim.</th><th>Estado</th></tr>`;
+  for(const l of a.lineas){
+    h += `<tr><td>${l.nombre}</td><td style="text-align:left;color:var(--gris)">${l.categoria}</td>
+      <td>${fmtPeso(l.proyectado)}</td><td>${fmtPeso(l.ejecutado)}</td>
+      <td class="${l.favorable===false?'neg':''}">${fmtPeso(l.variacion_absoluta)}</td>
+      <td class="${l.favorable===false?'neg':''}">${l.variacion_pct??'–'}%</td>
+      <td>${l.cumplimiento_pct??'–'}%</td>
+      <td style="text-align:left"><span class="dot ${l.semaforo}"></span>${l.semaforo.replace('_',' ')}</td></tr>`;
+  }
+  document.getElementById('tblAnalisis').innerHTML = h;
+}
+
+function pintarMatriz(f){
+  let h = `<tr><th>Concepto</th>`;
+  f.meses.forEach(m=>h+=`<th colspan="2">${m}</th>`);
+  h += `<th colspan="2">Total</th></tr><tr><th></th>`;
+  f.meses.forEach(()=>h+=`<th>P</th><th>E</th>`);
+  h += `<th>P</th><th>E</th></tr>`;
+
+  for(const cat of f.categorias){
+    h += `<tr class="categoria"><td>${cat.nombre} (${cat.tipo})</td>`;
+    cat.subtotal_proyectado.forEach((p,i)=>h+=`<td>${fmt(p)}</td><td>${fmt(cat.subtotal_ejecutado[i])}</td>`);
+    h += `<td>${fmt(cat.subtotal_proyectado.reduce((a,b)=>a+b,0))}</td>
+          <td>${fmt(cat.subtotal_ejecutado.reduce((a,b)=>a+b,0))}</td></tr>`;
+    for(const l of cat.lineas){
+      h += `<tr><td style="padding-left:22px">${l.nombre}</td>`;
+      l.proyectado.forEach((p,i)=>h+=`<td>${fmt(p)}</td><td>${fmt(l.ejecutado[i])}</td>`);
+      h += `<td>${fmt(l.total_proyectado)}</td><td>${fmt(l.total_ejecutado)}</td></tr>`;
+    }
+  }
+  h += `<tr class="total"><td>FLUJO NETO</td>`;
+  f.flujo_neto_proyectado.forEach((p,i)=>{
+    const e=f.flujo_neto_ejecutado[i];
+    h+=`<td class="${p<0?'neg':''}">${fmt(p)}</td><td class="${e<0?'neg':''}">${fmt(e)}</td>`;
+  });
+  h += `<td></td><td></td></tr><tr class="total"><td>SALDO ACUMULADO CAJA</td>`;
+  f.saldo_acumulado_proyectado.forEach((p,i)=>{
+    const e=f.saldo_acumulado_ejecutado[i];
+    h+=`<td class="${p<0?'neg':''}">${fmt(p)}</td><td class="${e<0?'neg':''}">${fmt(e)}</td>`;
+  });
+  h += `<td></td><td></td></tr>`;
+  document.getElementById('tblMatriz').innerHTML = h;
+}
+
+cargarTodo().catch(e=>{document.getElementById('empresa').textContent='Error: '+e.message});
+</script>
+</body>
+</html>
