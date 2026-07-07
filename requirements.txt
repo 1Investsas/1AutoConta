@@ -6,6 +6,8 @@ click>=8.0
 rich>=13.0
 python-dotenv>=1.0
 sqlalchemy>=2.0
+# Esquemas del Sistema Presupuestal (app/presupuesto)
+pydantic>=2.6
 flask>=3.0
 flask-wtf>=1.2
 waitress>=3.0

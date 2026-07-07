@@ -123,9 +123,9 @@ CATEGORIAS: dict[str, dict] = {
         "subtitulo": "Indicadores y proyecciones financieras.",
         "modulos": [
             {
-                "nombre": "Flujo de caja proyectado vs ejecutado",
-                "descripcion": "Compara la proyección frente a la ejecución real",
-                "endpoint": None,
+                "nombre": "Sistema Presupuestal",
+                "descripcion": "Presupuesto de flujo de caja: proyectado, ejecutado y análisis",
+                "endpoint": "web.presupuesto",
                 "icono": '<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7h-5M21 7v5"/>',
             },
         ],

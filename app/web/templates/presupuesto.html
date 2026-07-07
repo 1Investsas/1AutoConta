@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Sistema Presupuestal — 1ContaBot{% endblock %}
+{% block page_title %}📊 Sistema Presupuestal{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Presupuesto de flujo de caja: proyectado, ejecutado mes a mes y análisis comparativo con alertas.</p>{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Estructura el presupuesto anual por categorías y líneas, carga el
+      proyectado de los 12 meses y diligencia el ejecutado (manual, CSV o
+      automático desde Siigo/Alegra). Compara con semáforos y genera alertas.
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Presupuestos activos</div>
+    <div class="card-value" style="color:var(--accent); font-size:1.8rem">{{ presupuestos|length }}</div>
+    <div class="card-sub">un presupuesto por año y empresa</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Conector del ejecutado</div>
+    <div class="card-value" style="font-size:1.3rem; text-transform:capitalize">{{ conector }}</div>
+    <div class="card-sub">
+      {% if conector == 'manual' %}digitación manual o importación CSV
+      {% else %}sincroniza el ejecutado desde {{ conector }}{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ── Presupuestos ── -->
+<div class="form-section">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+    <h2 style="margin:0">🗂️ Presupuestos de {{ empresa }}</h2>
+    <button type="button" class="btn btn-primary" onclick="document.getElementById('nuevoPresupuesto').classList.toggle('hidden')">
+      <span>＋</span> Nuevo presupuesto
+    </button>
+  </div>
+
+  <form method="POST" action="{{ url_for('web.presupuesto_crear') }}" id="nuevoPresupuesto" class="hidden" style="margin-top:18px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="nombre">Nombre del presupuesto *</label>
+        <input type="text" id="nombre" name="nombre" placeholder="Presupuesto {{ anio_actual + 1 }}" required>
+      </div>
+      <div class="form-group">
+        <label for="anio">Año *</label>
+        <input type="number" id="anio" name="anio" min="2000" max="2100" value="{{ anio_actual + 1 }}" required>
+      </div>
+      <div class="form-group">
+        <label for="saldo_inicial">Saldo inicial de caja</label>
+        <input type="text" id="saldo_inicial" name="saldo_inicial" placeholder="0" inputmode="decimal">
+      </div>
+      <div class="form-group">
+        <label for="umbral_alerta">Umbral amarillo (% variación)</label>
+        <input type="number" id="umbral_alerta" name="umbral_alerta" value="5" min="0" step="0.5">
+      </div>
+      <div class="form-group">
+        <label for="umbral_critico">Umbral rojo (% variación)</label>
+        <input type="number" id="umbral_critico" name="umbral_critico" value="15" min="0" step="0.5">
+      </div>
+    </div>
+    <label class="form-check">
+      <input type="checkbox" name="plantilla_estandar" checked>
+      Crear con la estructura estándar (ingresos operacionales, gastos de
+      administración y ventas, impuestos, inversión y financiación)
+    </label>
+    <div style="margin-top:14px">
+      <button type="submit" class="btn btn-primary">Crear presupuesto</button>
+    </div>
+  </form>
+
+  {% if presupuestos %}
+  <section class="qa-grid" style="margin-top:22px">
+    {% for p in presupuestos %}
+    <a class="qa-card" href="{{ url_for('web.presupuesto_detalle', presupuesto_id=p.id) }}">
+      <span class="qa-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7h-5M21 7v5"/></svg></span>
+      <div class="qa-body">
+        <div class="qa-title">{{ p.nombre }} <span class="pill pill-info">{{ p.anio }}</span></div>
+        <div class="qa-desc">
+          {{ p.categorias|length }} categoría(s) ·
+          saldo inicial {{ '{:,.0f}'.format(p.saldo_inicial_caja) }} ·
+          semáforo {{ p.umbral_alerta|round(1) }}% / {{ p.umbral_critico|round(1) }}%
+        </div>
+      </div>
+      <span class="qa-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+    </a>
+    {% endfor %}
+  </section>
+  {% else %}
+  <p class="muted" style="margin-top:22px">
+    Aún no hay presupuestos para esta empresa. Crea el primero para estructurar
+    el flujo de caja proyectado del año.
+  </p>
+  {% endif %}
+</div>
+
+<!-- ── Conector contable ── -->
+<div class="form-section" style="margin-top:24px">
+  <h2>🔌 Conector del ejecutado</h2>
+  <p class="muted" style="font-size:0.85rem; margin:6px 0 14px">
+    Define de dónde se trae el ejecutado mensual: digitación manual /
+    importación CSV, o sincronización automática desde el software contable.
+  </p>
+  <form method="POST" action="{{ url_for('web.presupuesto_conector') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="conector">Conector</label>
+        <select id="conector" name="conector" onchange="mostrarCamposConector()">
+          <option value="manual" {% if conector == 'manual' %}selected{% endif %}>Manual / CSV</option>
+          <option value="siigo"  {% if conector == 'siigo'  %}selected{% endif %}>Siigo Nube</option>
+          <option value="alegra" {% if conector == 'alegra' %}selected{% endif %}>Alegra</option>
+          <option value="csv"    {% if conector == 'csv'    %}selected{% endif %}>Archivo CSV en ruta fija</option>
+        </select>
+      </div>
+
+      <div class="form-group campo-conector campo-siigo hidden">
+        <label for="siigo_username">Usuario Siigo (correo)</label>
+        <input type="text" id="siigo_username" name="siigo_username" value="{{ conector_cfg.username or '' }}" autocomplete="off">
+      </div>
+      <div class="form-group campo-conector campo-siigo hidden">
+        <label for="siigo_access_key">Access key</label>
+        <input type="password" id="siigo_access_key" name="siigo_access_key"
+               placeholder="{% if conector_cfg.access_key %}(guardada — dejar vacío para conservarla){% endif %}" autocomplete="new-password">
+      </div>
+      <div class="form-group campo-conector campo-siigo hidden">
+        <label for="siigo_partner_id">Partner-Id</label>
+        <input type="text" id="siigo_partner_id" name="siigo_partner_id" value="{{ conector_cfg.partner_id or '1ContaBot' }}" autocomplete="off">
+      </div>
+
+      <div class="form-group campo-conector campo-alegra hidden">
+        <label for="alegra_email">Correo Alegra</label>
+        <input type="text" id="alegra_email" name="alegra_email" value="{{ conector_cfg.email or '' }}" autocomplete="off">
+      </div>
+      <div class="form-group campo-conector campo-alegra hidden">
+        <label for="alegra_token">Token</label>
+        <input type="password" id="alegra_token" name="alegra_token"
+               placeholder="{% if conector_cfg.token %}(guardado — dejar vacío para conservarlo){% endif %}" autocomplete="new-password">
+      </div>
+
+      <div class="form-group campo-conector campo-csv hidden">
+        <label for="csv_ruta">Ruta del archivo CSV</label>
+        <input type="text" id="csv_ruta" name="csv_ruta" value="{{ conector_cfg.ruta or '' }}" placeholder="/ruta/al/balance_mensual.csv">
+      </div>
+    </div>
+    <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap">
+      <button type="submit" class="btn btn-primary">Guardar conector</button>
+    </div>
+  </form>
+  <form method="POST" action="{{ url_for('web.presupuesto_probar_conexion') }}" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary">Probar conexión</button>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<style>.hidden{display:none}</style>
+<script>
+function mostrarCamposConector() {
+  const v = document.getElementById('conector').value;
+  document.querySelectorAll('.campo-conector').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.campo-' + v).forEach(el => el.classList.remove('hidden'));
+}
+mostrarCamposConector();
+</script>
+{% endblock %}

@@ -1,0 +1,543 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pres.nombre }} ({{ pres.anio }}) — Sistema Presupuestal{% endblock %}
+{% block page_title %}📊 {{ pres.nombre }} <span class="pill pill-info">{{ pres.anio }}</span>{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Flujo de caja proyectado vs ejecutado · saldo inicial {{ '{:,.0f}'.format(pres.saldo_inicial_caja) }} · conector {{ emp_pres.conector.value }}</p>{% endblock %}
+
+{% macro dinero(v) %}{{ '{:,.0f}'.format(v or 0) }}{% endmacro %}
+{% macro mill(v) %}{{ '{:,.1f}'.format((v or 0) / 1000000) }}{% endmacro %}
+{% macro pill_semaforo(s) -%}
+  {%- if s == 'verde' %}<span class="pill pill-ok">verde</span>
+  {%- elif s == 'amarillo' %}<span class="pill pill-warn">amarillo</span>
+  {%- elif s == 'rojo' %}<span class="pill pill-pendiente">rojo</span>
+  {%- else %}<span class="pill pill-muted">sin dato</span>{% endif -%}
+{%- endmacro %}
+
+{% block content %}
+
+<p style="margin-bottom:16px">
+  <a href="{{ url_for('web.presupuesto') }}" class="link-more">← Volver a Sistema Presupuestal</a>
+</p>
+
+{% set r = analisis.resumen %}
+<div class="stats-grid" style="margin-bottom:20px">
+  <div class="card">
+    <div class="card-title">Ingresos ejecutados</div>
+    <div class="card-value" style="font-size:1.4rem">${{ dinero(r.ingresos_ejecutados) }}</div>
+    <div class="card-sub">cumplimiento {{ r.cumplimiento_ingresos_pct if r.cumplimiento_ingresos_pct is not none else '–' }}% de ${{ dinero(r.ingresos_proyectados) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Egresos ejecutados</div>
+    <div class="card-value" style="font-size:1.4rem">${{ dinero(r.egresos_ejecutados) }}</div>
+    <div class="card-sub">ejecución {{ r.ejecucion_egresos_pct if r.ejecucion_egresos_pct is not none else '–' }}% de ${{ dinero(r.egresos_proyectados) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Flujo neto ejecutado</div>
+    <div class="card-value" style="font-size:1.4rem; {% if r.flujo_neto_ejecutado < 0 %}color:var(--danger){% endif %}">${{ dinero(r.flujo_neto_ejecutado) }}</div>
+    <div class="card-sub">proyectado ${{ dinero(r.flujo_neto_proyectado) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Desviación del flujo neto</div>
+    <div class="card-value" style="font-size:1.4rem; {% if r.desviacion_flujo_neto < 0 %}color:var(--danger){% endif %}">${{ dinero(r.desviacion_flujo_neto) }}</div>
+    <div class="card-sub">último mes con ejecución: {{ meses[r.ultimo_mes_ejecutado - 1] if r.ultimo_mes_ejecutado else 'ninguno' }}</div>
+  </div>
+</div>
+
+{% for alerta in analisis.alertas %}
+<div class="flash error" style="position:static; margin-bottom:8px">⚠ {{ alerta }}</div>
+{% endfor %}
+
+<!-- ── Pestañas ── -->
+<div class="tabs" style="display:flex; gap:4px; border-bottom:1px solid var(--border); margin:18px 0">
+  <button type="button" class="tab-btn active" data-tab="pres" data-target="tabDashboard">Dashboard</button>
+  <button type="button" class="tab-btn" data-tab="pres" data-target="tabValores">Valores</button>
+  <button type="button" class="tab-btn" data-tab="pres" data-target="tabEstructura">Estructura</button>
+  <button type="button" class="tab-btn" data-tab="pres" data-target="tabSync">Sincronización</button>
+</div>
+
+<!-- ════════════ Dashboard ════════════ -->
+<div class="tab-panel active" data-tab="pres" id="tabDashboard">
+
+  {% if flujo.categorias %}
+  <div class="fila-graficas">
+    <div class="panel" style="padding:18px">
+      <div class="panel-head"><h3>Flujo neto mensual: proyectado vs ejecutado (millones)</h3></div>
+      <svg id="chFlujo" viewBox="0 0 640 260" style="width:100%; height:auto"></svg>
+    </div>
+    <div class="panel" style="padding:18px">
+      <div class="panel-head"><h3>Saldo de caja acumulado (millones)</h3></div>
+      <svg id="chSaldo" viewBox="0 0 640 260" style="width:100%; height:auto"></svg>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:20px; padding:18px">
+    <div class="panel-head" style="flex-wrap:wrap; gap:10px">
+      <h3>Análisis comparativo {{ '· ' + meses[mes - 1] if mes else '· acumulado YTD' }}</h3>
+      <form method="GET" action="{{ url_for('web.presupuesto_detalle', presupuesto_id=pres.id) }}">
+        <select name="mes" onchange="this.form.submit()">
+          <option value="">Acumulado (YTD)</option>
+          {% for m in meses %}
+          <option value="{{ loop.index }}" {% if mes == loop.index %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Concepto</th><th>Categoría</th>
+            <th style="text-align:right">Proyectado</th>
+            <th style="text-align:right">Ejecutado</th>
+            <th style="text-align:right">Variación</th>
+            <th style="text-align:right">Var %</th>
+            <th style="text-align:right">Cumplim.</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in analisis.lineas %}
+          <tr>
+            <td>{{ l.nombre }}</td>
+            <td class="muted">{{ l.categoria }}</td>
+            <td style="text-align:right; font-family:monospace">${{ dinero(l.proyectado) }}</td>
+            <td style="text-align:right; font-family:monospace">${{ dinero(l.ejecutado) }}</td>
+            <td style="text-align:right; font-family:monospace; {% if l.favorable is sameas false %}color:var(--danger){% endif %}">${{ dinero(l.variacion_absoluta) }}</td>
+            <td style="text-align:right; {% if l.favorable is sameas false %}color:var(--danger){% endif %}">{{ l.variacion_pct if l.variacion_pct is not none else '–' }}%</td>
+            <td style="text-align:right">{{ l.cumplimiento_pct if l.cumplimiento_pct is not none else '–' }}%</td>
+            <td>{{ pill_semaforo(l.semaforo) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:20px; padding:18px">
+    <div class="panel-head"><h3>Matriz de flujo de caja (P = proyectado · E = ejecutado · millones)</h3></div>
+    <div class="table-wrapper">
+      <table style="font-size:0.76rem">
+        <thead>
+          <tr>
+            <th>Concepto</th>
+            {% for m in flujo.meses %}<th colspan="2" style="text-align:center">{{ m }}</th>{% endfor %}
+            <th colspan="2" style="text-align:center">Total</th>
+          </tr>
+          <tr>
+            <th></th>
+            {% for m in flujo.meses %}<th style="text-align:right">P</th><th style="text-align:right">E</th>{% endfor %}
+            <th style="text-align:right">P</th><th style="text-align:right">E</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat in flujo.categorias %}
+          <tr style="font-weight:700; background:var(--bg-soft, #F1F5F9)">
+            <td>{{ cat.nombre }} <span class="pill {{ 'pill-ok' if cat.tipo.value == 'ingreso' else 'pill-warn' }}">{{ cat.tipo.value }}</span></td>
+            {% for p in cat.subtotal_proyectado %}
+            <td style="text-align:right; font-family:monospace">{{ mill(p) }}</td>
+            <td style="text-align:right; font-family:monospace">{{ mill(cat.subtotal_ejecutado[loop.index0]) }}</td>
+            {% endfor %}
+            <td style="text-align:right; font-family:monospace">{{ mill(cat.subtotal_proyectado|sum) }}</td>
+            <td style="text-align:right; font-family:monospace">{{ mill(cat.subtotal_ejecutado|sum) }}</td>
+          </tr>
+          {% for l in cat.lineas %}
+          <tr>
+            <td style="padding-left:24px">{{ l.nombre }}</td>
+            {% for p in l.proyectado %}
+            <td style="text-align:right; font-family:monospace">{{ mill(p) }}</td>
+            <td style="text-align:right; font-family:monospace">{{ mill(l.ejecutado[loop.index0]) }}</td>
+            {% endfor %}
+            <td style="text-align:right; font-family:monospace">{{ mill(l.total_proyectado) }}</td>
+            <td style="text-align:right; font-family:monospace">{{ mill(l.total_ejecutado) }}</td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+          <tr style="font-weight:700; background:var(--info-bg, #EEF2FF)">
+            <td>FLUJO NETO</td>
+            {% for p in flujo.flujo_neto_proyectado %}
+            <td style="text-align:right; font-family:monospace; {% if p < 0 %}color:var(--danger){% endif %}">{{ mill(p) }}</td>
+            {% set e = flujo.flujo_neto_ejecutado[loop.index0] %}
+            <td style="text-align:right; font-family:monospace; {% if e < 0 %}color:var(--danger){% endif %}">{{ mill(e) }}</td>
+            {% endfor %}
+            <td colspan="2"></td>
+          </tr>
+          <tr style="font-weight:700; background:var(--info-bg, #EEF2FF)">
+            <td>SALDO ACUMULADO CAJA</td>
+            {% for p in flujo.saldo_acumulado_proyectado %}
+            <td style="text-align:right; font-family:monospace; {% if p < 0 %}color:var(--danger){% endif %}">{{ mill(p) }}</td>
+            {% set e = flujo.saldo_acumulado_ejecutado[loop.index0] %}
+            <td style="text-align:right; font-family:monospace; {% if e < 0 %}color:var(--danger){% endif %}">{{ mill(e) }}</td>
+            {% endfor %}
+            <td colspan="2"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <p class="muted">El presupuesto aún no tiene estructura. Crea las categorías
+  y líneas en la pestaña <strong>Estructura</strong> y luego carga el
+  proyectado en <strong>Valores</strong>.</p>
+  {% endif %}
+
+</div>
+
+<!-- ════════════ Valores ════════════ -->
+<div class="tab-panel" data-tab="pres" id="tabValores">
+  {% if flujo.categorias %}
+  {% for tipo, titulo, ayuda in [
+       ('proyectado', '📈 Proyectado', 'Presupuesto de los 12 meses. Se digita una vez al estructurar el año.'),
+       ('ejecutado', '✅ Ejecutado', 'Realidad mes a mes. También puede llegar por CSV o sincronización automática (pestaña Sincronización).'),
+     ] %}
+  <div class="panel" style="margin-bottom:20px; padding:18px">
+    <div class="panel-head"><h3>{{ titulo }}</h3></div>
+    <p class="muted" style="font-size:0.82rem; margin:4px 0 12px">{{ ayuda }}
+      Los campos vacíos no se modifican; para borrar un valor digita 0.</p>
+    <form method="POST" action="{{ url_for('web.presupuesto_valores', presupuesto_id=pres.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="tipo" value="{{ tipo }}">
+      <div class="table-wrapper">
+        <table style="font-size:0.78rem">
+          <thead>
+            <tr>
+              <th style="min-width:160px">Línea</th>
+              {% for m in flujo.meses %}<th style="text-align:right">{{ m }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for cat in flujo.categorias %}
+            <tr style="font-weight:700; background:var(--bg-soft, #F1F5F9)">
+              <td colspan="13">{{ cat.nombre }} ({{ cat.tipo.value }})</td>
+            </tr>
+            {% for l in cat.lineas %}
+            <tr>
+              <td>{{ l.nombre }}</td>
+              {% set valores = l.proyectado if tipo == 'proyectado' else l.ejecutado %}
+              {% for v in valores %}
+              <td>
+                <input type="text" name="v_{{ l.linea_id }}_{{ loop.index }}" inputmode="decimal"
+                       value="{{ '{:.0f}'.format(v) if v else '' }}"
+                       style="width:90px; text-align:right; font-family:monospace; padding:4px 6px">
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px">
+        <button type="submit" class="btn btn-primary">Guardar {{ tipo }}</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="muted">Primero define la estructura del presupuesto en la pestaña
+  <strong>Estructura</strong>.</p>
+  {% endif %}
+</div>
+
+<!-- ════════════ Estructura ════════════ -->
+<div class="tab-panel" data-tab="pres" id="tabEstructura">
+
+  <div class="form-section" style="margin-bottom:20px">
+    <h2>＋ Nueva categoría</h2>
+    <form method="POST" action="{{ url_for('web.presupuesto_categoria_crear', presupuesto_id=pres.id) }}" style="margin-top:12px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" name="nombre" placeholder="Ingresos operacionales" required>
+        </div>
+        <div class="form-group">
+          <label>Tipo *</label>
+          <select name="tipo">
+            <option value="ingreso">Ingreso</option>
+            <option value="egreso">Egreso</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:12px"><button type="submit" class="btn btn-primary">Agregar categoría</button></div>
+    </form>
+  </div>
+
+  {% for cat in pres.categorias %}
+  <div class="panel" style="margin-bottom:16px; padding:18px">
+    <div class="panel-head" style="flex-wrap:wrap; gap:10px">
+      <h3>{{ cat.nombre }} <span class="pill {{ 'pill-ok' if cat.tipo.value == 'ingreso' else 'pill-warn' }}">{{ cat.tipo.value }}</span></h3>
+      <form method="POST" action="{{ url_for('web.presupuesto_categoria_eliminar', presupuesto_id=pres.id, categoria_id=cat.id) }}"
+            onsubmit="return confirm('¿Eliminar la categoría «{{ cat.nombre }}» con todas sus líneas y valores?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-secondary" style="color:var(--danger)">Eliminar categoría</button>
+      </form>
+    </div>
+
+    <div class="table-wrapper" style="margin-top:10px">
+      <table>
+        <thead>
+          <tr>
+            <th>Línea</th>
+            <th>Cuentas PUC (prefijos, separados por coma)</th>
+            <th style="width:1%"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in cat.lineas %}
+          <tr>
+            <td>{{ l.nombre }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('web.presupuesto_linea_cuentas', presupuesto_id=pres.id, linea_id=l.id) }}"
+                    style="display:flex; gap:8px; align-items:center">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" name="cuentas" value="{{ l.mapeos | map(attribute='codigo_cuenta') | join(', ') }}"
+                       placeholder="4135, 4210" style="font-family:monospace; flex:1; min-width:140px; padding:4px 8px">
+                <button type="submit" class="btn btn-secondary" style="padding:4px 10px">Guardar</button>
+              </form>
+            </td>
+            <td>
+              <form method="POST" action="{{ url_for('web.presupuesto_linea_eliminar', presupuesto_id=pres.id, linea_id=l.id) }}"
+                    onsubmit="return confirm('¿Eliminar la línea «{{ l.nombre }}» y sus valores?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary" style="color:var(--danger); padding:4px 10px">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="muted">Sin líneas todavía.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="POST" action="{{ url_for('web.presupuesto_linea_crear', presupuesto_id=pres.id) }}"
+          style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:12px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="categoria_id" value="{{ cat.id }}">
+      <div class="form-group" style="margin:0">
+        <label style="font-size:0.78rem">Nueva línea</label>
+        <input type="text" name="nombre" placeholder="Nómina" required>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:0.78rem">Cuentas PUC (opcional)</label>
+        <input type="text" name="cuentas" placeholder="5105, 5205" style="font-family:monospace">
+      </div>
+      <button type="submit" class="btn btn-secondary">＋ Agregar línea</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="muted">Sin categorías todavía. La estructura típica separa los
+  ingresos (ventas, recaudos) de los egresos (gastos, impuestos, inversión).</p>
+  {% endfor %}
+
+  <div class="form-section" style="margin-top:20px; border-color:var(--danger-bg, #FEE2E2)">
+    <h2 style="color:var(--danger)">Zona de riesgo</h2>
+    <p class="muted" style="font-size:0.85rem; margin:6px 0 12px">
+      Eliminar el presupuesto lo oculta del módulo (los datos se conservan en la
+      base de datos, pero el año queda disponible para crear uno nuevo).
+    </p>
+    <form method="POST" action="{{ url_for('web.presupuesto_eliminar', presupuesto_id=pres.id) }}"
+          onsubmit="return confirm('¿Eliminar el presupuesto «{{ pres.nombre }}» ({{ pres.anio }})?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-secondary" style="color:var(--danger)">Eliminar presupuesto</button>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════ Sincronización ════════════ -->
+<div class="tab-panel" data-tab="pres" id="tabSync">
+
+  <div class="stats-grid" style="margin-bottom:20px">
+    <div class="card">
+      <div class="card-title">Importar ejecutado por CSV</div>
+      <p class="card-sub" style="margin:8px 0 12px; line-height:1.5">
+        Balance de prueba o auxiliar del mes con columnas
+        <code>codigo_cuenta, nombre_cuenta, valor</code>.
+        <a href="{{ url_for('web.presupuesto_plantilla_csv') }}" class="link-more">Descargar plantilla</a>
+      </p>
+      <form method="POST" action="{{ url_for('web.presupuesto_importar_csv', presupuesto_id=pres.id) }}"
+            enctype="multipart/form-data" style="display:grid; gap:10px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="mes" required>
+          <option value="">Mes del ejecutado…</option>
+          {% for m in meses %}<option value="{{ loop.index }}">{{ m }}</option>{% endfor %}
+        </select>
+        <input type="file" name="archivo" accept=".csv,.txt" required>
+        <button type="submit" class="btn btn-primary">Importar CSV</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Sincronizar desde {{ emp_pres.conector.value if emp_pres.conector.value != 'manual' else 'el software contable' }}</div>
+      <p class="card-sub" style="margin:8px 0 12px; line-height:1.5">
+        {% if emp_pres.conector.value == 'manual' %}
+        La empresa no tiene conector automático. Configúralo en la
+        <a href="{{ url_for('web.presupuesto') }}" class="link-more">página del módulo</a>.
+        {% else %}
+        Trae los movimientos del mes desde {{ emp_pres.conector.value }} y los
+        cruza con las cuentas PUC mapeadas en cada línea.
+        {% endif %}
+      </p>
+      <form method="POST" action="{{ url_for('web.presupuesto_sincronizar', presupuesto_id=pres.id) }}"
+            style="display:grid; gap:10px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="mes" required>
+          <option value="">Mes a sincronizar…</option>
+          {% for m in meses %}<option value="{{ loop.index }}">{{ m }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary" {% if emp_pres.conector.value == 'manual' %}disabled{% endif %}>Sincronizar</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:18px">
+    <div class="panel-head"><h3>Historial de sincronizaciones</h3></div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Fuente</th><th>Mes</th><th>Resultado</th>
+            <th style="text-align:right">Líneas</th><th>Mensaje</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+          <tr>
+            <td>{{ log.ejecutado_en.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ log.fuente.value }}</td>
+            <td>{{ meses[log.mes - 1] }} {{ log.anio }}</td>
+            <td>{% if log.exito %}<span class="pill pill-ok">éxito</span>{% else %}<span class="pill pill-pendiente">error</span>{% endif %}</td>
+            <td style="text-align:right">{{ log.lineas_actualizadas }}</td>
+            <td class="muted" style="max-width:420px">{{ log.mensaje }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="muted">Sin sincronizaciones todavía.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<style>
+  .fila-graficas { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width: 980px) { .fila-graficas { grid-template-columns:1fr; } }
+</style>
+<script>
+// Activar la pestaña indicada en el hash de la URL (#valores, #estructura, #sync)
+(function () {
+  const destino = {valores: 'tabValores', estructura: 'tabEstructura', sync: 'tabSync'}[location.hash.slice(1)];
+  if (!destino) return;
+  const btn = document.querySelector('.tab-btn[data-target="' + destino + '"]');
+  if (btn) btn.click();
+})();
+
+// ── Gráficas SVG (sin dependencias externas) ──
+(function () {
+  const datos = {{ flujo_json | safe }};
+  const M = v => v / 1e6;
+  // El ejecutado solo se dibuja hasta el último mes con ejecución registrada.
+  const corte = (arr) => arr.map((v, i) => (i < datos.ultimo_mes ? M(v) : null));
+
+  const AZUL = '#1a56db', AZUL_CLARO = '#93c5fd';
+  const W = 640, H = 260, m = {t: 14, r: 12, b: 34, l: 56};
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+
+  function escala(series) {
+    const vals = series.flat().filter(v => v !== null);
+    let min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+    if (min === max) max = min + 1;
+    const pad = (max - min) * 0.08;
+    min -= pad; max += pad;
+    return v => m.t + ih - ((v - min) / (max - min)) * ih;
+  }
+
+  function ejes(svg, y, etiquetas) {
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const yv = m.t + (ih / 4) * i;
+      g += `<line x1="${m.l}" y1="${yv}" x2="${W - m.r}" y2="${yv}" stroke="#e2e8f0"/>`;
+    }
+    etiquetas.forEach((et, i) => {
+      const x = m.l + (iw / etiquetas.length) * (i + 0.5);
+      g += `<text x="${x}" y="${H - 10}" font-size="10" fill="#64748b" text-anchor="middle">${et}</text>`;
+    });
+    svg.insertAdjacentHTML('beforeend', g);
+  }
+
+  function etiquetasY(svg, series) {
+    const vals = series.flat().filter(v => v !== null);
+    let min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+    if (min === max) max = min + 1;
+    const pad = (max - min) * 0.08; min -= pad; max += pad;
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = max - ((max - min) / 4) * i;
+      const yv = m.t + (ih / 4) * i;
+      g += `<text x="${m.l - 6}" y="${yv + 3}" font-size="10" fill="#64748b" text-anchor="end">${v.toLocaleString('es-CO', {maximumFractionDigits: 0})}</text>`;
+    }
+    svg.insertAdjacentHTML('beforeend', g);
+  }
+
+  function leyenda(svg, series) {
+    let x = m.l;
+    series.forEach(([nombre, color]) => {
+      svg.insertAdjacentHTML('beforeend',
+        `<rect x="${x}" y="1" width="10" height="10" rx="2" fill="${color}"/>` +
+        `<text x="${x + 14}" y="10" font-size="10" fill="#64748b">${nombre}</text>`);
+      x += 14 + nombre.length * 6 + 18;
+    });
+  }
+
+  function barras(id, sP, sE) {
+    const svg = document.getElementById(id);
+    if (!svg) return;
+    const y = escala([sP, sE]);
+    ejes(svg, y, datos.meses); etiquetasY(svg, [sP, sE]);
+    leyenda(svg, [['Proyectado', AZUL_CLARO], ['Ejecutado', AZUL]]);
+    const paso = iw / 12, bw = Math.min(11, paso / 2 - 3), y0 = y(0);
+    let g = '';
+    for (let i = 0; i < 12; i++) {
+      const x = m.l + paso * i + paso / 2;
+      const yp = y(sP[i]);
+      g += `<rect x="${x - bw - 1}" y="${Math.min(yp, y0)}" width="${bw}" height="${Math.max(1, Math.abs(y0 - yp))}" fill="${AZUL_CLARO}"/>`;
+      if (sE[i] !== null) {
+        const ye = y(sE[i]);
+        g += `<rect x="${x + 1}" y="${Math.min(ye, y0)}" width="${bw}" height="${Math.max(1, Math.abs(y0 - ye))}" fill="${AZUL}"/>`;
+      }
+    }
+    g += `<line x1="${m.l}" y1="${y0}" x2="${W - m.r}" y2="${y0}" stroke="#94a3b8"/>`;
+    svg.insertAdjacentHTML('beforeend', g);
+  }
+
+  function lineas(id, sP, sE) {
+    const svg = document.getElementById(id);
+    if (!svg) return;
+    const y = escala([sP, sE]);
+    ejes(svg, y, datos.meses); etiquetasY(svg, [sP, sE]);
+    leyenda(svg, [['Proyectado', AZUL_CLARO], ['Ejecutado', AZUL]]);
+    const paso = iw / 12;
+    const punto = (v, i) => `${m.l + paso * i + paso / 2},${y(v)}`;
+    const trazo = (serie, color, ancho) => {
+      const pts = serie.map((v, i) => v === null ? null : punto(v, i)).filter(Boolean);
+      if (pts.length > 1) {
+        svg.insertAdjacentHTML('beforeend',
+          `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="${ancho}" stroke-linejoin="round"/>`);
+      }
+      serie.forEach((v, i) => {
+        if (v !== null) svg.insertAdjacentHTML('beforeend',
+          `<circle cx="${m.l + paso * i + paso / 2}" cy="${y(v)}" r="2.5" fill="${color}"/>`);
+      });
+    };
+    trazo(sP, AZUL_CLARO, 2);
+    trazo(sE, AZUL, 2.5);
+  }
+
+  barras('chFlujo', datos.neto_p.map(M), corte(datos.neto_e));
+  lineas('chSaldo', datos.saldo_p.map(M), corte(datos.saldo_e));
+})();
+</script>
+{% endblock %}
