@@ -76,6 +76,65 @@ class MovimientoBanco:
     idx_padre: Optional[int] = None  # si es 4x1000, idx del movimiento padre
 
 
+# Delimitadores que se prueban cuando el configurado no permite leer el CSV.
+_DELIMITADORES_FALLBACK = (",", ";", "\t", "|")
+
+
+def _leer_dataframe_banco(path: str | Path, fmt: dict, max_col: int) -> pd.DataFrame:
+    """
+    Lee el CSV con el delimitador configurado; si falla, intenta detectarlo.
+
+    Un delimitador mal configurado en la empresa (p. ej. "." — que aparece en
+    los decimales y en descripciones como "S.A") hace que pandas parta las
+    filas de forma inconsistente ("Expected N fields... saw M") o que no haya
+    columnas suficientes para las posiciones configuradas. En ambos casos se
+    reintenta con los delimitadores habituales y se acepta el primero que
+    produzca al menos `max_col + 1` columnas.
+    """
+    def _leer(delim: str) -> pd.DataFrame:
+        return pd.read_csv(
+            str(path),
+            header=None,
+            sep=delim,
+            skiprows=int(fmt["filas_encabezado"]),
+            dtype=str,
+            keep_default_na=False,
+            skip_blank_lines=True,
+        )
+
+    delim_cfg = str(fmt["delimitador"] or ",")
+    error_cfg: Optional[Exception] = None
+    try:
+        df = _leer(delim_cfg)
+        if df.shape[1] > max_col:
+            return df
+    except pd.errors.ParserError as exc:
+        error_cfg = exc
+
+    for candidato in _DELIMITADORES_FALLBACK:
+        if candidato == delim_cfg:
+            continue
+        try:
+            df = _leer(candidato)
+        except pd.errors.ParserError:
+            continue
+        if df.shape[1] > max_col:
+            logger.warning(
+                "El delimitador configurado (%r) no permite leer el extracto "
+                "(%s); se usó %r detectado automáticamente. Revisa el formato "
+                "del banco en la configuración de la empresa.",
+                delim_cfg, error_cfg or "columnas insuficientes", candidato,
+            )
+            return df
+
+    raise ValueError(
+        f"No se pudo interpretar el extracto con el delimitador configurado "
+        f"({delim_cfg!r}) ni con los delimitadores habituales (, ; tab |). "
+        f"Verifica el campo «Delimitador» del formato del extracto bancario "
+        f"en la configuración de la empresa."
+    ) from error_cfg
+
+
 def leer_csv_banco(path: str | Path, formato: Optional[dict] = None) -> list[MovimientoBanco]:
     """
     Lee el CSV del banco y retorna lista de MovimientoBanco.
@@ -100,22 +159,19 @@ def leer_csv_banco(path: str | Path, formato: Optional[dict] = None) -> list[Mov
     from app.empresas import FORMATO_BANCO_DEFAULT
     fmt = {**FORMATO_BANCO_DEFAULT, **(formato or {})}
 
-    df = pd.read_csv(
-        str(path),
-        header=None,
-        sep=fmt["delimitador"],
-        skiprows=int(fmt["filas_encabezado"]),
-        dtype=str,
-        keep_default_na=False,
-        skip_blank_lines=True,
-    )
-
     col_cuenta  = int(fmt["col_cuenta"])
     col_cod_bco = int(fmt["col_codigo_banco"])
     col_fecha   = int(fmt["col_fecha"])
     col_valor   = int(fmt["col_valor"])
     col_detalle = int(fmt["col_codigo_detalle"])
     col_desc    = int(fmt["col_descripcion"])
+
+    # La descripción es opcional (len(row) > col_desc más abajo); las demás
+    # columnas sí deben existir para poder interpretar el movimiento.
+    max_col = max(col_cuenta, col_cod_bco, col_fecha, col_valor, col_detalle)
+    df = _leer_dataframe_banco(path, fmt, max_col)
+
+
     sep_miles   = fmt["separador_miles"]
     sep_decimal = fmt["separador_decimal"]
 

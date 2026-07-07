@@ -92,6 +92,25 @@ def _parse_empresa_form() -> dict:
         if valor != default:
             formato_banco[campo] = valor
 
+    # Validar el delimitador: un carácter alfanumérico o un punto aparece
+    # dentro de los datos (decimales, "S.A", fechas…) y parte las filas de
+    # forma inconsistente ("Expected N fields... saw M" al importar).
+    delim = str(formato_banco.get("delimitador",
+                                  FORMATO_BANCO_DEFAULT["delimitador"]))
+    sep_decimal = str(formato_banco.get("separador_decimal",
+                                        FORMATO_BANCO_DEFAULT["separador_decimal"]))
+    if delim.isalnum() or delim == ".":
+        raise ValueError(
+            f"Delimitador inválido: «{delim}». Usa un separador de columnas "
+            f"como «,», «;» o «|» (el punto y los caracteres alfanuméricos "
+            f"aparecen dentro de los datos)."
+        )
+    if delim == sep_decimal:
+        raise ValueError(
+            f"El delimitador («{delim}») no puede ser igual al separador "
+            f"decimal: partiría los valores numéricos en dos columnas."
+        )
+
     # Cuentas contables de banco (lista; pueden ser varias)
     cuentas_banco = []
     codigos = request.form.getlist("cuenta_banco_cuenta")

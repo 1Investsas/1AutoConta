@@ -328,6 +328,80 @@ class TestFormatoBancoImportador:
         assert len(movs) == 1
         assert float(movs[0].valor) == -250000.00
 
+    def test_delimitador_mal_configurado_cae_al_detectado(self, tmp_path):
+        """Un delimitador '.' parte los decimales y "S.A" de forma inconsistente
+        (ParserError "Expected 2 fields... saw 3"); debe detectarse la coma."""
+        from app.banco.importador_banco import leer_csv_banco
+
+        csv = tmp_path / "extracto.csv"
+        csv.write_text(
+            "551-000068-95, 551, , 20260430, , 1.77, 2999, ABONO INTERESES AHORROS, 0,\n"
+            "551-000068-95, 551, , 20260416, , -526500.00, 7513, PAGO PSE ENLACE OPERATIVO S.A, 0,\n"
+        )
+        movs = leer_csv_banco(csv, formato={"delimitador": "."})
+        assert len(movs) == 2
+        assert sorted(float(m.valor) for m in movs) == [-526500.00, 1.77]
+
+    def test_delimitador_sin_columnas_suficientes_cae_al_detectado(self, tmp_path):
+        """Un delimitador ';' sobre un CSV de comas deja una sola columna;
+        debe reintentarse con los delimitadores habituales."""
+        from app.banco.importador_banco import leer_csv_banco
+
+        csv = tmp_path / "extracto.csv"
+        csv.write_text(
+            "551-000068-95,551,,20260131,,-250000.00,2999,PAGO X,0\n"
+        )
+        movs = leer_csv_banco(csv, formato={"delimitador": ";"})
+        assert len(movs) == 1
+        assert float(movs[0].valor) == -250000.00
+
+    def test_csv_ilegible_da_error_claro(self, tmp_path):
+        """Si ningún delimitador produce columnas suficientes el error debe
+        orientar al usuario a revisar el formato configurado."""
+        from app.banco.importador_banco import leer_csv_banco
+
+        csv = tmp_path / "extracto.csv"
+        csv.write_text("esto no es un extracto\ncon dos lineas\n")
+        with pytest.raises(ValueError, match="Delimitador"):
+            leer_csv_banco(csv)
+
+
+class TestValidacionDelimitadorFormulario:
+    """El formulario de empresas debe rechazar delimitadores que rompen la
+    importación del extracto (p. ej. '.', que aparece en decimales y "S.A")."""
+
+    def _parse(self, extra: dict):
+        import os
+        os.environ.setdefault("USE_SQLITE", "true")
+        os.environ.setdefault("FLASK_SECRET_KEY",
+                              "test-secret-fixed-key-no-dev-1234567890")
+        from app.web import create_app
+        from app.web.routes.empresas import _parse_empresa_form
+
+        app = create_app()
+        datos = {"nombre": "Empresa X", "nit": "900123456", "sigla": "EX",
+                 **extra}
+        with app.test_request_context("/empresas/crear", method="POST",
+                                      data=datos):
+            return _parse_empresa_form()
+
+    def test_delimitador_punto_rechazado(self):
+        with pytest.raises(ValueError, match="Delimitador inválido"):
+            self._parse({"banco_delimitador": "."})
+
+    def test_delimitador_alfanumerico_rechazado(self):
+        with pytest.raises(ValueError, match="Delimitador inválido"):
+            self._parse({"banco_delimitador": "0"})
+
+    def test_delimitador_igual_a_separador_decimal_rechazado(self):
+        with pytest.raises(ValueError, match="separador"):
+            self._parse({"banco_delimitador": ";",
+                         "banco_separador_decimal": ";"})
+
+    def test_delimitador_valido_aceptado(self):
+        campos = self._parse({"banco_delimitador": ";"})
+        assert campos["formato_banco"]["delimitador"] == ";"
+
 
 class TestClasificadorMultiEmpresa:
     def test_nit_empresa_parametrizable(self):
