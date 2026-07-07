@@ -59,7 +59,7 @@ CATEGORIAS: dict[str, dict] = {
         "modulos": [
             {
                 "nombre": "Bancos",
-                "descripcion": "Concilia y exporta extractos bancarios",
+                "descripcion": "Concilia y exporta los movimientos bancarios",
                 "endpoint": "web.banco",
                 "icono": '<path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/>',
             },
@@ -158,7 +158,7 @@ CATEGORIAS: dict[str, dict] = {
             },
             {
                 "nombre": "Estructura archivo bancos",
-                "descripcion": "Formato del extracto bancario de la empresa",
+                "descripcion": "Formato de los movimientos bancarios de la empresa",
                 "endpoint": "web.empresas",
                 "icono": '<rect x="3" y="4" width="18" height="16" rx="2"/>'
                          '<path d="M3 9h18M9 4v16"/>',

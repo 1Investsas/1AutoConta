@@ -120,7 +120,7 @@ def _leer_dataframe_banco(path: str | Path, fmt: dict, max_col: int) -> pd.DataF
             continue
         if df.shape[1] > max_col:
             logger.warning(
-                "El delimitador configurado (%r) no permite leer el extracto "
+                "El delimitador configurado (%r) no permite leer los movimientos "
                 "(%s); se usó %r detectado automáticamente. Revisa el formato "
                 "del banco en la configuración de la empresa.",
                 delim_cfg, error_cfg or "columnas insuficientes", candidato,
@@ -128,9 +128,9 @@ def _leer_dataframe_banco(path: str | Path, fmt: dict, max_col: int) -> pd.DataF
             return df
 
     raise ValueError(
-        f"No se pudo interpretar el extracto con el delimitador configurado "
+        f"No se pudo interpretar los movimientos con el delimitador configurado "
         f"({delim_cfg!r}) ni con los delimitadores habituales (, ; tab |). "
-        f"Verifica el campo «Delimitador» del formato del extracto bancario "
+        f"Verifica el campo «Delimitador» del formato de los movimientos bancarios "
         f"en la configuración de la empresa."
     ) from error_cfg
 

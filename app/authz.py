@@ -39,7 +39,7 @@ PERMISOS: dict[str, str] = {
     "radian.exportar":        "Generar el archivo SIIGO de RADIAN",
     "radian.auto":            "Configurar y ejecutar la importación automática de RADIAN",
     "banco.ver":              "Ver el módulo de Bancos y su historial",
-    "banco.procesar":         "Cargar y previsualizar extractos bancarios",
+    "banco.procesar":         "Cargar y previsualizar movimientos bancarios",
     "banco.exportar":         "Generar el archivo SIIGO de Bancos",
     "caja.ver":               "Ver el módulo de Caja General y sus períodos",
     "caja.gestionar":         "Crear y editar cuentas de caja",

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Extracto Bancario — 1ContaBot{% endblock %}
-{% block page_title %}🏦 Extracto Bancario{% endblock %}
+{% block title %}Movimientos Bancarios — 1ContaBot{% endblock %}
+{% block page_title %}🏦 Movimientos Bancarios{% endblock %}
 
 {% block content %}
 
@@ -9,7 +9,7 @@
   <div class="card">
     <div class="card-title">¿Qué hace este módulo?</div>
     <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
-      Convierte el extracto bancario CSV al formato de importación SIIGO.
+      Convierte los movimientos bancarios (CSV) al formato de importación SIIGO.
       Detecta automáticamente el 4x1000 y lo agrupa con su egreso correspondiente.
     </div>
   </div>
@@ -31,7 +31,7 @@
 </div>
 
 <div class="form-section">
-  <h2>⬆ Subir extracto bancario CSV</h2>
+  <h2>⬆ Subir movimientos bancarios (CSV)</h2>
 
   <form method="POST" action="{{ url_for('web.banco_previsualizar') }}"
         enctype="multipart/form-data" data-loading="true">
@@ -63,7 +63,7 @@
         <label for="cuentaBanco">
           Cuenta contable del banco
           <small style="color:var(--text-dim); font-weight:400">
-            — elige la cuenta de este extracto
+            — elige la cuenta de estos movimientos
           </small>
         </label>
         <select id="cuentaBanco" name="cuenta_banco" style="font-family:monospace">
@@ -81,7 +81,7 @@
         <label for="nitBanco">
           Banco
           <small style="color:var(--text-dim); font-weight:400">
-            — elige el banco de este extracto (4x1000, intereses, gastos)
+            — elige el banco de estos movimientos (4x1000, intereses, gastos)
           </small>
         </label>
         <select id="nitBanco" name="nit_banco">
@@ -133,7 +133,7 @@
         Guía rápida
       </h2>
     </div>
-    <p class="guia-sub">Pasos para procesar tu extracto bancario</p>
+    <p class="guia-sub">Pasos para procesar tus movimientos bancarios</p>
 
     <div class="guia-steps">
       <!-- Paso 1 -->
@@ -143,7 +143,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
         </div>
         <div class="guia-step-title guia-t-blue">Sube tu archivo CSV</div>
-        <div class="guia-step-desc">Arrastra o selecciona tu extracto bancario.</div>
+        <div class="guia-step-desc">Arrastra o selecciona el archivo de movimientos de tu banco.</div>
       </div>
       <div class="guia-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
 
