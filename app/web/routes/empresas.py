@@ -4,7 +4,7 @@ import io
 import logging
 
 from flask import (
-    flash, redirect, render_template,
+    flash, jsonify, redirect, render_template,
     request, send_file, session, url_for,
 )
 
@@ -209,6 +209,50 @@ def empresas_actualizar(empresa_id):
     audit.registrar("empresa.actualizar", empresa_id=emp.id, detalle=emp.nombre)
     flash(f"✓ Empresa '{emp.nombre}' ({emp.sigla_efectiva}) actualizada.", "success")
     return redirect(url_for("web.empresas"))
+
+
+@bp.route("/empresas/detectar-formato-banco", methods=["POST"])
+@require_permission("empresas.gestionar")
+def empresas_detectar_formato_banco():
+    """Detecta el formato de los movimientos bancarios desde un archivo de ejemplo.
+
+    Recibe el archivo que el banco le entrega al usuario y responde JSON con el
+    formato propuesto (delimitador, columnas, fecha, separadores), una vista
+    previa con el rol detectado de cada columna y el nº de movimientos que se
+    leyeron al validar. El formulario de la empresa usa esta respuesta para
+    llenar los campos automáticamente.
+    """
+    import os as _os
+    import tempfile
+
+    from app.banco.detector_formato import detectar_formato
+
+    archivo = request.files.get("archivo")
+    if not archivo or not archivo.filename:
+        return jsonify({"ok": False,
+                        "error": "Selecciona el archivo de ejemplo del banco."}), 400
+
+    contenido = archivo.read()
+    if len(contenido) > 10 * 1024 * 1024:
+        return jsonify({"ok": False,
+                        "error": "El archivo supera los 10 MB; sube una muestra "
+                                 "más pequeña (basta un mes de movimientos)."}), 400
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+    try:
+        tmp.write(contenido)
+        tmp.close()
+        resultado = detectar_formato(tmp.name)
+    except Exception:
+        logger.exception("Error detectando el formato de movimientos bancarios")
+        return jsonify({"ok": False,
+                        "error": "No se pudo analizar el archivo. Verifica que "
+                                 "sea el CSV de movimientos del banco."}), 400
+    finally:
+        _os.unlink(tmp.name)
+
+    status = 200 if resultado.get("ok") else 422
+    return jsonify(resultado), status
 
 
 @bp.route("/empresas/<empresa_id>/eliminar", methods=["POST"])

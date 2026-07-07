@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Empresas — 1ContaBot{% endblock %}
 {% block page_title %}Empresas{% endblock %}
-{% block page_subtitle %}<p class="topbar-sub">Gestiona las empresas, cuentas contables y extractos bancarios.</p>{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Gestiona las empresas, cuentas contables y movimientos bancarios.</p>{% endblock %}
 
 {% block content %}
 
@@ -20,8 +20,8 @@
         <h2>Empresas registradas</h2>
         <p>
           La empresa activa determina la base de datos, los archivos maestros (plan de cuentas,
-          terceros, comprobantes), las cuentas contables por defecto y el formato del extracto
-          bancario que usa la aplicación.
+          terceros, comprobantes), las cuentas contables por defecto y el formato de los
+          movimientos bancarios que usa la aplicación.
         </p>
       </div>
     </div>
@@ -253,7 +253,7 @@
         <div class="accordion-body">
           <p class="muted">
             La o las cuentas contables de los bancos de la empresa. Aplican a todos los movimientos
-            del extracto. Si configuras más de una, el módulo de Bancos te dejará elegir cuál usar.
+            bancarios. Si configuras más de una, el módulo de Bancos te dejará elegir cuál usar.
           </p>
           <div id="cuentasBancoList" class="config-list">
             {% for c in cuentas_cfg %}
@@ -276,14 +276,14 @@
           <span class="accordion-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="5" y1="21" x2="5" y2="10"/><line x1="9" y1="21" x2="9" y2="10"/><line x1="15" y1="21" x2="15" y2="10"/><line x1="19" y1="21" x2="19" y2="10"/><path d="M12 3 21 8H3Z"/></svg></span>
           <span class="accordion-text">
             <strong>Bancos</strong>
-            <span>Defina los bancos y sus configuraciones de extracto.</span>
+            <span>Defina los bancos y sus configuraciones de movimientos.</span>
           </span>
           <span class="accordion-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
         </summary>
         <div class="accordion-body">
           <p class="muted">
             NIT(s) de los bancos de la empresa (terceros). Se usan en el 4x1000, los intereses y
-            los gastos bancarios. Si configuras más de uno, podrás elegir cuál usar en cada extracto.
+            los gastos bancarios. Si configuras más de uno, podrás elegir cuál usar en cada importación.
           </p>
           <div id="bancosList" class="config-list">
             {% for b in bancos_cfg %}
@@ -300,20 +300,37 @@
         </div>
       </details>
 
-      <!-- Formato del extracto bancario -->
+      <!-- Formato de los movimientos bancarios -->
       <details class="accordion" {% if editando %}open{% endif %}>
         <summary>
           <span class="accordion-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M8 13h8M8 17h6"/></svg></span>
           <span class="accordion-text">
-            <strong>Formato del extracto bancario</strong>
-            <span>Personalice el formato y las columnas del extracto bancario.</span>
+            <strong>Formato de los movimientos bancarios</strong>
+            <span>Personalice el formato y las columnas del archivo de movimientos del banco.</span>
           </span>
           <span class="accordion-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
         </summary>
         <div class="accordion-body">
+
+          <!-- Asistente: detectar el formato desde un archivo de ejemplo -->
+          <div class="detector-formato" style="border:1px dashed var(--accent); border-radius:8px; padding:14px 16px; margin-bottom:16px">
+            <p style="margin:0 0 10px; font-size:0.85rem">
+              <strong>💡 ¿No sabes qué poner en estos campos?</strong>
+              Sube el archivo de movimientos que te entrega tu banco (un mes es suficiente)
+              y el sistema detectará el formato por ti: delimitador, columnas, fecha y separadores.
+            </p>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+              <input type="file" id="archivoDeteccion" accept=".csv,.txt" style="font-size:0.82rem">
+              <button type="button" class="btn btn-sm btn-primary" id="btnDetectarFormato">
+                🔍 Detectar formato automáticamente
+              </button>
+            </div>
+            <div id="deteccionResultado" hidden style="margin-top:12px"></div>
+          </div>
+
           <p class="muted">
             {% if editando %}Valores actuales de la empresa.{% else %}Déjalos vacíos para usar el formato por defecto.{% endif %}
-            Las columnas se cuentan desde 0.
+            Las columnas se cuentan desde 0 (la primera columna del archivo es la 0).
           </p>
           <div class="form-cols">
             <div class="form-field">
@@ -575,6 +592,101 @@
       var row = e.target.closest('.config-row');
       if (row) row.remove();
     }
+  });
+}());
+</script>
+<script>
+// --- Asistente: detectar el formato de los movimientos bancarios ---
+(function () {
+  var btn = document.getElementById('btnDetectarFormato');
+  var inputFile = document.getElementById('archivoDeteccion');
+  var resultado = document.getElementById('deteccionResultado');
+  if (!btn || !inputFile || !resultado) return;
+
+  // Nombre de cada campo del formulario según la clave del formato detectado
+  var CAMPOS = {
+    delimitador: 'banco_delimitador',
+    filas_encabezado: 'banco_filas_encabezado',
+    col_cuenta: 'banco_col_cuenta',
+    col_codigo_banco: 'banco_col_codigo_banco',
+    col_fecha: 'banco_col_fecha',
+    col_valor: 'banco_col_valor',
+    col_codigo_detalle: 'banco_col_codigo_detalle',
+    col_descripcion: 'banco_col_descripcion',
+    formato_fecha: 'banco_formato_fecha',
+    separador_decimal: 'banco_separador_decimal',
+    separador_miles: 'banco_separador_miles'
+  };
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = (s === null || s === undefined) ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function mostrar(html) { resultado.innerHTML = html; resultado.hidden = false; }
+
+  function mostrarError(msg) {
+    mostrar('<div style="color:var(--danger); font-size:0.83rem">✕ ' + esc(msg) + '</div>');
+  }
+
+  btn.addEventListener('click', function () {
+    if (!inputFile.files || !inputFile.files.length) {
+      mostrarError('Primero selecciona el archivo de movimientos que te entrega el banco.');
+      return;
+    }
+    btn.disabled = true;
+    mostrar('<div class="muted" style="font-size:0.83rem">Analizando el archivo…</div>');
+
+    var fd = new FormData();
+    fd.append('archivo', inputFile.files[0]);
+    var csrf = document.querySelector('#form-empresa input[name="csrf_token"]');
+    if (csrf) fd.append('csrf_token', csrf.value);
+
+    fetch({{ url_for('web.empresas_detectar_formato_banco') | tojson }}, { method: 'POST', body: fd })
+      .then(function (r) { return r.json().then(function (j) { return { st: r.status, j: j }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        var data = res.j || {};
+        if (!data.ok) { mostrarError(data.error || 'No se pudo detectar el formato.'); return; }
+
+        // Llenar los campos del formulario con lo detectado
+        Object.keys(CAMPOS).forEach(function (clave) {
+          var campo = document.querySelector('[name="' + CAMPOS[clave] + '"]');
+          if (campo && data.formato[clave] !== undefined && data.formato[clave] !== null) {
+            campo.value = data.formato[clave];
+            campo.style.background = 'rgba(46, 204, 113, .12)';
+          }
+        });
+
+        // Vista previa: primeras filas con el rol detectado de cada columna
+        var html = '<div style="color:var(--success); font-size:0.85rem; margin-bottom:8px">'
+          + '✓ Formato detectado y aplicado a los campos de abajo. '
+          + 'Se interpretaron <strong>' + esc(data.n_movimientos) + '</strong> movimientos del archivo.'
+          + '</div>';
+        (data.avisos || []).forEach(function (a) {
+          html += '<div style="color:#f39c12; font-size:0.8rem; margin-bottom:6px">⚠ ' + esc(a) + '</div>';
+        });
+        html += '<div class="tbl-scroll" style="max-height:220px"><table style="font-size:0.75rem"><thead><tr>';
+        (data.roles || []).forEach(function (rol, i) {
+          html += '<th>' + (rol ? esc(rol) : '<span class="muted">col ' + i + '</span>') + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+        (data.preview || []).forEach(function (fila) {
+          html += '<tr>';
+          fila.forEach(function (celda) { html += '<td class="mono">' + esc(celda) + '</td>'; });
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>'
+          + '<p class="muted" style="font-size:0.78rem; margin-top:8px">Revisa que cada columna tenga el '
+          + 'rol correcto. Si algo no coincide, ajusta el número de columna en los campos de abajo. '
+          + 'Recuerda <strong>guardar</strong> la empresa para aplicar el formato.</p>';
+        mostrar(html);
+      })
+      .catch(function () {
+        btn.disabled = false;
+        mostrarError('Error de red al analizar el archivo. Inténtalo de nuevo.');
+      });
   });
 }());
 </script>
