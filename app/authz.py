@@ -56,6 +56,9 @@ PERMISOS: dict[str, str] = {
     "presupuesto.ver":        "Ver el Sistema Presupuestal y sus análisis",
     "presupuesto.gestionar":  "Crear presupuestos, estructura y conector contable",
     "presupuesto.procesar":   "Registrar valores, importar CSV y sincronizar el ejecutado",
+    "cartera.ver":            "Ver la cartera y las cuentas por pagar",
+    "cartera.gestionar":      "Definir vencimientos, cuotas, contactos y anular obligaciones",
+    "cartera.procesar":       "Sincronizar la cartera y registrar abonos",
     "importaciones.ver":      "Ver el listado de importaciones",
     "importaciones.gestionar": "Retomar, corregir, anular y descargar importaciones",
     "analitica.ver":          "Ver analíticas y reportes",
@@ -72,8 +75,8 @@ PERMISOS: dict[str, str] = {
 # Permisos de solo lectura (compartidos por todos los roles operativos).
 _VER = (
     "dashboard.ver", "radian.ver", "banco.ver", "caja.ver", "mixto.ver",
-    "presupuesto.ver", "importaciones.ver", "analitica.ver", "ml.ver",
-    "empresas.ver", "terceros.ver",
+    "presupuesto.ver", "cartera.ver", "importaciones.ver", "analitica.ver",
+    "ml.ver", "empresas.ver", "terceros.ver",
 )
 
 # ---------------------------------------------------------------------------
@@ -94,6 +97,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "mixto.gestionar", "mixto.procesar", "mixto.exportar",
             "mixto.aprobar", "mixto.cerrar",
             "presupuesto.gestionar", "presupuesto.procesar",
+            "cartera.gestionar", "cartera.procesar",
             "importaciones.gestionar", "auditoria.ver",
             "terceros.gestionar", "ml.entrenar",
         ),
@@ -106,6 +110,7 @@ ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
             "caja.gestionar", "caja.procesar", "caja.exportar",
             "mixto.gestionar", "mixto.procesar", "mixto.exportar",
             "presupuesto.gestionar", "presupuesto.procesar",
+            "cartera.gestionar", "cartera.procesar",
             "importaciones.gestionar",
             "terceros.gestionar",
         ),

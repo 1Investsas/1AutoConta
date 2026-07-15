@@ -383,6 +383,9 @@ Diccionario `_GENERADORES` mapea clasificación → función generadora de líne
 | `importaciones` | Registro persistente de cada proceso RADIAN + **snapshot editable durable** (`preasientos_json`) con ciclo de estados (`procesando/procesada/corregida/exportada/error/anulada`). «Abrir» recupera el estado guardado con las correcciones; «Regenerar» reprocesa desde cero |
 | `procesos_banco` | Histórico del módulo Bancos: cada extracto previsualizado/exportado (archivo, cuenta, NIT banco, nº movimientos, estado `procesando`/`completada`/`error`) |
 | `cuentas_bancarias_tercero` | Cuentas bancarias de un tercero importadas del **certificado bancario** (Bancolombia, PJ y PN). Único por (`nit_tercero`, `numero_cuenta`); guarda banco, tipo de producto, fecha de apertura y estado. Lo alimenta el módulo Terceros |
+| `cartera_obligaciones` | Módulo **Cartera y Cuentas por Pagar** (Finanzas): una obligación por documento — CxC (`tipo='cxc'`, facturas de venta) o CxP (`tipo='cxp'`, facturas de compra/doc. soporte). Nace de `documentos_importados` (sincronización idempotente por CUFE) o manual. Guarda condición de pago (contado/crédito), vencimiento, contacto, fuente de recursos, saldo y estado (`pendiente/parcial/pagada/anulada`) |
+| `cartera_cuotas` | Cuotas de una obligación a crédito: cada una con su propia fecha de vencimiento, valor y saldo (los abonos se aplican FIFO por vencimiento) |
+| `cartera_pagos` | Abonos aplicados a una obligación. Los generan los Flujos Directos (Bancos al exportar → `referencia='banco:<proceso>'`; Caja/Mixtos al cerrar → `'caja:<periodo>'`/`'mixto:<flujo>'`; idempotente por (origen, referencia)) o el usuario (manual) |
 | `patrones_aprendidos` | Motor de aprendizaje generalizado (§6.7): contexto exacto normalizado → valor, por módulo/campo. Único por (modulo, campo, contexto, valor) |
 | `tokens_aprendidos` | Frecuencias token→valor del clasificador de texto (Naive Bayes) del motor de aprendizaje. Único por (modulo, campo, token, valor) |
 | `importaciones_conocimiento` | Histórico de entrenamientos del ML con archivos externos (archivo, módulo destino, filas, observaciones, estado) |
@@ -480,6 +483,10 @@ Contexto global inyectado en todas las plantillas: empresa actual, empresas disp
 | `/banco/previsualizar` | POST | Parsea el CSV, registra el proceso (estado `procesando`) y muestra tabla editable |
 | `/banco/exportar` | POST | Genera Excel(s) SIIGO del banco y marca el proceso `completada` (o `error`) |
 | `/banco/historial` | GET | Histórico completo de procesos del módulo Bancos |
+| `/cartera` | GET | **Cartera y CxP** (Finanzas): tablero con resumen, cartera y cuentas por pagar (vencimientos, cuotas, contactos, datos bancarios del tercero o aviso de certificado faltante) |
+| `/cartera/sincronizar` | POST | Crea las obligaciones que falten desde los documentos RADIAN y trae contactos del maestro de terceros |
+| `/cartera/nueva` | POST | Obligación manual (contratos, préstamos, etc.) |
+| `/cartera/<id>` (+ `/condiciones`, `/datos`, `/pago`, `/anular`) | GET/POST | Detalle de la obligación: condición de pago (contado o crédito con fecha de vencimiento por cuota), contacto/fuente de recursos, abono manual y anulación |
 | `/empresas` (+ `/seleccionar`, `/crear`, `/<id>/editar`, `/<id>/actualizar`, `/<id>/eliminar`, `/maestros`) | GET/POST | Administración multi-empresa |
 | `/test-procesar` | GET | Solo en DEBUG: procesa el primer RADIAN de `input/` |
 
@@ -679,6 +686,7 @@ importador de conocimiento externo, integración RADIAN).
 | Configurar cuentas/bancos de una empresa (varias cuentas o bancos) | `app/empresas.py` (`Empresa.cuentas_banco`, `bancos`, métodos `*_efectivas()`) + `templates/empresas.html` + `_parse_empresa_form` en `routes.py` |
 | Tocar la pantalla principal del módulo Bancos (selector, guía, actividad) | `templates/banco_upload.html` + `web.banco` en `routes.py` |
 | Añadir/ver el histórico de un módulo de Automatizaciones | tabla propia en `app/database.py` + helpers `registrar_/actualizar_/listar_*` (ver `procesos_banco`) + parcial `banco_actividad_items.html` |
+| Tocar la Cartera y Cuentas por Pagar (obligaciones/cuotas/pagos, sync, hooks de pagos) | `app/database/cartera.py` (datos), `app/web/routes/cartera.py` (vistas), `cartera.html`/`cartera_detalle.html`; hooks: `banco.py::banco_exportar` y `_aplicar_pagos_cartera` en `caja.py`/`mixtos.py` (al cerrar) |
 | Tocar el motor de aprendizaje / prediligenciamiento (ML) | `app/aprendizaje.py` (motor), `app/aprendizaje_importador.py` (entrenamiento externo), rutas `aprendizaje*` y `api_aprendizaje_sugerir` en `routes.py`, plantilla `aprendizaje.html` |
 | Añadir un endpoint web | `app/web/routes.py` (+ plantilla en `templates/`) |
 | Tocar el esquema de BD | `app/database.py` (`_create_tables_sqlite` y `_create_tables_mssql`) |

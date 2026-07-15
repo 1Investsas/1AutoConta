@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Cartera y Cuentas por Pagar — 1ContaBot{% endblock %}
+{% block page_title %}📒 Cartera y Cuentas por Pagar{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">Vencimientos, cuotas, contactos y datos bancarios para programar cobros y pagos a tiempo.</p>{% endblock %}
+
+{% macro pill_estado(o) %}
+  {% if o.vencida %}<span class="pill pill-pendiente">vencida</span>
+  {% elif o.estado == 'pagada' %}<span class="pill pill-ok">pagada</span>
+  {% elif o.estado == 'parcial' %}<span class="pill pill-warn">parcial</span>
+  {% else %}<span class="pill pill-info">pendiente</span>{% endif %}
+{% endmacro %}
+
+{% macro celda_vencimiento(o) %}
+  {% if o.prox_vencimiento %}
+    <span style="font-family:monospace">{{ o.prox_vencimiento[:10] }}</span>
+    {% if o.dias_vencimiento is not none and o.saldo > 0.01 %}
+      <small class="muted">
+        {%- if o.dias_vencimiento < 0 %} (hace {{ -o.dias_vencimiento }} d)
+        {%- elif o.dias_vencimiento == 0 %} (hoy)
+        {%- else %} (en {{ o.dias_vencimiento }} d){% endif -%}
+      </small>
+    {% endif %}
+  {% else %}<span class="muted">sin definir</span>{% endif %}
+{% endmacro %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">¿Qué hace este módulo?</div>
+    <div class="card-sub" style="font-size:0.85rem; line-height:1.6; margin-top:8px">
+      Consolida lo que te deben y lo que debes a partir de los <strong>Flujos
+      indirectos de efectivo</strong> (documentos RADIAN). Define vencimientos y
+      cuotas, guarda contactos y datos bancarios, y descuenta automáticamente los
+      pagos hechos en los <strong>Flujos directos de efectivo</strong>.
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Por cobrar (cartera)</div>
+    <div class="card-value" style="color:var(--success); font-size:1.6rem">${{ '{:,.0f}'.format(resumen.por_cobrar) }}</div>
+    <div class="card-sub">{% if resumen.vencido_cxc > 0 %}<span style="color:var(--danger)">${{ '{:,.0f}'.format(resumen.vencido_cxc) }} vencido</span>{% else %}sin cartera vencida{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Por pagar</div>
+    <div class="card-value" style="color:var(--danger); font-size:1.6rem">${{ '{:,.0f}'.format(resumen.por_pagar) }}</div>
+    <div class="card-sub">{% if resumen.vencido_cxp > 0 %}<span style="color:var(--danger)">${{ '{:,.0f}'.format(resumen.vencido_cxp) }} vencido</span>{% else %}sin pagos vencidos{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Vence en los próximos 30 días</div>
+    <div class="card-value" style="color:var(--accent); font-size:1.6rem">${{ '{:,.0f}'.format(resumen.proximos_30) }}</div>
+    <div class="card-sub">para programar los recursos con tiempo</div>
+  </div>
+</div>
+
+<div class="form-section">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+    <h2 style="margin:0">🔄 Actualizar la cartera</h2>
+    <div style="display:flex; gap:10px; flex-wrap:wrap">
+      <form method="POST" action="{{ url_for('web.cartera_sincronizar') }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary">Sincronizar desde Flujos Indirectos</button>
+      </form>
+      <button type="button" class="btn" onclick="document.getElementById('nuevaOblig').classList.toggle('hidden')">
+        <span>＋</span> Obligación manual
+      </button>
+    </div>
+  </div>
+  <p class="muted" style="margin:10px 0 0">
+    «Sincronizar» crea las obligaciones de los documentos RADIAN ya procesados
+    (facturas de venta → por cobrar; facturas de compra y documentos soporte →
+    por pagar) y trae el contacto del maestro de terceros. Los pagos de Bancos
+    (al exportar) y de Caja/Flujos mixtos (al cerrar) descuentan los saldos solos.
+  </p>
+
+  <form method="POST" action="{{ url_for('web.cartera_nueva') }}" id="nuevaOblig" class="hidden" style="margin-top:18px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="tipo">Tipo *</label>
+        <select id="tipo" name="tipo" required>
+          <option value="cxc">Por cobrar (cartera)</option>
+          <option value="cxp">Por pagar</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="nit_tercero">NIT del tercero *</label>
+        <input type="text" id="nit_tercero" name="nit_tercero" required
+               autocomplete="off" placeholder="Solo dígitos" style="font-family:monospace">
+      </div>
+      <div class="form-group">
+        <label for="nombre_tercero">Nombre del tercero</label>
+        <input type="text" id="nombre_tercero" name="nombre_tercero" placeholder="Razón social">
+      </div>
+      <div class="form-group">
+        <label for="valor_total">Valor total *</label>
+        <input type="text" id="valor_total" name="valor_total" required placeholder="0" style="font-family:monospace">
+      </div>
+      <div class="form-group">
+        <label for="documento">Documento / referencia</label>
+        <input type="text" id="documento" name="documento" placeholder="Contrato, pagaré, factura…">
+      </div>
+      <div class="form-group">
+        <label for="fecha_emision">Fecha de emisión</label>
+        <input type="date" id="fecha_emision" name="fecha_emision">
+      </div>
+      <div class="form-group">
+        <label for="fecha_vencimiento">Fecha de vencimiento</label>
+        <input type="date" id="fecha_vencimiento" name="fecha_vencimiento">
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <button type="submit" class="btn btn-primary">Crear obligación</button>
+    </div>
+  </form>
+</div>
+
+<!-- ── Cartera (cuentas por cobrar) ── -->
+<div class="panel" style="margin-top:24px">
+  <div class="panel-head"><h2>💰 Cartera — cuentas por cobrar ({{ cxc|length }})</h2></div>
+  {% if cxc %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Documento</th><th>Tercero</th><th>Emisión</th>
+          <th>Vencimiento</th><th>Cuotas</th>
+          <th style="text-align:right">Valor</th>
+          <th style="text-align:right">Saldo por cobrar</th>
+          <th>Estado</th><th>Contacto de cobro</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in cxc %}
+        <tr>
+          <td>{{ o.documento or '—' }}</td>
+          <td>{{ o.nombre_tercero or o.nit_tercero }}<br><small class="muted" style="font-family:monospace">{{ o.nit_tercero }}</small></td>
+          <td style="font-family:monospace">{{ (o.fecha_emision or '')[:10] or '—' }}</td>
+          <td>{{ celda_vencimiento(o) }}</td>
+          <td>{% if o.condicion_pago == 'credito' %}{{ o.num_cuotas }} cuota(s){% else %}contado{% endif %}</td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(o.valor_total or 0) }}</td>
+          <td style="text-align:right; font-family:monospace; font-weight:600">{{ '{:,.0f}'.format(o.saldo or 0) }}</td>
+          <td>{{ pill_estado(o) }}</td>
+          <td>
+            {% if o.contacto_nombre or o.contacto_telefono or o.contacto_correo %}
+              {{ o.contacto_nombre or '' }}
+              {% if o.contacto_telefono %}<br><small class="muted">📞 {{ o.contacto_telefono }}</small>{% endif %}
+              {% if o.contacto_correo %}<br><small class="muted">✉ {{ o.contacto_correo }}</small>{% endif %}
+            {% else %}<span class="muted">sin contacto</span>{% endif %}
+          </td>
+          <td style="text-align:right"><a href="{{ url_for('web.cartera_detalle', oblig_id=o.id) }}" class="link-more">Abrir</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:16px 20px">
+    No hay cuentas por cobrar. Usa «Sincronizar desde Flujos Indirectos» para
+    traer las facturas de venta procesadas.
+  </p>
+  {% endif %}
+</div>
+
+<!-- ── Cuentas por pagar ── -->
+<div class="panel" style="margin-top:24px">
+  <div class="panel-head"><h2>📤 Cuentas por pagar ({{ cxp|length }})</h2></div>
+  {% if cxp %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Documento</th><th>Tercero</th><th>Emisión</th>
+          <th>Vencimiento</th><th>Cuotas</th>
+          <th style="text-align:right">Valor</th>
+          <th style="text-align:right">Saldo por pagar</th>
+          <th>Estado</th><th>Cuenta para el pago</th><th>Fuente de recursos</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in cxp %}
+        <tr>
+          <td>{{ o.documento or '—' }}</td>
+          <td>{{ o.nombre_tercero or o.nit_tercero }}<br><small class="muted" style="font-family:monospace">{{ o.nit_tercero }}</small></td>
+          <td style="font-family:monospace">{{ (o.fecha_emision or '')[:10] or '—' }}</td>
+          <td>{{ celda_vencimiento(o) }}</td>
+          <td>{% if o.condicion_pago == 'credito' %}{{ o.num_cuotas }} cuota(s){% else %}contado{% endif %}</td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(o.valor_total or 0) }}</td>
+          <td style="text-align:right; font-family:monospace; font-weight:600">{{ '{:,.0f}'.format(o.saldo or 0) }}</td>
+          <td>{{ pill_estado(o) }}</td>
+          <td>
+            {% if o.cuentas_bancarias %}
+              {% set cb = o.cuentas_bancarias[0] %}
+              {{ cb.banco or 'Banco' }}<br>
+              <small class="muted" style="font-family:monospace">{{ cb.tipo_producto or '' }} {{ cb.numero_cuenta }}</small>
+              {% if o.cuentas_bancarias|length > 1 %}<br><small class="muted">+{{ o.cuentas_bancarias|length - 1 }} más</small>{% endif %}
+            {% elif o.falta_certificado %}
+              <span class="pill pill-warn">falta certificado bancario</span><br>
+              <small class="muted">solicítalo e impórtalo en <a href="{{ url_for('web.terceros') }}">Terceros</a></small>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td>{{ o.fuente_recursos or '—' }}</td>
+          <td style="text-align:right"><a href="{{ url_for('web.cartera_detalle', oblig_id=o.id) }}" class="link-more">Abrir</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:16px 20px">
+    No hay cuentas por pagar. Usa «Sincronizar desde Flujos Indirectos» para
+    traer las facturas de compra y documentos soporte procesados.
+  </p>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<style>.hidden{display:none}</style>
+{% endblock %}

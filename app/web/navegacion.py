@@ -128,6 +128,13 @@ CATEGORIAS: dict[str, dict] = {
                 "endpoint": "web.presupuesto",
                 "icono": '<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7h-5M21 7v5"/>',
             },
+            {
+                "nombre": "Cartera y Cuentas por Pagar",
+                "descripcion": "Vencimientos, cuotas, contactos y datos de pago de CxC y CxP",
+                "endpoint": "web.cartera",
+                "icono": '<rect x="3" y="5" width="18" height="14" rx="2"/>'
+                         '<path d="M3 10h18"/><path d="M7 15h4"/><circle cx="16.5" cy="15" r="1.2"/>',
+            },
         ],
     },
     # ===== Configuraciones =====

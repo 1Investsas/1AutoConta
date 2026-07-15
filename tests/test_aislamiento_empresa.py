@@ -210,16 +210,17 @@ class TestTenantAwareAzure:
         # procesos_banco, correcciones_tercero, cuentas_bancarias_tercero,
         # cash_accounts, cash_periods, cash_movements,
         # mixed_accounts, mixed_periods, mixed_movements,
+        # cartera_obligaciones, cartera_cuotas, cartera_pagos,
         # patrones_aprendidos, tokens_aprendidos, importaciones_conocimiento
         # (la tabla `empresas` es el catálogo y se crea aparte, sin empresa_id).
-        assert len(creates) == 16
+        assert len(creates) == 19
         assert all("empresa_id" in sql for sql in creates)
 
     def test_asegurar_indices_idempotente_y_por_empresa(self):
         conn = _RecConn(is_sqlite=False)
         db._asegurar_indices_mssql(conn)
         sqls = [sql for sql, _ in conn.calls]
-        assert len(sqls) == 11
+        assert len(sqls) == 14
         # Todos guardados por IF NOT EXISTS (idempotencia) y liderados por empresa_id.
         assert all("IF NOT EXISTS" in sql for sql in sqls)
         assert any("CREATE INDEX ix_importaciones_empresa ON importaciones (empresa_id, id)" in sql
@@ -242,6 +243,12 @@ class TestTenantAwareAzure:
                    and "(empresa_id, mixed_account_id)" in sql for sql in sqls)
         assert any("ix_mixed_movements_periodo" in sql
                    and "(empresa_id, mixed_period_id)" in sql for sql in sqls)
+        assert any("ix_cartera_oblig_empresa" in sql
+                   and "(empresa_id, tipo, nit_tercero)" in sql for sql in sqls)
+        assert any("ix_cartera_cuotas_oblig" in sql
+                   and "(empresa_id, obligacion_id)" in sql for sql in sqls)
+        assert any("ix_cartera_pagos_oblig" in sql
+                   and "(empresa_id, obligacion_id)" in sql for sql in sqls)
         assert any("ix_import_conocimiento_emp" in sql
                    and "(empresa_id, id)" in sql for sql in sqls)
 

@@ -411,6 +411,49 @@ def banco_exportar():
     audit.registrar("banco.exportar_siigo", empresa_id=emp.id,
                     detalle=f"proceso={datos_banco.get('proceso_id')} archivos={len(rutas)}")
 
+    # Actualizar la Cartera y Cuentas por Pagar con los pagos confirmados: los
+    # ingresos con tercero abonan la cartera (CxC) y los egresos las cuentas
+    # por pagar (CxP). Idempotente por proceso (reexportar no duplica abonos)
+    # y best-effort (un fallo no bloquea la descarga).
+    try:
+        from app.database import aplicar_pagos_flujos_directos
+
+        movs_por_idx = {m.idx: m for m in movimientos}
+        pagos = []
+        for asig in asignaciones:
+            m = movs_por_idx.get(asig["idx"])
+            if m is None or m.es_bancario or m.es_4x1000:
+                continue  # intereses/GMF/cuota de manejo: no son pagos a terceros
+            sentido = "ingreso" if m.valor > 0 else "egreso"
+            fecha = m.fecha.isoformat() if m.fecha else ""
+            partes = asig.get("contrapartidas") or []
+            if partes:
+                for p in partes:
+                    if p.get("nit_tercero"):
+                        pagos.append({
+                            "nit": p["nit_tercero"], "valor": p["monto"],
+                            "sentido": sentido, "fecha": fecha,
+                            "detalle": p.get("concepto") or m.descripcion,
+                        })
+            elif asig.get("nit_tercero"):
+                pagos.append({
+                    "nit": asig["nit_tercero"], "valor": abs(float(m.valor)),
+                    "sentido": sentido, "fecha": fecha, "detalle": m.descripcion,
+                })
+        if pagos:
+            res = aplicar_pagos_flujos_directos(
+                pagos, "banco", f"banco:{datos_banco.get('proceso_id')}",
+                emp.db_path,
+            )
+            if res["n_pagos"]:
+                audit.registrar(
+                    "cartera.pagos_aplicados", empresa_id=emp.id,
+                    detalle=f"banco:{datos_banco.get('proceso_id')} "
+                            f"obligaciones={res['n_pagos']} valor={res['aplicado']}",
+                )
+    except Exception:
+        logger.exception("No se pudo actualizar la cartera desde el banco.")
+
     # Aprender de las asignaciones confirmadas (descripción → cuenta / NIT):
     # el usuario revisó la tabla antes de exportar, así que cada valor cuenta
     # como una confirmación para el motor de aprendizaje. Best-effort.

@@ -381,6 +381,8 @@ def mixto_flujo_estado(period_id, accion):
         )
         extra["closed_by"] = caja._usuario_email()
         extra["closed_at"] = _dt.now().isoformat()
+        # Al cerrar, abonar en la Cartera los pagos/recaudos con tercero.
+        caja._aplicar_pagos_cartera(emp, movs, f"mixto:{period_id}")
 
     actualizar_mixed_period_estado(period_id, destino, db_path=db_path, **extra)
     audit.registrar(f"mixto.{accion}", empresa_id=emp.id,

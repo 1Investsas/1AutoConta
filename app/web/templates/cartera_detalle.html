@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}Obligación {{ etiqueta_tipo }} — 1ContaBot{% endblock %}
+{% block page_title %}📒 Obligación {{ etiqueta_tipo }}{% endblock %}
+{% block page_subtitle %}<p class="topbar-sub">{{ o.nombre_tercero or o.nit_tercero }} · {{ o.documento or 'sin documento' }} · <a href="{{ url_for('web.cartera') }}">← volver a la cartera</a></p>{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:28px">
+  <div class="card">
+    <div class="card-title">Tercero</div>
+    <div class="card-value" style="font-size:1.1rem">{{ o.nombre_tercero or '—' }}</div>
+    <div class="card-sub" style="font-family:monospace">NIT {{ o.nit_tercero }}{% if o.fecha_emision %} · emitida {{ o.fecha_emision[:10] }}{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Valor total</div>
+    <div class="card-value" style="font-size:1.6rem">${{ '{:,.0f}'.format(o.valor_total or 0) }}</div>
+    <div class="card-sub">{% if o.condicion_pago == 'credito' %}a crédito · {{ o.num_cuotas }} cuota(s){% else %}de contado{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Saldo {{ etiqueta_tipo }}</div>
+    <div class="card-value" style="font-size:1.6rem; color:{% if o.saldo > 0.01 %}var(--danger){% else %}var(--success){% endif %}">${{ '{:,.0f}'.format(o.saldo or 0) }}</div>
+    <div class="card-sub">
+      {% if o.vencida %}<span class="pill pill-pendiente">vencida</span>
+      {% elif o.estado == 'pagada' %}<span class="pill pill-ok">pagada</span>
+      {% elif o.estado == 'parcial' %}<span class="pill pill-warn">abonada</span>
+      {% else %}<span class="pill pill-info">pendiente</span>{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Próximo vencimiento</div>
+    <div class="card-value" style="font-size:1.3rem; font-family:monospace">{{ (o.prox_vencimiento or '')[:10] or 'sin definir' }}</div>
+    <div class="card-sub">
+      {% if o.dias_vencimiento is not none and o.saldo > 0.01 %}
+        {% if o.dias_vencimiento < 0 %}venció hace {{ -o.dias_vencimiento }} día(s)
+        {% elif o.dias_vencimiento == 0 %}vence hoy
+        {% else %}vence en {{ o.dias_vencimiento }} día(s){% endif %}
+      {% else %}define la condición de pago abajo{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ── Condiciones de pago ── -->
+<div class="form-section">
+  <h2 style="margin-top:0">📅 Condiciones de pago</h2>
+  <p class="muted" style="margin:6px 0 14px">
+    De contado se registra una sola fecha de vencimiento. A crédito, indica el
+    número de cuotas: cada cuota lleva su propia fecha de vencimiento y valor
+    (la suma debe igualar el valor total, ${{ '{:,.0f}'.format(o.valor_total or 0) }}).
+  </p>
+  <form method="POST" action="{{ url_for('web.cartera_condiciones', oblig_id=o.id) }}" id="formCondiciones">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="display:flex; gap:24px; align-items:center; flex-wrap:wrap">
+      <label style="display:flex; gap:6px; align-items:center; font-weight:600">
+        <input type="radio" name="condicion_pago" value="contado"
+               {% if o.condicion_pago != 'credito' %}checked{% endif %}> De contado
+      </label>
+      <label style="display:flex; gap:6px; align-items:center; font-weight:600">
+        <input type="radio" name="condicion_pago" value="credito"
+               {% if o.condicion_pago == 'credito' %}checked{% endif %}> A crédito (cuotas)
+      </label>
+    </div>
+
+    <div id="zonaContado" style="margin-top:14px">
+      <div class="form-group" style="max-width:280px">
+        <label for="fecha_vencimiento">Fecha de vencimiento</label>
+        <input type="date" id="fecha_vencimiento" name="fecha_vencimiento"
+               value="{{ (o.fecha_vencimiento or '')[:10] if o.condicion_pago != 'credito' else '' }}">
+      </div>
+    </div>
+
+    <div id="zonaCredito" style="margin-top:14px">
+      <div class="form-group" style="max-width:280px">
+        <label for="numCuotas">Número de cuotas</label>
+        <input type="number" id="numCuotas" min="1" max="60"
+               value="{{ cuotas|length if cuotas else 2 }}">
+      </div>
+      <div class="table-wrapper" style="max-width:560px">
+        <table id="tablaCuotas">
+          <thead><tr><th>Cuota</th><th>Fecha de vencimiento</th><th style="text-align:right">Valor</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <small id="sumaCuotas" class="muted" style="display:block; margin-top:6px"></small>
+    </div>
+
+    <div style="margin-top:14px">
+      <button type="submit" class="btn btn-primary">Guardar condiciones</button>
+    </div>
+  </form>
+</div>
+
+<div class="stats-grid" style="margin-top:24px; align-items:start">
+
+  <!-- ── Datos de gestión (contacto / fuente de recursos) ── -->
+  <div class="form-section" style="margin:0">
+    <h2 style="margin-top:0">{% if o.tipo == 'cxc' %}📞 A quién contactar para cobrar{% else %}📞 Contacto y origen del pago{% endif %}</h2>
+    <form method="POST" action="{{ url_for('web.cartera_datos', oblig_id=o.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label for="contacto_nombre">Nombre del contacto</label>
+        <input type="text" id="contacto_nombre" name="contacto_nombre" value="{{ o.contacto_nombre or '' }}">
+      </div>
+      <div class="form-group">
+        <label for="contacto_telefono">Teléfono</label>
+        <input type="text" id="contacto_telefono" name="contacto_telefono" value="{{ o.contacto_telefono or '' }}">
+      </div>
+      <div class="form-group">
+        <label for="contacto_correo">Correo</label>
+        <input type="text" id="contacto_correo" name="contacto_correo" value="{{ o.contacto_correo or '' }}">
+      </div>
+      {% if o.tipo == 'cxp' %}
+      <div class="form-group">
+        <label for="fuente_recursos">¿De dónde saldrán los recursos?</label>
+        <input type="text" id="fuente_recursos" name="fuente_recursos"
+               value="{{ o.fuente_recursos or '' }}" placeholder="Cuenta bancaria, recaudo de cartera, crédito…">
+      </div>
+      {% endif %}
+      <div class="form-group">
+        <label for="observaciones">Observaciones</label>
+        <input type="text" id="observaciones" name="observaciones" value="{{ o.observaciones or '' }}">
+      </div>
+      <button type="submit" class="btn btn-primary">Guardar datos</button>
+    </form>
+  </div>
+
+  <!-- ── Datos bancarios del tercero ── -->
+  <div class="form-section" style="margin:0">
+    <h2 style="margin-top:0">🏦 Cuentas bancarias del tercero</h2>
+    {% if cuentas_banco %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Banco</th><th>Producto</th><th>Número</th><th>Estado</th></tr></thead>
+        <tbody>
+          {% for c in cuentas_banco %}
+          <tr>
+            <td>{{ c.banco or '—' }}</td>
+            <td>{{ c.tipo_producto or '—' }}</td>
+            <td style="font-family:monospace">{{ c.numero_cuenta }}</td>
+            <td>{{ c.estado or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:8px">Importadas del certificado bancario en el módulo de <a href="{{ url_for('web.terceros') }}">Terceros</a>.</p>
+    {% else %}
+    <p class="muted">
+      Este tercero no tiene cuentas bancarias registradas.
+      {% if o.tipo == 'cxp' %}<strong>Solicítale el certificado bancario</strong> e impórtalo en el módulo de <a href="{{ url_for('web.terceros') }}">Terceros</a> para poder programar el pago.{% else %}Puedes importar su certificado bancario en el módulo de <a href="{{ url_for('web.terceros') }}">Terceros</a>.{% endif %}
+    </p>
+    {% endif %}
+
+    <!-- ── Abono manual ── -->
+    <h2 style="margin-top:22px">➕ Registrar abono manual</h2>
+    <p class="muted" style="margin:6px 0 12px">
+      Los pagos de Bancos, Caja y Flujos mixtos se aplican solos; usa esto para
+      abonos hechos por fuera o ajustes (p. ej. una nota crédito).
+    </p>
+    <form method="POST" action="{{ url_for('web.cartera_pago', oblig_id=o.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="valor">Valor *</label>
+          <input type="text" id="valor" name="valor" required placeholder="0" style="font-family:monospace">
+        </div>
+        <div class="form-group">
+          <label for="fecha">Fecha</label>
+          <input type="date" id="fecha" name="fecha">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="detalle">Detalle</label>
+        <input type="text" id="detalle" name="detalle" placeholder="Referencia del pago o ajuste">
+      </div>
+      <button type="submit" class="btn btn-primary">Registrar abono</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Cuotas ── -->
+{% if cuotas %}
+<div class="panel" style="margin-top:24px">
+  <div class="panel-head"><h2>🗓️ Cuotas</h2></div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Vencimiento</th>
+        <th style="text-align:right">Valor</th>
+        <th style="text-align:right">Saldo</th><th>Estado</th></tr>
+      </thead>
+      <tbody>
+        {% for c in cuotas %}
+        <tr>
+          <td>{{ c.numero }}</td>
+          <td style="font-family:monospace">{{ (c.fecha_vencimiento or '')[:10] }}</td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(c.valor or 0) }}</td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(c.saldo or 0) }}</td>
+          <td>
+            {% if c.estado == 'pagada' %}<span class="pill pill-ok">pagada</span>
+            {% elif c.estado == 'parcial' %}<span class="pill pill-warn">parcial</span>
+            {% else %}<span class="pill pill-info">pendiente</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Pagos aplicados ── -->
+<div class="panel" style="margin-top:24px">
+  <div class="panel-head"><h2>💳 Pagos aplicados</h2></div>
+  {% if pagos %}
+  <div class="table-wrapper">
+    <table>
+      <thead><tr><th>Fecha</th><th style="text-align:right">Valor</th><th>Origen</th><th>Referencia</th><th>Detalle</th></tr></thead>
+      <tbody>
+        {% for p in pagos %}
+        <tr>
+          <td style="font-family:monospace">{{ (p.fecha or '')[:10] }}</td>
+          <td style="text-align:right; font-family:monospace">{{ '{:,.0f}'.format(p.valor or 0) }}</td>
+          <td><span class="pill pill-muted">{{ p.origen }}</span></td>
+          <td style="font-family:monospace">{{ p.referencia or '—' }}</td>
+          <td>{{ p.detalle or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:16px 20px">
+    Aún no hay pagos aplicados. Se registrarán solos cuando los movimientos de
+    los Flujos Directos de Efectivo (Bancos, Caja, Flujos mixtos) paguen o
+    recauden esta obligación, o cuando registres un abono manual.
+  </p>
+  {% endif %}
+</div>
+
+<div style="margin-top:20px; text-align:right">
+  <form method="POST" action="{{ url_for('web.cartera_anular', oblig_id=o.id) }}"
+        onsubmit="return confirm('¿Anular esta obligación? Dejará de aparecer en la cartera.')" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary" style="color:var(--danger)">Anular obligación</button>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const radios   = document.querySelectorAll('input[name="condicion_pago"]');
+  const zContado = document.getElementById('zonaContado');
+  const zCredito = document.getElementById('zonaCredito');
+  const numInput = document.getElementById('numCuotas');
+  const tbody    = document.querySelector('#tablaCuotas tbody');
+  const suma     = document.getElementById('sumaCuotas');
+  const total    = {{ (o.valor_total or 0)|float }};
+  // Cuotas ya guardadas (para editar sin volver a digitar).
+  const guardadas = [
+    {% for c in cuotas %}{fecha: '{{ (c.fecha_vencimiento or "")[:10] }}', valor: {{ (c.valor or 0)|float }}},{% endfor %}
+  ];
+
+  function modo() {
+    return document.querySelector('input[name="condicion_pago"]:checked').value;
+  }
+
+  function alternar() {
+    zContado.style.display = modo() === 'contado' ? '' : 'none';
+    zCredito.style.display = modo() === 'credito' ? '' : 'none';
+  }
+
+  function filaCuota(i, fecha, valor) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + (i + 1) + '</td>' +
+      '<td><input type="date" name="cuota_fecha" value="' + (fecha || '') + '" required></td>' +
+      '<td style="text-align:right"><input type="text" name="cuota_valor" value="' + (valor || '') +
+      '" style="font-family:monospace; text-align:right; max-width:140px" required></td>';
+    return tr;
+  }
+
+  function generarFilas() {
+    const n = Math.max(1, Math.min(60, parseInt(numInput.value || '1', 10)));
+    const previas = Array.from(tbody.querySelectorAll('tr')).map(tr => ({
+      fecha: tr.querySelector('input[name="cuota_fecha"]').value,
+      valor: tr.querySelector('input[name="cuota_valor"]').value,
+    }));
+    tbody.innerHTML = '';
+    const base = Math.floor(total / n);
+    for (let i = 0; i < n; i++) {
+      const prev = previas[i] || guardadas[i] || {};
+      // Última cuota absorbe el redondeo para que la suma cuadre exacta.
+      const sugerido = (i === n - 1) ? (total - base * (n - 1)) : base;
+      tbody.appendChild(filaCuota(i, prev.fecha, prev.valor || sugerido));
+    }
+    validarSuma();
+  }
+
+  function validarSuma() {
+    let s = 0;
+    tbody.querySelectorAll('input[name="cuota_valor"]').forEach(inp => {
+      s += parseFloat((inp.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+    });
+    const dif = Math.round((total - s) * 100) / 100;
+    if (Math.abs(dif) < 0.01) {
+      suma.textContent = '✓ Las cuotas suman el valor total.';
+      suma.style.color = 'var(--success)';
+    } else {
+      suma.textContent = (dif > 0 ? 'Faltan $' : 'Sobran $') +
+        Math.abs(dif).toLocaleString('es-CO') + ' para cuadrar con el valor total.';
+      suma.style.color = 'var(--danger)';
+    }
+  }
+
+  radios.forEach(r => r.addEventListener('change', alternar));
+  numInput.addEventListener('change', generarFilas);
+  tbody.addEventListener('input', validarSuma);
+
+  if (guardadas.length) numInput.value = guardadas.length;
+  generarFilas();
+  alternar();
+})();
+</script>
+{% endblock %}
