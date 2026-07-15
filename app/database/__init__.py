@@ -21,6 +21,7 @@ siguen funcionando igual que cuando todo vivía en un solo módulo:
                        de banco (con snapshot editable).
 - ``caja``           — Caja General: cuentas, períodos y movimientos.
 - ``mixtos``         — Flujos Mixtos: cuentas, flujos y movimientos.
+- ``cartera``        — Cartera y Cuentas por Pagar: obligaciones, cuotas y pagos.
 - ``aprendizaje``    — persistencia del motor de aprendizaje (ML).
 """
 
@@ -144,6 +145,22 @@ from .mixtos import (  # noqa: F401
     actualizar_mixed_period_estado,
     listar_mixed_movements,
     reemplazar_mixed_movements,
+)
+from .cartera import (  # noqa: F401
+    registrar_obligacion,
+    obtener_obligacion,
+    listar_obligaciones,
+    actualizar_datos_obligacion,
+    anular_obligacion,
+    sincronizar_desde_documentos,
+    listar_cuotas,
+    definir_condiciones_pago,
+    registrar_pago,
+    listar_pagos,
+    pagos_ya_aplicados,
+    aplicar_pago_tercero,
+    aplicar_pagos_flujos_directos,
+    resumen_cartera,
 )
 from .aprendizaje import (  # noqa: F401
     registrar_aprendizaje_lote,

@@ -26,7 +26,8 @@ def inicializar_db(db_path: str = DB_PATH) -> None:
     Crea todas las tablas necesarias si no existen.
 
     Tablas: documentos_importados, bitacora, historial_cuentas, importaciones,
-    procesos_banco, correcciones_tercero, cuentas_bancarias_tercero.
+    procesos_banco, correcciones_tercero, cuentas_bancarias_tercero,
+    cartera_obligaciones/cuotas/pagos, cash_*, mixed_*, y las del ML.
 
     El esquema se asegura una sola vez por proceso y por ruta de BD: el DDL es
     idempotente y estático, de modo que reejecutarlo en cada request solo añade
@@ -138,6 +139,10 @@ _INDICES_MSSQL = (
     ("ix_mixed_movements_periodo",   "mixed_movements",      "empresa_id, mixed_period_id"),
     # Machine learning: histórico de entrenamientos por empresa.
     ("ix_import_conocimiento_emp",   "importaciones_conocimiento", "empresa_id, id"),
+    # Cartera: listados por empresa/tipo/tercero y cuotas/pagos por obligación.
+    ("ix_cartera_oblig_empresa",     "cartera_obligaciones", "empresa_id, tipo, nit_tercero"),
+    ("ix_cartera_cuotas_oblig",      "cartera_cuotas",       "empresa_id, obligacion_id"),
+    ("ix_cartera_pagos_oblig",       "cartera_pagos",        "empresa_id, obligacion_id"),
 )
 
 
@@ -166,6 +171,7 @@ _TABLAS_RLS = (
     "cash_accounts", "cash_periods", "cash_movements",
     "mixed_accounts", "mixed_periods", "mixed_movements",
     "patrones_aprendidos", "tokens_aprendidos", "importaciones_conocimiento",
+    "cartera_obligaciones", "cartera_cuotas", "cartera_pagos",
 )
 
 _RLS_FUNCION = "rls.fn_filtro_empresa"
@@ -457,6 +463,59 @@ def _create_tables_sqlite(conn: DbConnection) -> None:
             updated_at          TEXT
         )
     """)
+    # ── Módulo Cartera y Cuentas por Pagar (Finanzas) ────────────────────────
+    # Una obligación por documento: CxC (facturas de venta) o CxP (facturas de
+    # compra / documentos soporte). El saldo baja con los pagos aplicados desde
+    # los módulos de Flujos Directos de Efectivo o con abonos manuales.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cartera_obligaciones (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo              TEXT    NOT NULL,
+            origen            TEXT    DEFAULT 'radian',
+            cufe              TEXT,
+            clasificacion     TEXT,
+            documento         TEXT,
+            nit_tercero       TEXT    NOT NULL,
+            nombre_tercero    TEXT,
+            fecha_emision     TEXT,
+            valor_total       REAL    DEFAULT 0,
+            saldo             REAL    DEFAULT 0,
+            condicion_pago    TEXT    DEFAULT 'contado',
+            num_cuotas        INTEGER DEFAULT 1,
+            fecha_vencimiento TEXT,
+            fuente_recursos   TEXT,
+            contacto_nombre   TEXT,
+            contacto_telefono TEXT,
+            contacto_correo   TEXT,
+            observaciones     TEXT,
+            estado            TEXT    NOT NULL DEFAULT 'pendiente',
+            created_at        TEXT,
+            updated_at        TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cartera_cuotas (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            obligacion_id     INTEGER NOT NULL,
+            numero            INTEGER DEFAULT 1,
+            fecha_vencimiento TEXT,
+            valor             REAL    DEFAULT 0,
+            saldo             REAL    DEFAULT 0,
+            estado            TEXT    NOT NULL DEFAULT 'pendiente'
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cartera_pagos (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            obligacion_id     INTEGER NOT NULL,
+            fecha             TEXT,
+            valor             REAL    DEFAULT 0,
+            origen            TEXT    DEFAULT 'manual',
+            referencia        TEXT,
+            detalle           TEXT,
+            created_at        TEXT
+        )
+    """)
     # ── Motor de aprendizaje generalizado (machine learning) ────────────────
     # Patrones exactos: contexto normalizado → valor confirmado (con contador).
     conn.execute("""
@@ -744,6 +803,62 @@ def _create_tables_mssql(conn: DbConnection) -> None:
             observations     NVARCHAR(MAX),
             created_at       NVARCHAR(50),
             updated_at       NVARCHAR(50)
+        )
+    """)
+    # ── Módulo Cartera y Cuentas por Pagar (Finanzas) ────────────────────────
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cartera_obligaciones')
+        CREATE TABLE cartera_obligaciones (
+            id                INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id        NVARCHAR(100)  NOT NULL DEFAULT 'principal',
+            tipo              NVARCHAR(10)   NOT NULL,
+            origen            NVARCHAR(20)   DEFAULT 'radian',
+            cufe              NVARCHAR(500),
+            clasificacion     NVARCHAR(100),
+            documento         NVARCHAR(200),
+            nit_tercero       NVARCHAR(50)   NOT NULL,
+            nombre_tercero    NVARCHAR(300),
+            fecha_emision     NVARCHAR(50),
+            valor_total       FLOAT          DEFAULT 0,
+            saldo             FLOAT          DEFAULT 0,
+            condicion_pago    NVARCHAR(20)   DEFAULT 'contado',
+            num_cuotas        INT            DEFAULT 1,
+            fecha_vencimiento NVARCHAR(50),
+            fuente_recursos   NVARCHAR(300),
+            contacto_nombre   NVARCHAR(300),
+            contacto_telefono NVARCHAR(100),
+            contacto_correo   NVARCHAR(300),
+            observaciones     NVARCHAR(MAX),
+            estado            NVARCHAR(30)   NOT NULL DEFAULT 'pendiente',
+            created_at        NVARCHAR(50),
+            updated_at        NVARCHAR(50)
+        )
+    """)
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cartera_cuotas')
+        CREATE TABLE cartera_cuotas (
+            id                INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id        NVARCHAR(100) NOT NULL DEFAULT 'principal',
+            obligacion_id     INT           NOT NULL,
+            numero            INT           DEFAULT 1,
+            fecha_vencimiento NVARCHAR(50),
+            valor             FLOAT         DEFAULT 0,
+            saldo             FLOAT         DEFAULT 0,
+            estado            NVARCHAR(30)  NOT NULL DEFAULT 'pendiente'
+        )
+    """)
+    conn.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cartera_pagos')
+        CREATE TABLE cartera_pagos (
+            id                INT IDENTITY(1,1) PRIMARY KEY,
+            empresa_id        NVARCHAR(100) NOT NULL DEFAULT 'principal',
+            obligacion_id     INT           NOT NULL,
+            fecha             NVARCHAR(50),
+            valor             FLOAT         DEFAULT 0,
+            origen            NVARCHAR(20)  DEFAULT 'manual',
+            referencia        NVARCHAR(200),
+            detalle           NVARCHAR(MAX),
+            created_at        NVARCHAR(50)
         )
     """)
     # ── Motor de aprendizaje generalizado (machine learning) ────────────────

@@ -80,6 +80,46 @@ def _usuario_email() -> str:
     return (u or {}).get("email", "") if u else ""
 
 
+def _aplicar_pagos_cartera(emp, movimientos, referencia: str) -> None:
+    """Abona en la Cartera los movimientos de efectivo que tienen tercero.
+
+    Se invoca al **cerrar** un período de caja o un flujo mixto (un evento
+    único, no en cada guardado): los ingresos abonan la cartera (CxC) del
+    tercero y los egresos sus cuentas por pagar (CxP). Idempotente por
+    ``referencia`` (reabrir y volver a cerrar no duplica abonos) y
+    best-effort (un fallo no bloquea el cierre). También lo usa el módulo de
+    Flujos Mixtos.
+    """
+    from app.database import aplicar_pagos_flujos_directos
+
+    try:
+        pagos = []
+        for m in movimientos:
+            if not m.third_party_nit:
+                continue
+            fecha = m.movement_date.isoformat() if m.movement_date else ""
+            if m.inflow_amount and abs(m.inflow_amount) > 0:
+                pagos.append({"nit": m.third_party_nit,
+                              "valor": float(abs(m.inflow_amount)),
+                              "sentido": "ingreso", "fecha": fecha,
+                              "detalle": m.concept})
+            if m.outflow_amount and abs(m.outflow_amount) > 0:
+                pagos.append({"nit": m.third_party_nit,
+                              "valor": float(abs(m.outflow_amount)),
+                              "sentido": "egreso", "fecha": fecha,
+                              "detalle": m.concept})
+        if not pagos:
+            return
+        origen = referencia.split(":", 1)[0]
+        res = aplicar_pagos_flujos_directos(pagos, origen, referencia, emp.db_path)
+        if res["n_pagos"]:
+            audit.registrar("cartera.pagos_aplicados", empresa_id=emp.id,
+                            detalle=f"{referencia} obligaciones={res['n_pagos']} "
+                                    f"valor={res['aplicado']}")
+    except Exception:
+        logger.exception("No se pudo actualizar la cartera desde %s", referencia)
+
+
 def _resolver_cuenta_contable(emp, codigo: str) -> tuple[str, bool, bool]:
     """Resuelve el nombre de una cuenta contable por su código en el maestro.
 
@@ -518,6 +558,8 @@ def caja_periodo_estado(period_id, accion):
         )
         extra["closed_by"] = _usuario_email()
         extra["closed_at"] = _dt.now().isoformat()
+        # Al cerrar, abonar en la Cartera los pagos/recaudos con tercero.
+        _aplicar_pagos_cartera(emp, movs, f"caja:{period_id}")
 
     actualizar_cash_period_estado(period_id, destino, db_path=db_path, **extra)
     audit.registrar(f"caja.{accion}", empresa_id=emp.id,
